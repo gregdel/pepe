@@ -1,0 +1,253 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/odwrtw/polochon/lib/papi"
+	"github.com/sirupsen/logrus"
+)
+
+// MediaItem represents a unified movie or show for search
+type MediaItem struct {
+	ID    string
+	Title string
+	Year  int
+	Type  string // "movie" or "show"
+}
+
+// APIClient wraps the papi client with caching and periodic refresh
+type APIClient struct {
+	client          *papi.Client
+	refreshInterval time.Duration
+
+	mu           sync.RWMutex
+	movies       map[string]*papi.Movie
+	shows        map[string]*papi.Show
+	movieRadix   *RadixTree
+	showRadix    *RadixTree
+	titleToMedia map[string]*MediaItem
+	movieCount   int
+	showCount    int
+
+	log *logrus.Entry
+}
+
+func newAPIClient(endpoint, token string, refreshInterval time.Duration, log *logrus.Entry) (*APIClient, error) {
+	papiClient, err := papi.New(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create papi client: %w", err)
+	}
+
+	papiClient.SetToken(token)
+
+	c := &APIClient{
+		client:          papiClient,
+		refreshInterval: refreshInterval,
+		movies:          make(map[string]*papi.Movie),
+		shows:           make(map[string]*papi.Show),
+		titleToMedia:    make(map[string]*MediaItem),
+		log:             log,
+	}
+
+	return c, nil
+}
+
+func (c *APIClient) fetchLibrary() error {
+	c.log.Info("Fetching library from API...")
+
+	movieCollection, err := c.client.GetMovies()
+	if err != nil {
+		return fmt.Errorf("failed to fetch movies: %w", err)
+	}
+
+	showCollection, err := c.client.GetShows()
+	if err != nil {
+		return fmt.Errorf("failed to fetch shows: %w", err)
+	}
+
+	movieList := movieCollection.List()
+	showList := showCollection.List()
+
+	movies := make(map[string]*papi.Movie)
+	shows := make(map[string]*papi.Show)
+	titleToMedia := make(map[string]*MediaItem)
+
+	var movieTitles []string
+	var showTitles []string
+
+	// Helper to format title with year
+	formatTitle := func(title string, year int) string {
+		if year > 0 {
+			return fmt.Sprintf("%s (%d)", title, year)
+		}
+		return title
+	}
+
+	// Helper to strip "The " prefix
+	stripThePrefix := func(title string) (string, bool) {
+		if len(title) > 4 && strings.HasPrefix(strings.ToLower(title), "the ") {
+			return title[4:], true
+		}
+		return title, false
+	}
+
+	for _, movie := range movieList {
+		movies[movie.ImdbID] = movie
+
+		// Format title with year
+		displayTitle := formatTitle(movie.Title, movie.Year)
+
+		item := MediaItem{
+			ID:    movie.ImdbID,
+			Title: movie.Title,
+			Year:  movie.Year,
+			Type:  "movie",
+		}
+
+		// Add main title
+		movieTitles = append(movieTitles, displayTitle)
+		titleToMedia[displayTitle] = &item
+
+		// Also index without "The " prefix if present
+		if strippedTitle, hasThe := stripThePrefix(displayTitle); hasThe {
+			movieTitles = append(movieTitles, strippedTitle)
+			titleToMedia[strippedTitle] = &item
+		}
+	}
+
+	for _, show := range showList {
+		shows[show.ImdbID] = show
+
+		// Format title with year (shows might not have year in papi)
+		displayTitle := formatTitle(show.Title, 0) // TODO: Check if show has year field
+
+		item := MediaItem{
+			ID:    show.ImdbID,
+			Title: show.Title,
+			Year:  0,
+			Type:  "show",
+		}
+
+		// Add main title
+		showTitles = append(showTitles, displayTitle)
+		titleToMedia[displayTitle] = &item
+
+		// Also index without "The " prefix if present
+		if strippedTitle, hasThe := stripThePrefix(displayTitle); hasThe {
+			showTitles = append(showTitles, strippedTitle)
+			titleToMedia[strippedTitle] = &item
+		}
+	}
+
+	// Build radix trees
+	movieRadix := NewRadixTree(movieTitles)
+	showRadix := NewRadixTree(showTitles)
+
+	c.mu.Lock()
+	c.movies = movies
+	c.shows = shows
+	c.movieRadix = movieRadix
+	c.showRadix = showRadix
+	c.titleToMedia = titleToMedia
+	c.movieCount = len(movies)
+	c.showCount = len(shows)
+	c.mu.Unlock()
+
+	c.log.Infof("Library fetched: %d movies, %d shows", len(movies), len(shows))
+	return nil
+}
+
+func (c *APIClient) getMovieRadix() *RadixTree {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.movieRadix
+}
+
+func (c *APIClient) getShowRadix() *RadixTree {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.showRadix
+}
+
+func (c *APIClient) getMovieCount() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.movieCount
+}
+
+func (c *APIClient) getShowCount() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.showCount
+}
+
+func (c *APIClient) getMovie(id string) (*papi.Movie, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	movie, ok := c.movies[id]
+	return movie, ok
+}
+
+func (c *APIClient) getShow(id string) (*papi.Show, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	show, ok := c.shows[id]
+	return show, ok
+}
+
+func (c *APIClient) startPeriodicRefresh(stopCh <-chan struct{}) {
+	ticker := time.NewTicker(c.refreshInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := c.fetchLibrary(); err != nil {
+				c.log.Errorf("Failed to refresh library: %v", err)
+			}
+		case <-stopCh:
+			c.log.Info("Stopping periodic refresh")
+			return
+		}
+	}
+}
+
+// Config holds the application configuration
+type Config struct {
+	PolochonURL     string
+	Token           string
+	RefreshInterval time.Duration
+}
+
+func loadConfig() (*Config, error) {
+	url := os.Getenv("POLOCHON_URL")
+	if url == "" {
+		return nil, fmt.Errorf("POLOCHON_URL environment variable is required")
+	}
+
+	token := os.Getenv("POLOCHON_TOKEN")
+	if token == "" {
+		return nil, fmt.Errorf("POLOCHON_TOKEN environment variable is required")
+	}
+
+	refreshInterval := 5 * time.Minute
+	if intervalStr := os.Getenv("POLOCHON_REFRESH_INTERVAL"); intervalStr != "" {
+		interval, err := time.ParseDuration(intervalStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid POLOCHON_REFRESH_INTERVAL: %w", err)
+		}
+		refreshInterval = interval
+	}
+
+	return &Config{
+		PolochonURL:     url,
+		Token:           token,
+		RefreshInterval: refreshInterval,
+	}, nil
+}
