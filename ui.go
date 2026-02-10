@@ -180,8 +180,7 @@ type Model struct {
 }
 
 func initialModel(client *APIClient) Model {
-	movieRadix := client.getMovieRadix()
-	showRadix := client.getShowRadix()
+	snapshot := client.getSnapshot()
 
 	nav := newNavigationState()
 
@@ -190,11 +189,11 @@ func initialModel(client *APIClient) Model {
 
 	return Model{
 		client:       client,
-		movieRadix:   movieRadix,
-		showRadix:    showRadix,
-		titleToMedia: client.titleToMedia,
-		movieCount:   client.getMovieCount(),
-		showCount:    client.getShowCount(),
+		movieRadix:   snapshot.movieRadix,
+		showRadix:    snapshot.showRadix,
+		titleToMedia: snapshot.titleToMedia,
+		movieCount:   snapshot.movieCount,
+		showCount:    snapshot.showCount,
 		nav:          nav,
 		width:        80,
 		height:       24,

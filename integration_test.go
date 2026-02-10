@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -219,21 +218,6 @@ func TestThePrefixHandling(t *testing.T) {
 
 	var movieTitles []string
 
-	// Helper functions (same as in core.go)
-	formatTitle := func(title string, year int) string {
-		if year > 0 {
-			return fmt.Sprintf("%s (%d)", title, year)
-		}
-		return title
-	}
-
-	stripThePrefix := func(title string) (string, bool) {
-		if len(title) > 4 && strings.HasPrefix(strings.ToLower(title), "the ") {
-			return title[4:], true
-		}
-		return title, false
-	}
-
 	for _, movie := range movies {
 		displayTitle := formatTitle(movie.title, movie.year)
 		item := &MediaItem{
@@ -300,17 +284,19 @@ func TestYearInTitles(t *testing.T) {
 	}
 
 	for _, tt := range titles {
-		var formatted string
-		if tt.year > 0 {
-			formatted = fmt.Sprintf("%s (%d)", tt.original, tt.year)
-		} else {
-			formatted = tt.original
-		}
+		formatted := formatTitle(tt.original, tt.year)
 
 		if formatted != tt.expected {
 			t.Errorf("For title='%s', year=%d: expected '%s', got '%s'",
 				tt.original, tt.year, tt.expected, formatted)
 		}
+	}
+}
+
+func TestYearInShowTitles(t *testing.T) {
+	formatted := formatTitle("Breaking Bad", 2008)
+	if formatted != "Breaking Bad (2008)" {
+		t.Errorf("Expected show title with year, got '%s'", formatted)
 	}
 }
 

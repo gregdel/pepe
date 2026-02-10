@@ -36,6 +36,14 @@ type APIClient struct {
 	log *logrus.Entry
 }
 
+type LibrarySnapshot struct {
+	movieRadix   *RadixTree
+	showRadix    *RadixTree
+	titleToMedia map[string]*MediaItem
+	movieCount   int
+	showCount    int
+}
+
 func newAPIClient(endpoint, token string, refreshInterval time.Duration, log *logrus.Entry) (*APIClient, error) {
 	papiClient, err := papi.New(endpoint)
 	if err != nil {
@@ -54,6 +62,20 @@ func newAPIClient(endpoint, token string, refreshInterval time.Duration, log *lo
 	}
 
 	return c, nil
+}
+
+func formatTitle(title string, year int) string {
+	if year > 0 {
+		return fmt.Sprintf("%s (%d)", title, year)
+	}
+	return title
+}
+
+func stripThePrefix(title string) (string, bool) {
+	if len(title) > 4 && strings.HasPrefix(strings.ToLower(title), "the ") {
+		return title[4:], true
+	}
+	return title, false
 }
 
 func (c *APIClient) fetchLibrary() error {
@@ -78,22 +100,6 @@ func (c *APIClient) fetchLibrary() error {
 
 	var movieTitles []string
 	var showTitles []string
-
-	// Helper to format title with year
-	formatTitle := func(title string, year int) string {
-		if year > 0 {
-			return fmt.Sprintf("%s (%d)", title, year)
-		}
-		return title
-	}
-
-	// Helper to strip "The " prefix
-	stripThePrefix := func(title string) (string, bool) {
-		if len(title) > 4 && strings.HasPrefix(strings.ToLower(title), "the ") {
-			return title[4:], true
-		}
-		return title, false
-	}
 
 	for _, movie := range movieList {
 		movies[movie.ImdbID] = movie
@@ -122,13 +128,13 @@ func (c *APIClient) fetchLibrary() error {
 	for _, show := range showList {
 		shows[show.ImdbID] = show
 
-		// Format title with year (shows might not have year in papi)
-		displayTitle := formatTitle(show.Title, 0) // TODO: Check if show has year field
+		// Format title with year
+		displayTitle := formatTitle(show.Title, show.Year)
 
 		item := MediaItem{
 			ID:    show.ImdbID,
 			Title: show.Title,
-			Year:  0,
+			Year:  show.Year,
 			Type:  "show",
 		}
 
@@ -159,6 +165,24 @@ func (c *APIClient) fetchLibrary() error {
 
 	c.log.Infof("Library fetched: %d movies, %d shows", len(movies), len(shows))
 	return nil
+}
+
+func (c *APIClient) getSnapshot() LibrarySnapshot {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	titleToMedia := make(map[string]*MediaItem, len(c.titleToMedia))
+	for key, value := range c.titleToMedia {
+		titleToMedia[key] = value
+	}
+
+	return LibrarySnapshot{
+		movieRadix:   c.movieRadix,
+		showRadix:    c.showRadix,
+		titleToMedia: titleToMedia,
+		movieCount:   c.movieCount,
+		showCount:    c.showCount,
+	}
 }
 
 func (c *APIClient) getMovieRadix() *RadixTree {
