@@ -1,18 +1,27 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/sirupsen/logrus"
 )
 
 func main() {
-	// Setup logger
-	log := logrus.New()
-	log.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
-	logEntry := log.WithField("app", "polochon-tui")
+	logFilePath := flag.String("logFile", "polochon-tui.log", "log file path")
+	flag.Parse()
+
+	logFile, err := os.OpenFile(*logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open log file '%s': %v\n", *logFilePath, err)
+		logFile = os.Stderr
+	} else {
+		defer logFile.Close()
+	}
+
+	log := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{})).With("app", "polochon-tui")
 
 	// Load configuration
 	config, err := loadConfig()
@@ -25,14 +34,16 @@ func main() {
 	}
 
 	// Create API client
-	apiClient, err := newAPIClient(config.PolochonURL, config.Token, config.RefreshInterval, logEntry)
+	apiClient, err := newAPIClient(config.PolochonURL, config.Token, config.RefreshInterval, log)
 	if err != nil {
-		logEntry.Fatalf("Failed to create API client: %v", err)
+		log.Error("failed to create API client", "error", err)
+		os.Exit(1)
 	}
 
 	// Initial fetch
 	if err := apiClient.fetchLibrary(); err != nil {
-		logEntry.Fatalf("Failed to fetch library: %v", err)
+		log.Error("failed to fetch library", "error", err)
+		os.Exit(1)
 	}
 
 	// Start background refresh
@@ -45,6 +56,7 @@ func main() {
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
-		logEntry.Fatalf("Error running TUI: %v", err)
+		log.Error("error running TUI", "error", err)
+		os.Exit(1)
 	}
 }

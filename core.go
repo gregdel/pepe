@@ -2,13 +2,13 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/odwrtw/polochon/lib/papi"
-	"github.com/sirupsen/logrus"
 )
 
 // MediaItem represents a unified movie or show for search
@@ -33,7 +33,7 @@ type APIClient struct {
 	movieCount   int
 	showCount    int
 
-	log *logrus.Entry
+	log *slog.Logger
 }
 
 type LibrarySnapshot struct {
@@ -44,7 +44,7 @@ type LibrarySnapshot struct {
 	showCount    int
 }
 
-func newAPIClient(endpoint, token string, refreshInterval time.Duration, log *logrus.Entry) (*APIClient, error) {
+func newAPIClient(endpoint, token string, refreshInterval time.Duration, log *slog.Logger) (*APIClient, error) {
 	papiClient, err := papi.New(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create papi client: %w", err)
@@ -79,7 +79,7 @@ func stripThePrefix(title string) (string, bool) {
 }
 
 func (c *APIClient) fetchLibrary() error {
-	c.log.Info("Fetching library from API...")
+	c.log.Info("fetching library from API")
 
 	movieCollection, err := c.client.GetMovies()
 	if err != nil {
@@ -163,7 +163,7 @@ func (c *APIClient) fetchLibrary() error {
 	c.showCount = len(shows)
 	c.mu.Unlock()
 
-	c.log.Infof("Library fetched: %d movies, %d shows", len(movies), len(shows))
+	c.log.Info("library fetched", "movies", len(movies), "shows", len(shows))
 	return nil
 }
 
@@ -233,10 +233,10 @@ func (c *APIClient) startPeriodicRefresh(stopCh <-chan struct{}) {
 		select {
 		case <-ticker.C:
 			if err := c.fetchLibrary(); err != nil {
-				c.log.Errorf("Failed to refresh library: %v", err)
+				c.log.Error("failed to refresh library", "error", err)
 			}
 		case <-stopCh:
-			c.log.Info("Stopping periodic refresh")
+			c.log.Info("stopping periodic refresh")
 			return
 		}
 	}

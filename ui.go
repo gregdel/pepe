@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dustin/go-humanize"
@@ -69,6 +70,8 @@ var (
 			Background(lipgloss.Color("214")). // Orange
 			Padding(0, 1)
 )
+
+const detailSeparator = " · "
 
 // formatQualityBadge formats video quality for display
 func formatQualityBadge(q polochon.Quality) string {
@@ -177,6 +180,14 @@ type Model struct {
 	height int
 
 	quitting bool
+
+	refreshing bool
+	spinner    spinner.Model
+}
+
+type refreshLibraryMsg struct {
+	snapshot LibrarySnapshot
+	err      error
 }
 
 func initialModel(client *APIClient) Model {
@@ -197,11 +208,22 @@ func initialModel(client *APIClient) Model {
 		nav:          nav,
 		width:        80,
 		height:       24,
+		spinner:      spinner.New(spinner.WithSpinner(spinner.Dot)),
 	}
 }
 
 func (m Model) Init() tea.Cmd {
 	return nil
+}
+
+func refreshLibraryCmd(client *APIClient) tea.Cmd {
+	return func() tea.Msg {
+		err := client.fetchLibrary()
+		if err != nil {
+			return refreshLibraryMsg{err: err}
+		}
+		return refreshLibraryMsg{snapshot: client.getSnapshot()}
+	}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -216,6 +238,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			m.quitting = true
 			return m, tea.Quit
+
+		case "r":
+			m.refreshing = true
+			return m, tea.Batch(refreshLibraryCmd(m.client), m.spinner.Tick)
 
 		case "up", "k":
 			return m.navigateUp(), nil
@@ -232,6 +258,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			return m.toggleSection(), nil
 		}
+
+	case refreshLibraryMsg:
+		if msg.err != nil {
+			m.refreshing = false
+			return m, nil
+		}
+		m.movieRadix = msg.snapshot.movieRadix
+		m.showRadix = msg.snapshot.showRadix
+		m.titleToMedia = msg.snapshot.titleToMedia
+		m.movieCount = msg.snapshot.movieCount
+		m.showCount = msg.snapshot.showCount
+		m.nav = newNavigationState()
+		m.refreshing = false
+		return m, nil
+
+	case spinner.TickMsg:
+		if m.refreshing {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
+		return m, nil
 	}
 
 	return m, nil
@@ -329,7 +377,7 @@ func (m Model) navigateRight() Model {
 			// Create season nodes
 			seasonNodes := createSeasonNodes(show)
 			if len(seasonNodes) > 0 {
-				m.nav.enterDynamicNav(seasonNodes)
+				m.nav.enterDynamicNav(seasonNodes, show.Title)
 			}
 			return m
 		}
@@ -500,12 +548,17 @@ func (m Model) renderDynamicNodeItem(node *DynamicNode, selected bool) string {
 		prefix = "> "
 	}
 
+	label := node.Label
+	if m.nav.dynamicTitle != "" {
+		label = m.nav.dynamicTitle + detailSeparator + node.Label
+	}
+
 	// Episodes (terminal nodes) don't show count
 	var line string
 	if node.IsTerminalNode() {
-		line = fmt.Sprintf("%s%s", prefix, node.Label)
+		line = fmt.Sprintf("%s%s", prefix, label)
 	} else {
-		line = fmt.Sprintf("%s%s (%d)", prefix, node.Label, node.SubtreeCount)
+		line = fmt.Sprintf("%s%s (%d)", prefix, label, node.SubtreeCount)
 	}
 
 	// Different style for episodes
@@ -650,7 +703,7 @@ func (m Model) renderMediaDetails(media *MediaItem) string {
 		infoItems = append(infoItems, fmt.Sprintf("Year: %d", movie.Year))
 	}
 	if len(infoItems) > 0 {
-		b.WriteString(strings.Join(infoItems, " | "))
+		b.WriteString(strings.Join(infoItems, detailSeparator))
 		b.WriteString("\n")
 	}
 
@@ -665,21 +718,21 @@ func (m Model) renderMediaDetails(media *MediaItem) string {
 		detailItems = append(detailItems, fmt.Sprintf("Genres: %s", genres))
 	}
 	if len(detailItems) > 0 {
-		b.WriteString(strings.Join(detailItems, " | "))
+		b.WriteString(strings.Join(detailItems, detailSeparator))
 		b.WriteString("\n")
 	}
 
 	// Technical details
-	var techDetails []string
 	if movie.ReleaseGroup != "" {
-		techDetails = append(techDetails, fmt.Sprintf("Release: %s", movie.ReleaseGroup))
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("Release: %s", movie.ReleaseGroup))
 	}
 	if dateAdded := formatDateAdded(movie.DateAdded); dateAdded != "" {
-		techDetails = append(techDetails, fmt.Sprintf("Added: %s", dateAdded))
-	}
-	if len(techDetails) > 0 {
+		if movie.ReleaseGroup == "" {
+			b.WriteString("\n")
+		}
 		b.WriteString("\n")
-		b.WriteString(strings.Join(techDetails, " | "))
+		b.WriteString(fmt.Sprintf("Added: %s", dateAdded))
 	}
 
 	// Subtitles
@@ -696,7 +749,10 @@ func (m Model) renderMediaDetails(media *MediaItem) string {
 }
 
 func (m Model) renderHelp() string {
-	help := "hjkl/arrows: navigate | enter/l: select | h: back | tab: toggle section | q: quit"
+	help := "hjkl/arrows: navigate · enter/l: select · h: back · tab: toggle section · r: refresh · q: quit"
+	if m.refreshing {
+		help = help + detailSeparator + "refreshing " + m.spinner.View()
+	}
 	return helpStyle.Render(help)
 }
 
@@ -731,8 +787,25 @@ func (m Model) renderEpisodeDetails(episodeNode *DynamicNode) string {
 		return "Episode details not available"
 	}
 
-	// Title: S01E01 - Episode Title
-	b.WriteString(titleStyle.Render(episodeNode.Label))
+	// Title: Show Title · Season X · Episode Y
+	titleParts := []string{}
+	showTitle := episode.ShowTitle
+	if showTitle == "" {
+		showTitle = m.nav.dynamicTitle
+	}
+	if showTitle != "" {
+		titleParts = append(titleParts, showTitle)
+	}
+	if episode.Season > 0 {
+		titleParts = append(titleParts, fmt.Sprintf("Season %d", episode.Season))
+	}
+	if episode.Episode > 0 {
+		titleParts = append(titleParts, fmt.Sprintf("Episode %d", episode.Episode))
+	}
+	if len(titleParts) == 0 {
+		titleParts = append(titleParts, episodeNode.Label)
+	}
+	b.WriteString(titleStyle.Render(strings.Join(titleParts, detailSeparator)))
 	b.WriteString("\n\n")
 
 	// Badge line - technical specs
@@ -757,8 +830,8 @@ func (m Model) renderEpisodeDetails(episodeNode *DynamicNode) string {
 
 	// Basic info line
 	var infoItems []string
-	if episode.ShowTitle != "" {
-		infoItems = append(infoItems, fmt.Sprintf("Show: %s", episode.ShowTitle))
+	if showTitle != "" {
+		infoItems = append(infoItems, fmt.Sprintf("Show: %s", showTitle))
 	}
 	if episode.Aired != "" {
 		infoItems = append(infoItems, fmt.Sprintf("Aired: %s", episode.Aired))
@@ -767,21 +840,21 @@ func (m Model) renderEpisodeDetails(episodeNode *DynamicNode) string {
 		infoItems = append(infoItems, fmt.Sprintf("Runtime: %d min", episode.Runtime))
 	}
 	if len(infoItems) > 0 {
-		b.WriteString(strings.Join(infoItems, " | "))
+		b.WriteString(strings.Join(infoItems, detailSeparator))
 		b.WriteString("\n")
 	}
 
 	// Technical details
-	var techDetails []string
 	if episode.ReleaseGroup != "" {
-		techDetails = append(techDetails, fmt.Sprintf("Release: %s", episode.ReleaseGroup))
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("Release: %s", episode.ReleaseGroup))
 	}
 	if dateAdded := formatDateAdded(episode.DateAdded); dateAdded != "" {
-		techDetails = append(techDetails, fmt.Sprintf("Added: %s", dateAdded))
-	}
-	if len(techDetails) > 0 {
+		if episode.ReleaseGroup == "" {
+			b.WriteString("\n")
+		}
 		b.WriteString("\n")
-		b.WriteString(strings.Join(techDetails, " | "))
+		b.WriteString(fmt.Sprintf("Added: %s", dateAdded))
 	}
 
 	// Subtitles
