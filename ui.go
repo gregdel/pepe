@@ -638,6 +638,9 @@ func (m Model) renderNodeChildren(node *RadixNode) string {
 	b.WriteString(titleStyle.Render("Children"))
 	b.WriteString("\n\n")
 
+	currentPath := m.nav.getCurrentPath()
+	selectedPrefix := currentPath + node.Label
+
 	if len(node.Children) == 0 {
 		b.WriteString("No children")
 	} else {
@@ -655,9 +658,17 @@ func (m Model) renderNodeChildren(node *RadixNode) string {
 			label := child.Label
 			if child.IsTerminal && child.FullString != "" {
 				label = child.FullString
+			} else if selectedPrefix != "" {
+				label = selectedPrefix + child.Label
 			}
 
-			b.WriteString(fmt.Sprintf("  %s (%d)\n", label, child.SubtreeCount))
+			styledLabel := label
+			if selectedPrefix != "" && strings.HasPrefix(label, selectedPrefix) {
+				remainder := label[len(selectedPrefix):]
+				styledLabel = pathHighlightStyle.Render(selectedPrefix) + remainder
+			}
+
+			b.WriteString(fmt.Sprintf("  %s (%d)\n", styledLabel, child.SubtreeCount))
 		}
 	}
 
