@@ -18,7 +18,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to open log file '%s': %v\n", *logFilePath, err)
 		logFile = os.Stderr
 	} else {
-		defer logFile.Close()
+		defer func() {
+			if closeErr := logFile.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "Failed to close log file '%s': %v\n", *logFilePath, closeErr)
+			}
+		}()
 	}
 
 	log := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{})).With("app", "polochon-tui")

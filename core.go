@@ -185,30 +185,6 @@ func (c *APIClient) getSnapshot() LibrarySnapshot {
 	}
 }
 
-func (c *APIClient) getMovieRadix() *RadixTree {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.movieRadix
-}
-
-func (c *APIClient) getShowRadix() *RadixTree {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.showRadix
-}
-
-func (c *APIClient) getMovieCount() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.movieCount
-}
-
-func (c *APIClient) getShowCount() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.showCount
-}
-
 func (c *APIClient) getDownloadURL(target papi.Downloadable) (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
