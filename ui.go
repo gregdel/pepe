@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -183,11 +184,20 @@ type Model struct {
 
 	refreshing bool
 	spinner    spinner.Model
+
+	playerRunning     bool
+	playerCommand     string
+	playerExecCommand string
+	playerStatus      string
 }
 
 type refreshLibraryMsg struct {
 	snapshot LibrarySnapshot
 	err      error
+}
+
+type playerFinishedMsg struct {
+	err error
 }
 
 func initialModel(client *APIClient) Model {
@@ -209,6 +219,7 @@ func initialModel(client *APIClient) Model {
 		width:        80,
 		height:       24,
 		spinner:      spinner.New(spinner.WithSpinner(spinner.Dot)),
+		playerStatus: "Idle",
 	}
 }
 
@@ -253,7 +264,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.navigateLeft(), nil
 
 		case "right", "l", "enter":
-			return m.navigateRight(), nil
+			return m.navigateRight()
 
 		case "tab":
 			return m.toggleSection(), nil
@@ -280,9 +291,63 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, nil
+
+	case playerFinishedMsg:
+		m.playerRunning = false
+		if msg.err != nil {
+			m.playerStatus = "Error"
+		} else {
+			m.playerStatus = "Idle"
+		}
+		return m, nil
 	}
 
 	return m, nil
+}
+
+func runPlayerCmd(command string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("sh", "-c", command)
+		err := cmd.Run()
+		return playerFinishedMsg{err: err}
+	}
+}
+
+func quoteArg(arg string) string {
+	if arg == "" {
+		return "\"\""
+	}
+	if strings.ContainsAny(arg, " \t\n\"'\\") {
+		escaped := strings.ReplaceAll(arg, "\"", "\\\"")
+		return "\"" + escaped + "\""
+	}
+	return arg
+}
+
+func buildMPVCommand(title, videoURL string, subtitleURLs []string) string {
+	var args []string
+	args = append(args, "mpv")
+	args = append(args, "--http-header-fields=X-Auth-Token: $POLOCHON_TOKEN")
+	if title != "" {
+		args = append(args, "--title="+title)
+	}
+	for _, sub := range subtitleURLs {
+		if sub == "" {
+			continue
+		}
+		args = append(args, "--sub-file="+sub)
+	}
+	args = append(args, videoURL)
+
+	var parts []string
+	for _, arg := range args {
+		parts = append(parts, quoteArg(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func fakePlayerCommand(cmdLine string) string {
+	return fmt.Sprintf("echo %s && sleep 5", quoteArg(cmdLine))
 }
 
 func (m Model) navigateUp() Model {
@@ -322,7 +387,7 @@ func (m Model) navigateLeft() Model {
 	return m
 }
 
-func (m Model) navigateRight() Model {
+func (m Model) navigateRight() (Model, tea.Cmd) {
 	if m.nav.isAtRoot() {
 		// At root level, enter selected section
 		if m.nav.cursor == 0 {
@@ -332,46 +397,54 @@ func (m Model) navigateRight() Model {
 			// Enter Shows
 			m.nav.resetToSection(SectionShows, m.showRadix.Root())
 		}
-		return m
+		return m, nil
 	}
 
 	// Handle dynamic navigation (seasons/episodes)
 	if m.nav.inDynamicNav {
 		selectedChild := m.nav.getSelectedDynamicChild()
 		if selectedChild == nil {
-			return m
+			return m, nil
 		}
 
 		if selectedChild.IsTerminalNode() {
-			// Episode selected - play it (for now, just quit)
-			fmt.Printf("\nSelected episode: %s\n", selectedChild.Label)
-			m.quitting = true
-			return m
+			playerCommand, execCommand, ok := m.buildEpisodeCommand(selectedChild)
+			if !ok {
+				m.playerStatus = "Error"
+				m.playerCommand = ""
+				m.playerExecCommand = ""
+				return m, nil
+			}
+			m.playerCommand = playerCommand
+			m.playerExecCommand = execCommand
+			m.playerRunning = true
+			m.playerStatus = "Running"
+			return m, runPlayerCmd(execCommand)
 		}
 
 		// Enter season to see episodes
 		m.nav.goForwardDynamic(selectedChild)
-		return m
+		return m, nil
 	}
 
 	// Get the selected child from radix tree
 	selectedChild := m.nav.getSelectedChild()
 	if selectedChild == nil {
-		return m
+		return m, nil
 	}
 
 	if selectedChild.IsTerminal {
 		// This is a final media item
 		media, ok := m.titleToMedia[selectedChild.FullString]
 		if !ok {
-			return m
+			return m, nil
 		}
 
 		// If it's a show, enter season/episode navigation
 		if media.Type == "show" {
 			show, ok := m.client.getShow(media.ID)
 			if !ok {
-				return m
+				return m, nil
 			}
 
 			// Create season nodes
@@ -379,18 +452,27 @@ func (m Model) navigateRight() Model {
 			if len(seasonNodes) > 0 {
 				m.nav.enterDynamicNav(seasonNodes, show.Title)
 			}
-			return m
+			return m, nil
 		}
 
-		// It's a movie - play it (for now, just quit)
-		fmt.Printf("\nSelected: %s (%s)\n", media.Title, media.Type)
-		m.quitting = true
-		return m
+		// It's a movie - start fake player
+		playerCommand, execCommand, ok := m.buildMovieCommand(media)
+		if !ok {
+			m.playerStatus = "Error"
+			m.playerCommand = ""
+			m.playerExecCommand = ""
+			return m, nil
+		}
+		m.playerCommand = playerCommand
+		m.playerExecCommand = execCommand
+		m.playerRunning = true
+		m.playerStatus = "Running"
+		return m, runPlayerCmd(execCommand)
 	}
 
 	// Enter the selected node
 	m.nav.goForward(selectedChild)
-	return m
+	return m, nil
 }
 
 func (m Model) toggleSection() Model {
@@ -428,6 +510,58 @@ func (m Model) View() string {
 		panels,
 		help,
 	)
+}
+
+func (m Model) buildMovieCommand(media *MediaItem) (string, string, bool) {
+	movie, ok := m.client.getMovie(media.ID)
+	if !ok {
+		return "", "", false
+	}
+	videoURL, err := m.client.getDownloadURL(movie)
+	if err != nil {
+		return "", "", false
+	}
+
+	subs := make([]string, 0, len(movie.Subtitles))
+	for _, sub := range movie.Subtitles {
+		if sub == nil || sub.Embedded {
+			continue
+		}
+		url, err := m.client.getDownloadURL(sub)
+		if err != nil {
+			continue
+		}
+		subs = append(subs, url)
+	}
+
+	cmdLine := buildMPVCommand(media.Title, videoURL, subs)
+	return cmdLine, fakePlayerCommand(cmdLine), true
+}
+
+func (m Model) buildEpisodeCommand(node *DynamicNode) (string, string, bool) {
+	if node == nil || node.Episode == nil {
+		return "", "", false
+	}
+
+	videoURL, err := m.client.getDownloadURL(node.Episode)
+	if err != nil {
+		return "", "", false
+	}
+
+	subs := make([]string, 0, len(node.Episode.Subtitles))
+	for _, sub := range node.Episode.Subtitles {
+		if sub == nil || sub.Embedded {
+			continue
+		}
+		url, err := m.client.getDownloadURL(sub)
+		if err != nil {
+			continue
+		}
+		subs = append(subs, url)
+	}
+
+	cmdLine := buildMPVCommand(node.Label, videoURL, subs)
+	return cmdLine, fakePlayerCommand(cmdLine), true
 }
 
 func (m Model) renderLeftPanel(width, height int) string {
@@ -604,6 +738,8 @@ func (m Model) renderRightPanel(width, height int) string {
 			media, ok := m.titleToMedia[selectedChild.FullString]
 			if ok {
 				b.WriteString(m.renderMediaDetails(media))
+				b.WriteString("\n\n")
+				b.WriteString(m.renderPlayerStatus())
 			} else {
 				b.WriteString("Media details not found")
 			}
@@ -628,6 +764,24 @@ func (m Model) renderSectionDetails(sectionName string, count int) string {
 	b.WriteString(fmt.Sprintf("Total items: %d\n", count))
 	b.WriteString("\n")
 	b.WriteString("Press Enter or → to browse")
+
+	return b.String()
+}
+
+func (m Model) renderPlayerStatus() string {
+	var b strings.Builder
+	status := m.playerStatus
+	if status == "" {
+		status = "Idle"
+	}
+
+	b.WriteString(titleStyle.Render("Player"))
+	b.WriteString("\n\n")
+	b.WriteString(fmt.Sprintf("Status: %s\n", status))
+	if status == "Running" && m.playerCommand != "" {
+		b.WriteString("\nCommand:\n")
+		b.WriteString(m.playerCommand)
+	}
 
 	return b.String()
 }
@@ -761,6 +915,9 @@ func (m Model) renderMediaDetails(media *MediaItem) string {
 
 func (m Model) renderHelp() string {
 	help := "hjkl/arrows: navigate · enter/l: select · h: back · tab: toggle section · r: refresh · q: quit"
+	if m.playerRunning {
+		help = help + detailSeparator + "player: running"
+	}
 	if m.refreshing {
 		help = help + detailSeparator + "refreshing " + m.spinner.View()
 	}
@@ -876,6 +1033,11 @@ func (m Model) renderEpisodeDetails(episodeNode *DynamicNode) string {
 	// Plot
 	if episode.Plot != "" {
 		b.WriteString("\n\n" + episode.Plot)
+	}
+
+	if m.playerCommand != "" {
+		b.WriteString("\n\n")
+		b.WriteString(m.renderPlayerStatus())
 	}
 
 	return b.String()

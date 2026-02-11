@@ -209,6 +209,12 @@ func (c *APIClient) getShowCount() int {
 	return c.showCount
 }
 
+func (c *APIClient) getDownloadURL(target papi.Downloadable) (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.client.DownloadURL(target)
+}
+
 func (c *APIClient) getMovie(id string) (*papi.Movie, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
