@@ -216,9 +216,7 @@ const (
 )
 
 type playerFinishedMsg struct {
-	err    error
-	stdout string
-	stderr string
+	err error
 }
 
 func initialModel(client *APIClient) Model {
@@ -317,14 +315,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.playerRunning = false
 		if msg.err != nil {
 			m.playerStatus = PlayerStatusError
-			switch {
-			case msg.stderr != "":
-				m.playerError = msg.stderr
-			case msg.stdout != "":
-				m.playerError = msg.stdout
-			default:
-				m.playerError = msg.err.Error()
-			}
+			m.playerError = msg.err.Error()
 		} else {
 			m.playerStatus = PlayerStatusIdle
 			m.playerError = ""
@@ -336,22 +327,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func runPlayerCmd(args []string) tea.Cmd {
-	return func() tea.Msg {
-		if len(args) == 0 {
+	if len(args) == 0 {
+		return func() tea.Msg {
 			return playerFinishedMsg{err: fmt.Errorf("empty player command")}
 		}
-		cmd := exec.Command(args[0], args[1:]...)
-		var stdout strings.Builder
-		var stderr strings.Builder
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		err := cmd.Run()
-		return playerFinishedMsg{
-			err:    err,
-			stdout: strings.TrimSpace(stdout.String()),
-			stderr: strings.TrimSpace(stderr.String()),
-		}
 	}
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return playerFinishedMsg{err: err}
+	})
 }
 
 func quoteArg(arg string) string {
@@ -366,10 +353,15 @@ func quoteArg(arg string) string {
 }
 
 func detectPlayerMode() PlayerMode {
-	for _, name := range []string{"WAYLAND_DISPLAY", "DISPLAY", "XDG_SESSION_TYPE"} {
+	for _, name := range []string{"WAYLAND_DISPLAY", "DISPLAY"} {
 		if os.Getenv(name) != "" {
 			return PlayerModeGUI
 		}
+	}
+
+	sessionType := strings.ToLower(strings.TrimSpace(os.Getenv("XDG_SESSION_TYPE")))
+	if sessionType == "wayland" || sessionType == "x11" {
+		return PlayerModeGUI
 	}
 	return PlayerModeKMS
 }
