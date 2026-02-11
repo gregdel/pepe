@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -188,13 +189,29 @@ type Model struct {
 	playerRunning     bool
 	playerCommand     string
 	playerExecCommand string
-	playerStatus      string
+	playerStatus      PlayerStatus
+	playerMode        PlayerMode
 }
 
 type refreshLibraryMsg struct {
 	snapshot LibrarySnapshot
 	err      error
 }
+
+type PlayerStatus string
+
+const (
+	PlayerStatusIdle    PlayerStatus = "Idle"
+	PlayerStatusRunning PlayerStatus = "Running"
+	PlayerStatusError   PlayerStatus = "Error"
+)
+
+type PlayerMode string
+
+const (
+	PlayerModeGUI PlayerMode = "gui"
+	PlayerModeKMS PlayerMode = "kms"
+)
 
 type playerFinishedMsg struct {
 	err error
@@ -219,7 +236,7 @@ func initialModel(client *APIClient) Model {
 		width:        80,
 		height:       24,
 		spinner:      spinner.New(spinner.WithSpinner(spinner.Dot)),
-		playerStatus: "Idle",
+		playerStatus: PlayerStatusIdle,
 	}
 }
 
@@ -295,9 +312,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case playerFinishedMsg:
 		m.playerRunning = false
 		if msg.err != nil {
-			m.playerStatus = "Error"
+			m.playerStatus = PlayerStatusError
 		} else {
-			m.playerStatus = "Idle"
+			m.playerStatus = PlayerStatusIdle
 		}
 		return m, nil
 	}
@@ -324,10 +341,29 @@ func quoteArg(arg string) string {
 	return arg
 }
 
-func buildMPVCommand(title, videoURL string, subtitleURLs []string) string {
+func detectPlayerMode() PlayerMode {
+	for _, name := range []string{"WAYLAND_DISPLAY", "DISPLAY", "XDG_SESSION_TYPE"} {
+		if os.Getenv(name) != "" {
+			return PlayerModeGUI
+		}
+	}
+	return PlayerModeKMS
+}
+
+func buildMPVCommand(title, videoURL string, subtitleURLs []string, mode PlayerMode) string {
 	var args []string
 	args = append(args, "mpv")
 	args = append(args, "--http-header-fields=X-Auth-Token: $POLOCHON_TOKEN")
+	if mode == PlayerModeKMS {
+		args = append(args,
+			"--vo=gpu",
+			"--gpu-context=drm",
+			"--opengl-es=yes",
+			"--fs",
+			"--no-border",
+			"--ontop",
+		)
+	}
 	if title != "" {
 		args = append(args, "--title="+title)
 	}
@@ -408,17 +444,19 @@ func (m Model) navigateRight() (Model, tea.Cmd) {
 		}
 
 		if selectedChild.IsTerminalNode() {
-			playerCommand, execCommand, ok := m.buildEpisodeCommand(selectedChild)
+			playerCommand, execCommand, mode, ok := m.buildEpisodeCommand(selectedChild)
 			if !ok {
-				m.playerStatus = "Error"
+				m.playerStatus = PlayerStatusError
 				m.playerCommand = ""
 				m.playerExecCommand = ""
+				m.playerMode = ""
 				return m, nil
 			}
 			m.playerCommand = playerCommand
 			m.playerExecCommand = execCommand
 			m.playerRunning = true
-			m.playerStatus = "Running"
+			m.playerStatus = PlayerStatusRunning
+			m.playerMode = mode
 			return m, runPlayerCmd(execCommand)
 		}
 
@@ -456,17 +494,19 @@ func (m Model) navigateRight() (Model, tea.Cmd) {
 		}
 
 		// It's a movie - start fake player
-		playerCommand, execCommand, ok := m.buildMovieCommand(media)
+		playerCommand, execCommand, mode, ok := m.buildMovieCommand(media)
 		if !ok {
-			m.playerStatus = "Error"
+			m.playerStatus = PlayerStatusError
 			m.playerCommand = ""
 			m.playerExecCommand = ""
+			m.playerMode = ""
 			return m, nil
 		}
 		m.playerCommand = playerCommand
 		m.playerExecCommand = execCommand
 		m.playerRunning = true
-		m.playerStatus = "Running"
+		m.playerStatus = PlayerStatusRunning
+		m.playerMode = mode
 		return m, runPlayerCmd(execCommand)
 	}
 
@@ -512,14 +552,14 @@ func (m Model) View() string {
 	)
 }
 
-func (m Model) buildMovieCommand(media *MediaItem) (string, string, bool) {
+func (m Model) buildMovieCommand(media *MediaItem) (string, string, PlayerMode, bool) {
 	movie, ok := m.client.getMovie(media.ID)
 	if !ok {
-		return "", "", false
+		return "", "", "", false
 	}
 	videoURL, err := m.client.getDownloadURL(movie)
 	if err != nil {
-		return "", "", false
+		return "", "", "", false
 	}
 
 	subs := make([]string, 0, len(movie.Subtitles))
@@ -534,18 +574,19 @@ func (m Model) buildMovieCommand(media *MediaItem) (string, string, bool) {
 		subs = append(subs, url)
 	}
 
-	cmdLine := buildMPVCommand(media.Title, videoURL, subs)
-	return cmdLine, fakePlayerCommand(cmdLine), true
+	mode := detectPlayerMode()
+	cmdLine := buildMPVCommand(media.Title, videoURL, subs, mode)
+	return cmdLine, fakePlayerCommand(cmdLine), mode, true
 }
 
-func (m Model) buildEpisodeCommand(node *DynamicNode) (string, string, bool) {
+func (m Model) buildEpisodeCommand(node *DynamicNode) (string, string, PlayerMode, bool) {
 	if node == nil || node.Episode == nil {
-		return "", "", false
+		return "", "", "", false
 	}
 
 	videoURL, err := m.client.getDownloadURL(node.Episode)
 	if err != nil {
-		return "", "", false
+		return "", "", "", false
 	}
 
 	subs := make([]string, 0, len(node.Episode.Subtitles))
@@ -560,8 +601,9 @@ func (m Model) buildEpisodeCommand(node *DynamicNode) (string, string, bool) {
 		subs = append(subs, url)
 	}
 
-	cmdLine := buildMPVCommand(node.Label, videoURL, subs)
-	return cmdLine, fakePlayerCommand(cmdLine), true
+	mode := detectPlayerMode()
+	cmdLine := buildMPVCommand(node.Label, videoURL, subs, mode)
+	return cmdLine, fakePlayerCommand(cmdLine), mode, true
 }
 
 func (m Model) renderLeftPanel(width, height int) string {
@@ -772,13 +814,16 @@ func (m Model) renderPlayerStatus() string {
 	var b strings.Builder
 	status := m.playerStatus
 	if status == "" {
-		status = "Idle"
+		status = PlayerStatusIdle
 	}
 
 	b.WriteString(titleStyle.Render("Player"))
 	b.WriteString("\n\n")
 	b.WriteString(fmt.Sprintf("Status: %s\n", status))
-	if status == "Running" && m.playerCommand != "" {
+	if m.playerMode != "" {
+		b.WriteString(fmt.Sprintf("Mode: %s\n", m.playerMode))
+	}
+	if status == PlayerStatusRunning && m.playerCommand != "" {
 		b.WriteString("\nCommand:\n")
 		b.WriteString(m.playerCommand)
 	}
