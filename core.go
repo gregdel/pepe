@@ -23,6 +23,7 @@ type MediaItem struct {
 type APIClient struct {
 	client          *papi.Client
 	refreshInterval time.Duration
+	token           string
 
 	mu           sync.RWMutex
 	movies       map[string]*papi.Movie
@@ -55,6 +56,7 @@ func newAPIClient(endpoint, token string, refreshInterval time.Duration, log *sl
 	c := &APIClient{
 		client:          papiClient,
 		refreshInterval: refreshInterval,
+		token:           token,
 		movies:          make(map[string]*papi.Movie),
 		shows:           make(map[string]*papi.Show),
 		titleToMedia:    make(map[string]*MediaItem),
@@ -189,6 +191,12 @@ func (c *APIClient) getDownloadURL(target papi.Downloadable) (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.client.DownloadURL(target)
+}
+
+func (c *APIClient) getToken() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.token
 }
 
 func (c *APIClient) getMovie(id string) (*papi.Movie, bool) {

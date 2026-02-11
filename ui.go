@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -186,11 +187,12 @@ type Model struct {
 	refreshing bool
 	spinner    spinner.Model
 
-	playerRunning     bool
-	playerCommand     string
-	playerExecCommand string
-	playerStatus      PlayerStatus
-	playerMode        PlayerMode
+	playerRunning  bool
+	playerCommand  string
+	playerExecArgs []string
+	playerStatus   PlayerStatus
+	playerMode     PlayerMode
+	playerError    string
 }
 
 type refreshLibraryMsg struct {
@@ -214,7 +216,9 @@ const (
 )
 
 type playerFinishedMsg struct {
-	err error
+	err    error
+	stdout string
+	stderr string
 }
 
 func initialModel(client *APIClient) Model {
@@ -313,8 +317,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.playerRunning = false
 		if msg.err != nil {
 			m.playerStatus = PlayerStatusError
+			switch {
+			case msg.stderr != "":
+				m.playerError = msg.stderr
+			case msg.stdout != "":
+				m.playerError = msg.stdout
+			default:
+				m.playerError = msg.err.Error()
+			}
 		} else {
 			m.playerStatus = PlayerStatusIdle
+			m.playerError = ""
 		}
 		return m, nil
 	}
@@ -322,11 +335,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func runPlayerCmd(command string) tea.Cmd {
+func runPlayerCmd(args []string) tea.Cmd {
 	return func() tea.Msg {
-		cmd := exec.Command("sh", "-c", command)
+		if len(args) == 0 {
+			return playerFinishedMsg{err: fmt.Errorf("empty player command")}
+		}
+		cmd := exec.Command(args[0], args[1:]...)
+		var stdout strings.Builder
+		var stderr strings.Builder
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
 		err := cmd.Run()
-		return playerFinishedMsg{err: err}
+		return playerFinishedMsg{
+			err:    err,
+			stdout: strings.TrimSpace(stdout.String()),
+			stderr: strings.TrimSpace(stderr.String()),
+		}
 	}
 }
 
@@ -350,9 +374,8 @@ func detectPlayerMode() PlayerMode {
 	return PlayerModeKMS
 }
 
-func buildMPVCommand(title, videoURL string, subtitleURLs []string, mode PlayerMode) string {
-	var args []string
-	args = append(args, "mpv")
+func buildMPVArgs(title, videoURL string, subtitleURLs []string, mode PlayerMode) []string {
+	args := []string{"mpv"}
 	args = append(args, "--http-header-fields=X-Auth-Token: $POLOCHON_TOKEN")
 	if mode == PlayerModeKMS {
 		args = append(args,
@@ -374,6 +397,24 @@ func buildMPVCommand(title, videoURL string, subtitleURLs []string, mode PlayerM
 		args = append(args, "--sub-file="+sub)
 	}
 	args = append(args, videoURL)
+	return args
+}
+
+func addQueryParam(rawURL, key, value string) string {
+	if value == "" {
+		return rawURL
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	query := parsed.Query()
+	query.Set(key, value)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func buildMPVCommand(args []string) string {
 
 	var parts []string
 	for _, arg := range args {
@@ -382,8 +423,15 @@ func buildMPVCommand(title, videoURL string, subtitleURLs []string, mode PlayerM
 	return strings.Join(parts, " ")
 }
 
-func fakePlayerCommand(cmdLine string) string {
-	return fmt.Sprintf("echo %s && sleep 5", quoteArg(cmdLine))
+func replaceMpvToken(args []string, token string) []string {
+	if token == "" {
+		return args
+	}
+	updated := make([]string, len(args))
+	for i, arg := range args {
+		updated[i] = strings.ReplaceAll(arg, "$POLOCHON_TOKEN", token)
+	}
+	return updated
 }
 
 func (m Model) navigateUp() Model {
@@ -444,20 +492,21 @@ func (m Model) navigateRight() (Model, tea.Cmd) {
 		}
 
 		if selectedChild.IsTerminalNode() {
-			playerCommand, execCommand, mode, ok := m.buildEpisodeCommand(selectedChild)
+			playerCommand, execArgs, mode, ok := m.buildEpisodeCommand(selectedChild)
 			if !ok {
 				m.playerStatus = PlayerStatusError
 				m.playerCommand = ""
-				m.playerExecCommand = ""
+				m.playerExecArgs = nil
 				m.playerMode = ""
 				return m, nil
 			}
 			m.playerCommand = playerCommand
-			m.playerExecCommand = execCommand
+			m.playerExecArgs = execArgs
 			m.playerRunning = true
 			m.playerStatus = PlayerStatusRunning
 			m.playerMode = mode
-			return m, runPlayerCmd(execCommand)
+			m.playerError = ""
+			return m, runPlayerCmd(execArgs)
 		}
 
 		// Enter season to see episodes
@@ -494,20 +543,21 @@ func (m Model) navigateRight() (Model, tea.Cmd) {
 		}
 
 		// It's a movie - start fake player
-		playerCommand, execCommand, mode, ok := m.buildMovieCommand(media)
+		playerCommand, execArgs, mode, ok := m.buildMovieCommand(media)
 		if !ok {
 			m.playerStatus = PlayerStatusError
 			m.playerCommand = ""
-			m.playerExecCommand = ""
+			m.playerExecArgs = nil
 			m.playerMode = ""
 			return m, nil
 		}
 		m.playerCommand = playerCommand
-		m.playerExecCommand = execCommand
+		m.playerExecArgs = execArgs
 		m.playerRunning = true
 		m.playerStatus = PlayerStatusRunning
 		m.playerMode = mode
-		return m, runPlayerCmd(execCommand)
+		m.playerError = ""
+		return m, runPlayerCmd(execArgs)
 	}
 
 	// Enter the selected node
@@ -552,15 +602,16 @@ func (m Model) View() string {
 	)
 }
 
-func (m Model) buildMovieCommand(media *MediaItem) (string, string, PlayerMode, bool) {
+func (m Model) buildMovieCommand(media *MediaItem) (string, []string, PlayerMode, bool) {
 	movie, ok := m.client.getMovie(media.ID)
 	if !ok {
-		return "", "", "", false
+		return "", nil, "", false
 	}
 	videoURL, err := m.client.getDownloadURL(movie)
 	if err != nil {
-		return "", "", "", false
+		return "", nil, "", false
 	}
+	videoURL = addQueryParam(videoURL, "title", media.Title)
 
 	subs := make([]string, 0, len(movie.Subtitles))
 	for _, sub := range movie.Subtitles {
@@ -571,23 +622,26 @@ func (m Model) buildMovieCommand(media *MediaItem) (string, string, PlayerMode, 
 		if err != nil {
 			continue
 		}
-		subs = append(subs, url)
+		subs = append(subs, addQueryParam(url, "lang", string(sub.Lang)))
 	}
 
 	mode := detectPlayerMode()
-	cmdLine := buildMPVCommand(media.Title, videoURL, subs, mode)
-	return cmdLine, fakePlayerCommand(cmdLine), mode, true
+	execArgs := buildMPVArgs(media.Title, videoURL, subs, mode)
+	execArgs = replaceMpvToken(execArgs, m.client.getToken())
+	cmdLine := buildMPVCommand(execArgs)
+	return cmdLine, execArgs, mode, true
 }
 
-func (m Model) buildEpisodeCommand(node *DynamicNode) (string, string, PlayerMode, bool) {
+func (m Model) buildEpisodeCommand(node *DynamicNode) (string, []string, PlayerMode, bool) {
 	if node == nil || node.Episode == nil {
-		return "", "", "", false
+		return "", nil, "", false
 	}
 
 	videoURL, err := m.client.getDownloadURL(node.Episode)
 	if err != nil {
-		return "", "", "", false
+		return "", nil, "", false
 	}
+	videoURL = addQueryParam(videoURL, "title", node.Label)
 
 	subs := make([]string, 0, len(node.Episode.Subtitles))
 	for _, sub := range node.Episode.Subtitles {
@@ -598,12 +652,14 @@ func (m Model) buildEpisodeCommand(node *DynamicNode) (string, string, PlayerMod
 		if err != nil {
 			continue
 		}
-		subs = append(subs, url)
+		subs = append(subs, addQueryParam(url, "lang", string(sub.Lang)))
 	}
 
 	mode := detectPlayerMode()
-	cmdLine := buildMPVCommand(node.Label, videoURL, subs, mode)
-	return cmdLine, fakePlayerCommand(cmdLine), mode, true
+	execArgs := buildMPVArgs(node.Label, videoURL, subs, mode)
+	execArgs = replaceMpvToken(execArgs, m.client.getToken())
+	cmdLine := buildMPVCommand(execArgs)
+	return cmdLine, execArgs, mode, true
 }
 
 func (m Model) renderLeftPanel(width, height int) string {
@@ -822,6 +878,10 @@ func (m Model) renderPlayerStatus() string {
 	b.WriteString(fmt.Sprintf("Status: %s\n", status))
 	if m.playerMode != "" {
 		b.WriteString(fmt.Sprintf("Mode: %s\n", m.playerMode))
+	}
+	if status == PlayerStatusError && m.playerError != "" {
+		b.WriteString("\nError:\n")
+		b.WriteString(m.playerError)
 	}
 	if status == PlayerStatusRunning && m.playerCommand != "" {
 		b.WriteString("\nCommand:\n")
