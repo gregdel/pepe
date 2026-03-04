@@ -94,6 +94,9 @@ type App struct {
 	// image cache (thumbs, fanarts, posters — all media types)
 	images *imageCache
 
+	// nfo cache — parsed NFO data per movie ID
+	nfos *nfoCache
+
 	// Gio persistent list state (must survive between frames)
 	leftList        layout.List
 	rightList       layout.List
@@ -128,6 +131,7 @@ func newApp(w *app.Window, client *APIClient) *App {
 		rightList:       layout.List{Axis: layout.Vertical},
 		playerLinesList: layout.List{Axis: layout.Vertical},
 		images:          newImageCache(),
+		nfos:            newNFOCache(),
 	}
 }
 
@@ -201,12 +205,18 @@ func (a *App) drainChannels() {
 			a.refreshDone = nil
 			// invalidate cached images since the library has changed
 			a.images.reset()
+			a.nfos.reset()
 		default:
 		}
 	}
 
 	// Drain all pending image fetch results.
 	if a.images.drain() {
+		a.w.Invalidate()
+	}
+
+	// Drain all pending NFO fetch results.
+	if a.nfos.drain() {
 		a.w.Invalidate()
 	}
 }
@@ -419,11 +429,21 @@ type (
 const (
 	leftFlex  = 0.38
 	rightFlex = 0.62
-	sp        = unit.Sp(14)
-	dp4       = unit.Dp(4)
-	dp8       = unit.Dp(8)
-	dp12      = unit.Dp(12)
-	dp16      = unit.Dp(16)
+
+	// Font sizes — calibrated for 10-foot / TV viewing distance at 1080p.
+	sp      = unit.Sp(20) // default body text (KV rows, help, nav)
+	spBody  = unit.Sp(22) // plot, subtitles, multi-line text
+	spTitle = unit.Sp(36) // movie / show title
+	spMeta  = unit.Sp(20) // year · runtime · genres line
+	spBadge = unit.Sp(16) // tech badge pills
+
+	// Spacing
+	dp4  = unit.Dp(4)
+	dp8  = unit.Dp(8)
+	dp12 = unit.Dp(12)
+	dp16 = unit.Dp(16)
+	dp20 = unit.Dp(20)
+	dp24 = unit.Dp(24)
 )
 
 func (a *App) layout(gtx C) D {
@@ -718,46 +738,100 @@ func (a *App) renderMediaDetails(gtx C, media *MediaItem) D {
 		return a.renderText(gtx, colorMuted, "Movie details not available")
 	}
 
+	movieID := movie.ImdbID
+	id := media.ID
+
+	// Kick off async NFO fetch if not yet cached.
+	nfoKey := "nfo:" + movieID
+	a.nfos.fetch(nfoKey, func() (*polochon.Movie, error) {
+		return a.client.fetchMovieNFO(movieID)
+	}, a.w)
+
+	// Merge NFO data with API data — NFO wins for text fields.
+	// nfoData is nil until the fetch completes (or permanently nil on error).
+	nfoData, _ := a.nfos.get(nfoKey)
+
+	// Resolved display values: prefer NFO when available.
+	plot := movie.Plot
+	tagline := movie.Tagline
+	runtime := movie.Runtime
+	genres := movie.Genres
+	if nfoData != nil {
+		if nfoData.Plot != "" {
+			plot = nfoData.Plot
+		}
+		if nfoData.Tagline != "" {
+			tagline = nfoData.Tagline
+		}
+		if nfoData.Runtime != 0 {
+			runtime = nfoData.Runtime
+		}
+		if len(nfoData.Genres) > 0 {
+			genres = nfoData.Genres
+		}
+	}
+
+	// Build the info-column sections (right side of the two-column layout).
 	var sections []func(C) D
 
-	// Title
+	// Title — large, bold
 	sections = append(sections, func(gtx C) D {
-		lbl := material.Label(a.th, unit.Sp(18), media.Title)
+		lbl := material.Label(a.th, spTitle, media.Title)
 		lbl.Color = colorFg
 		lbl.Font.Weight = font.Bold
+		lbl.MaxLines = 0
 		return lbl.Layout(gtx)
 	})
 	sections = append(sections, spacerFn(dp8))
 
-	// Badges
-	if badges := a.buildMovieBadges(movie); len(badges) > 0 {
+	// Tagline — italic, muted, below title
+	if tagline != "" {
+		tl := tagline
 		sections = append(sections, func(gtx C) D {
-			return a.renderBadgeRow(gtx, badges)
+			lbl := material.Label(a.th, spBody, tl)
+			lbl.Color = colorMuted
+			lbl.Font.Style = font.Italic
+			lbl.MaxLines = 0
+			return lbl.Layout(gtx)
 		})
 		sections = append(sections, spacerFn(dp8))
 	}
 
-	// Year
-	if movie.Year > 0 {
+	// Meta line: "1999  ·  2h 16m  ·  Action, Sci-Fi"
+	if metaLine := buildMetaLine(movie.Year, runtime, genres); metaLine != "" {
 		sections = append(sections, func(gtx C) D {
-			return a.renderKV(gtx, "Year", fmt.Sprintf("%d", movie.Year))
+			lbl := material.Label(a.th, spMeta, metaLine)
+			lbl.Color = colorMuted
+			return lbl.Layout(gtx)
 		})
+		sections = append(sections, spacerFn(dp12))
 	}
 
-	// Runtime + genres
-	if movie.Runtime > 0 {
-		h, m := movie.Runtime/60, movie.Runtime%60
+	// Tech badges
+	if badges := a.buildMovieBadges(movie); len(badges) > 0 {
 		sections = append(sections, func(gtx C) D {
-			return a.renderKV(gtx, "Runtime", fmt.Sprintf("%dh %dm", h, m))
+			return a.renderBadgeRow(gtx, badges)
 		})
-	}
-	if g := formatGenres(movie.Genres); g != "" {
-		sections = append(sections, func(gtx C) D {
-			return a.renderKV(gtx, "Genres", g)
-		})
+		sections = append(sections, spacerFn(dp20))
 	}
 
-	// Release group + date added
+	// Plot
+	if plot != "" {
+		p := plot
+		sections = append(sections, func(gtx C) D {
+			return a.renderBody(gtx, p)
+		})
+		sections = append(sections, spacerFn(dp16))
+	}
+
+	// Subtitles
+	subText := formatSubtitles(movie.EmbeddedSubtitles, movie.Subtitles)
+	sections = append(sections, func(gtx C) D {
+		return a.renderBody(gtx, subText)
+	})
+	sections = append(sections, spacerFn(dp12))
+
+	// Release group + date added (compact KV)
 	if movie.ReleaseGroup != "" {
 		rg := movie.ReleaseGroup
 		sections = append(sections, func(gtx C) D {
@@ -770,44 +844,55 @@ func (a *App) renderMediaDetails(gtx C, media *MediaItem) D {
 		})
 	}
 
-	// Subtitles
-	subText := formatSubtitles(movie.EmbeddedSubtitles, movie.Subtitles)
-	sections = append(sections, spacerFn(dp4))
-	sections = append(sections, func(gtx C) D {
-		return a.renderMultiline(gtx, subText)
-	})
-
-	// Plot
-	if movie.Plot != "" {
-		sections = append(sections, spacerFn(dp8))
-		plot := movie.Plot
-		sections = append(sections, func(gtx C) D {
-			return a.renderMultiline(gtx, plot)
-		})
-	}
-
 	// Player status
-	sections = append(sections, spacerFn(dp8))
+	sections = append(sections, spacerFn(dp12))
 	sections = append(sections, func(gtx C) D {
 		return a.renderPlayerStatus(gtx)
 	})
 
-	// Thumbnail
-	id := media.ID
-	sections = append(sections, spacerFn(dp8))
-	sections = append(sections, func(gtx C) D {
-		return a.renderThumb(gtx, id)
-	})
-
-	movieID := movie.ImdbID
+	// Two-column layout: [poster | info] on top of the fanart background.
 	return layout.Stack{}.Layout(gtx,
 		layout.Expanded(func(gtx C) D {
 			return a.renderFanartBg(gtx, movieID)
 		}),
 		layout.Stacked(func(gtx C) D {
-			return a.renderSections(gtx, sections)
+			return layout.Inset{
+				Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
+			}.Layout(gtx, func(gtx C) D {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+					// Left column: poster
+					layout.Rigid(func(gtx C) D {
+						return a.renderThumbColumn(gtx, id)
+					}),
+					layout.Rigid(layout.Spacer{Width: dp24}.Layout),
+					// Right column: scrollable info
+					layout.Flexed(1, func(gtx C) D {
+						return a.renderSections(gtx, sections)
+					}),
+				)
+			})
 		}),
 	)
+}
+
+// buildMetaLine returns "1999  ·  2h 16m  ·  Action, Sci-Fi" from resolved values.
+func buildMetaLine(year, runtime int, genres []string) string {
+	var parts []string
+	if year > 0 {
+		parts = append(parts, fmt.Sprintf("%d", year))
+	}
+	if runtime > 0 {
+		h, m := runtime/60, runtime%60
+		if h > 0 {
+			parts = append(parts, fmt.Sprintf("%dh %dm", h, m))
+		} else {
+			parts = append(parts, fmt.Sprintf("%dm", m))
+		}
+	}
+	if g := formatGenres(genres); g != "" {
+		parts = append(parts, g)
+	}
+	return strings.Join(parts, "  ·  ")
 }
 
 func (a *App) buildMovieBadges(movie *papi.Movie) []badge {
@@ -897,6 +982,46 @@ func (a *App) renderFanartBg(gtx C, movieID string) D {
 		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Fanart })
 	}, a.w)
 	return D{Size: gtx.Constraints.Max}
+}
+
+// renderThumbColumn renders the movie poster in a fixed-width column (~200dp).
+// The poster fills the column width and is constrained to a 2:3 aspect ratio height.
+// Used as the left column in the two-column movie details layout.
+func (a *App) renderThumbColumn(gtx C, movieID string) D {
+	const colWidthDp = unit.Dp(200)
+	colW := gtx.Dp(colWidthDp)
+	colH := colW * 3 / 2 // 2:3 poster ratio
+
+	gtx2 := gtx
+	gtx2.Constraints = layout.Exact(image.Pt(colW, colH))
+
+	if img, ok := a.images.get("thumb:" + movieID); ok {
+		if img == nil {
+			// Fetch failed permanently — render a translucent placeholder.
+			defer clip.Rect{Max: image.Pt(colW, colH)}.Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0x80})
+			return D{Size: image.Pt(colW, colH)}
+		}
+		return widget.Image{
+			Src:      paint.NewImageOp(img),
+			Fit:      widget.Contain,
+			Position: layout.N,
+		}.Layout(gtx2)
+	}
+
+	// Not cached yet — kick off fetch.
+	a.images.fetch("thumb:"+movieID, func() (image.Image, error) {
+		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Thumb })
+	}, a.w)
+
+	// Loading placeholder: dim rounded rect at poster proportions.
+	defer clip.RRect{
+		Rect: image.Rectangle{Max: image.Pt(colW, colH)},
+		NE:   gtx.Dp(unit.Dp(4)), NW: gtx.Dp(unit.Dp(4)),
+		SE: gtx.Dp(unit.Dp(4)), SW: gtx.Dp(unit.Dp(4)),
+	}.Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0x80})
+	return D{Size: image.Pt(colW, colH)}
 }
 
 // ── Right panel: season details ───────────────────────────────────────────────
@@ -1183,6 +1308,14 @@ func (a *App) renderMultiline(gtx C, s string) D {
 	return lbl.Layout(gtx)
 }
 
+// renderBody renders body text at the larger spBody size for comfortable TV reading.
+func (a *App) renderBody(gtx C, s string) D {
+	lbl := material.Label(a.th, spBody, s)
+	lbl.Color = colorFg
+	lbl.MaxLines = 0
+	return lbl.Layout(gtx)
+}
+
 // renderBadgeRow draws a horizontal row of coloured badge pills.
 func (a *App) renderBadgeRow(gtx C, badges []badge) D {
 	children := make([]layout.FlexChild, 0, len(badges)*2)
@@ -1199,11 +1332,11 @@ func (a *App) renderBadgeRow(gtx C, badges []badge) D {
 }
 
 func (a *App) drawBadge(gtx C, b badge) D {
-	inset := layout.Inset{Left: dp4, Right: dp4, Top: unit.Dp(2), Bottom: unit.Dp(2)}
+	inset := layout.Inset{Left: dp8, Right: dp8, Top: dp4, Bottom: dp4}
 	// Measure text first
 	macro := op.Record(gtx.Ops)
 	dims := inset.Layout(gtx, func(gtx C) D {
-		lbl := material.Label(a.th, unit.Sp(12), b.text)
+		lbl := material.Label(a.th, spBadge, b.text)
 		lbl.Color = colorBadgeFg
 		return lbl.Layout(gtx)
 	})
@@ -1212,8 +1345,8 @@ func (a *App) drawBadge(gtx C, b badge) D {
 	// Draw background
 	defer clip.RRect{
 		Rect: image.Rectangle{Max: dims.Size},
-		NE:   gtx.Dp(unit.Dp(3)), NW: gtx.Dp(unit.Dp(3)),
-		SE: gtx.Dp(unit.Dp(3)), SW: gtx.Dp(unit.Dp(3)),
+		NE:   gtx.Dp(unit.Dp(4)), NW: gtx.Dp(unit.Dp(4)),
+		SE: gtx.Dp(unit.Dp(4)), SW: gtx.Dp(unit.Dp(4)),
 	}.Push(gtx.Ops).Pop()
 	paint.Fill(gtx.Ops, b.bg)
 

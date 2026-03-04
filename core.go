@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	polochon "github.com/odwrtw/polochon/lib"
+	"github.com/odwrtw/polochon/lib/nfo"
 	"github.com/odwrtw/polochon/lib/papi"
 )
 
@@ -266,6 +268,46 @@ func (c *APIClient) fetchImageFile(f papi.Downloadable) (image.Image, error) {
 	}
 	img, _, err := image.Decode(resp.Body)
 	return img, err
+}
+
+// fetchMovieNFO downloads and parses the NFO file for the given movie ID.
+// It returns the polochon.Movie with fields populated from the NFO XML.
+func (c *APIClient) fetchMovieNFO(id string) (*polochon.Movie, error) {
+	movie, ok := c.getMovie(id)
+	if !ok {
+		return nil, fmt.Errorf("movie %s not found", id)
+	}
+	if movie.NFO == nil {
+		return nil, fmt.Errorf("movie %s: no NFO file", id)
+	}
+
+	rawURL, err := c.getDownloadURL(movie.NFO)
+	if err != nil {
+		return nil, fmt.Errorf("movie %s: NFO URL: %w", id, err)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Auth-Token", c.getToken())
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("movie %s: NFO fetch returned %s", id, resp.Status)
+	}
+
+	m := &polochon.Movie{}
+	if err := nfo.Read(resp.Body, m); err != nil {
+		return nil, fmt.Errorf("movie %s: NFO parse: %w", id, err)
+	}
+
+	return m, nil
 }
 
 func (c *APIClient) startPeriodicRefresh(stopCh <-chan struct{}) {
