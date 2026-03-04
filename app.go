@@ -33,6 +33,7 @@ import (
 var (
 	colorBg         = color.NRGBA{R: 0x1c, G: 0x1c, B: 0x1c, A: 0xff}
 	colorFg         = color.NRGBA{R: 0xd0, G: 0xd0, B: 0xd0, A: 0xff}
+	colorSubtle     = color.NRGBA{R: 0xa8, G: 0xa8, B: 0xa8, A: 0xff} // secondary text on glass card
 	colorPrimary    = color.NRGBA{R: 0x87, G: 0x5f, B: 0xff, A: 0xff} // 256-colour 99  (purple)
 	colorMuted      = color.NRGBA{R: 0x60, G: 0x60, B: 0x60, A: 0xff} // 256-colour 240 (grey)
 	colorTerminal   = color.NRGBA{R: 0xff, G: 0x69, B: 0xb4, A: 0xff} // 256-colour 212 (pink)
@@ -438,6 +439,7 @@ const (
 	spBadge = unit.Sp(16) // tech badge pills
 
 	// Spacing
+	dp1  = unit.Dp(1)
 	dp4  = unit.Dp(4)
 	dp8  = unit.Dp(8)
 	dp12 = unit.Dp(12)
@@ -789,7 +791,7 @@ func (a *App) renderMediaDetails(gtx C, media *MediaItem) D {
 		tl := tagline
 		sections = append(sections, func(gtx C) D {
 			lbl := material.Label(a.th, spBody, tl)
-			lbl.Color = colorMuted
+			lbl.Color = colorSubtle
 			lbl.Font.Style = font.Italic
 			lbl.MaxLines = 0
 			return lbl.Layout(gtx)
@@ -801,7 +803,7 @@ func (a *App) renderMediaDetails(gtx C, media *MediaItem) D {
 	if metaLine := buildMetaLine(movie.Year, runtime, genres); metaLine != "" {
 		sections = append(sections, func(gtx C) D {
 			lbl := material.Label(a.th, spMeta, metaLine)
-			lbl.Color = colorMuted
+			lbl.Color = colorSubtle
 			return lbl.Layout(gtx)
 		})
 		sections = append(sections, spacerFn(dp12))
@@ -850,7 +852,7 @@ func (a *App) renderMediaDetails(gtx C, media *MediaItem) D {
 		return a.renderPlayerStatus(gtx)
 	})
 
-	// Two-column layout: [poster | info] on top of the fanart background.
+	// Two-column layout: [poster | info] floating on a glass card over the fanart.
 	return layout.Stack{}.Layout(gtx,
 		layout.Expanded(func(gtx C) D {
 			return a.renderFanartBg(gtx, movieID)
@@ -859,17 +861,23 @@ func (a *App) renderMediaDetails(gtx C, media *MediaItem) D {
 			return layout.Inset{
 				Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
 			}.Layout(gtx, func(gtx C) D {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
-					// Left column: poster
-					layout.Rigid(func(gtx C) D {
-						return a.renderThumbColumn(gtx, id)
-					}),
-					layout.Rigid(layout.Spacer{Width: dp24}.Layout),
-					// Right column: scrollable info
-					layout.Flexed(1, func(gtx C) D {
-						return a.renderSections(gtx, sections)
-					}),
-				)
+				return a.renderGlassCard(gtx, func(gtx C) D {
+					return layout.Inset{
+						Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
+					}.Layout(gtx, func(gtx C) D {
+						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+							// Left column: poster
+							layout.Rigid(func(gtx C) D {
+								return a.renderThumbColumn(gtx, id)
+							}),
+							layout.Rigid(layout.Spacer{Width: dp24}.Layout),
+							// Right column: scrollable info
+							layout.Flexed(1, func(gtx C) D {
+								return a.renderSections(gtx, sections)
+							}),
+						)
+					})
+				})
 			})
 		}),
 	)
@@ -959,8 +967,43 @@ func (a *App) renderThumb(gtx C, movieID string) D {
 	return D{Size: sz}
 }
 
-// renderFanartBg fills the right panel with the movie's fanart image covered by
-// a dark overlay so the text on top remains readable at TV viewing distance.
+// renderGlassCard draws a semi-transparent dark panel with rounded corners and
+// a subtle white border, then renders content inside it. This gives a
+// "frosted glass card" look floating over the fanart background.
+func (a *App) renderGlassCard(gtx C, content layout.Widget) D {
+	r := gtx.Dp(unit.Dp(12))
+	border := gtx.Dp(dp1)
+	bounds := image.Rectangle{Max: gtx.Constraints.Max}
+
+	// Outer ring: border colour (~20% white).
+	rrOuter := clip.RRect{
+		Rect: bounds,
+		NE:   r, NW: r, SE: r, SW: r,
+	}
+	defer rrOuter.Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x33})
+
+	// Inner fill: ~80% opaque dark, lets just a whisper of fanart tint through.
+	inner := image.Rectangle{
+		Min: image.Pt(border, border),
+		Max: image.Pt(bounds.Max.X-border, bounds.Max.Y-border),
+	}
+	ri := r - border
+	if ri < 0 {
+		ri = 0
+	}
+	rrInner := clip.RRect{
+		Rect: inner,
+		NE:   ri, NW: ri, SE: ri, SW: ri,
+	}
+	defer rrInner.Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, color.NRGBA{R: 0x12, G: 0x12, B: 0x12, A: 0xcc})
+
+	return content(gtx)
+}
+
+// renderFanartBg fills the right panel with the movie's fanart image and a
+// light dark tint. The glass card drawn on top provides contrast for text.
 func (a *App) renderFanartBg(gtx C, movieID string) D {
 	if img, ok := a.images.get("fanart:" + movieID); ok {
 		if img != nil {
@@ -970,21 +1013,16 @@ func (a *App) renderFanartBg(gtx C, movieID string) D {
 				Fit:      widget.Cover,
 				Position: layout.Center,
 			}.Layout(gtx)
-			// Dark overlay to keep text readable at TV viewing distance.
+			// Light tint (~25% black) to tone down very bright fanarts.
 			defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
-			paint.Fill(gtx.Ops, color.NRGBA{A: 0xb8})
+			paint.Fill(gtx.Ops, color.NRGBA{A: 0x40})
 		}
 		return D{Size: gtx.Constraints.Max}
 	}
 
 	// Not cached yet — kick off fetch if not already in flight.
-	// Apply a box blur so the background is soft and text stays readable.
 	a.images.fetch("fanart:"+movieID, func() (image.Image, error) {
-		img, err := a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Fanart })
-		if err != nil || img == nil {
-			return img, err
-		}
-		return blurImage(img, 14), nil
+		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Fanart })
 	}, a.w)
 	return D{Size: gtx.Constraints.Max}
 }
@@ -1304,7 +1342,7 @@ func (a *App) renderKV(gtx C, k, v string) D {
 	return layout.Flex{}.Layout(gtx,
 		layout.Rigid(func(gtx C) D {
 			lbl := material.Label(a.th, sp, k+": ")
-			lbl.Color = colorMuted
+			lbl.Color = colorSubtle
 			return lbl.Layout(gtx)
 		}),
 		layout.Rigid(func(gtx C) D {
