@@ -21,6 +21,7 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/text"
 	"gioui.org/unit"
+	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"github.com/dustin/go-humanize"
 	polochon "github.com/odwrtw/polochon/lib"
@@ -90,6 +91,9 @@ type App struct {
 	refreshing  bool
 	refreshDone chan LibrarySnapshot // goroutine → event loop
 
+	// image cache (thumbs, fanarts, posters — all media types)
+	images *imageCache
+
 	// Gio persistent list state (must survive between frames)
 	leftList        layout.List
 	rightList       layout.List
@@ -123,6 +127,7 @@ func newApp(w *app.Window, client *APIClient) *App {
 		leftList:        layout.List{Axis: layout.Vertical},
 		rightList:       layout.List{Axis: layout.Vertical},
 		playerLinesList: layout.List{Axis: layout.Vertical},
+		images:          newImageCache(),
 	}
 }
 
@@ -194,8 +199,15 @@ func (a *App) drainChannels() {
 			a.nav = newNavigationState()
 			a.refreshing = false
 			a.refreshDone = nil
+			// invalidate cached images since the library has changed
+			a.images.reset()
 		default:
 		}
+	}
+
+	// Drain all pending image fetch results.
+	if a.images.drain() {
+		a.w.Invalidate()
 	}
 }
 
@@ -780,7 +792,22 @@ func (a *App) renderMediaDetails(gtx C, media *MediaItem) D {
 		return a.renderPlayerStatus(gtx)
 	})
 
-	return a.renderSections(gtx, sections)
+	// Thumbnail
+	id := media.ID
+	sections = append(sections, spacerFn(dp8))
+	sections = append(sections, func(gtx C) D {
+		return a.renderThumb(gtx, id)
+	})
+
+	movieID := movie.ImdbID
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx C) D {
+			return a.renderFanartBg(gtx, movieID)
+		}),
+		layout.Stacked(func(gtx C) D {
+			return a.renderSections(gtx, sections)
+		}),
+	)
 }
 
 func (a *App) buildMovieBadges(movie *papi.Movie) []badge {
@@ -798,6 +825,78 @@ func (a *App) buildMovieBadges(movie *papi.Movie) []badge {
 		badges = append(badges, badge{text: ct, bg: colorBadgeBg})
 	}
 	return badges
+}
+
+// renderThumb displays the movie poster thumbnail.
+// If the image is cached it renders it immediately; otherwise it kicks off an
+// async fetch and shows a muted placeholder rectangle in the meantime.
+func (a *App) renderThumb(gtx C, movieID string) D {
+	const maxHeightDp = unit.Dp(300)
+	maxH := gtx.Dp(maxHeightDp)
+
+	// Constrain height to maxH while keeping full available width.
+	thumbConstraints := gtx.Constraints
+	if thumbConstraints.Max.Y > maxH {
+		thumbConstraints.Max.Y = maxH
+	}
+	thumbConstraints.Min = image.Point{}
+
+	if img, ok := a.images.get("thumb:" + movieID); ok {
+		if img == nil {
+			// Fetch failed permanently — render nothing.
+			return D{}
+		}
+		// Image is ready — render it.
+		gtx2 := gtx
+		gtx2.Constraints = thumbConstraints
+		return widget.Image{
+			Src:      paint.NewImageOp(img),
+			Fit:      widget.Contain,
+			Position: layout.NW,
+		}.Layout(gtx2)
+	}
+
+	// Not cached yet — kick off fetch if not already in flight.
+	a.images.fetch("thumb:"+movieID, func() (image.Image, error) {
+		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Thumb })
+	}, a.w)
+
+	// Placeholder: a muted-colour rectangle at the constrained size.
+	w := thumbConstraints.Max.X
+	h := maxH
+	// Estimate poster size (2:3 ratio) so placeholder doesn't take full width.
+	if w > h*2/3 {
+		w = h * 2 / 3
+	}
+	sz := image.Pt(w, h)
+	defer clip.Rect{Max: sz}.Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, colorMuted)
+	return D{Size: sz}
+}
+
+// renderFanartBg fills the right panel with the movie's fanart image covered by
+// a dark overlay so the text on top remains readable at TV viewing distance.
+func (a *App) renderFanartBg(gtx C, movieID string) D {
+	if img, ok := a.images.get("fanart:" + movieID); ok {
+		if img != nil {
+			// Draw fanart covering the full panel (cropped, cinema feel).
+			widget.Image{
+				Src:      paint.NewImageOp(img),
+				Fit:      widget.Cover,
+				Position: layout.Center,
+			}.Layout(gtx)
+			// Dark overlay to keep text readable at TV viewing distance.
+			defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, color.NRGBA{A: 0xb8})
+		}
+		return D{Size: gtx.Constraints.Max}
+	}
+
+	// Not cached yet — kick off fetch if not already in flight.
+	a.images.fetch("fanart:"+movieID, func() (image.Image, error) {
+		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Fanart })
+	}, a.w)
+	return D{Size: gtx.Constraints.Max}
 }
 
 // ── Right panel: season details ───────────────────────────────────────────────

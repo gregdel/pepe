@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -24,6 +26,7 @@ type APIClient struct {
 	client          *papi.Client
 	refreshInterval time.Duration
 	token           string
+	endpoint        string
 
 	mu           sync.RWMutex
 	movies       map[string]*papi.Movie
@@ -57,6 +60,7 @@ func newAPIClient(endpoint, token string, refreshInterval time.Duration, log *sl
 		client:          papiClient,
 		refreshInterval: refreshInterval,
 		token:           token,
+		endpoint:        endpoint,
 		movies:          make(map[string]*papi.Movie),
 		shows:           make(map[string]*papi.Show),
 		titleToMedia:    make(map[string]*MediaItem),
@@ -213,6 +217,55 @@ func (c *APIClient) getShow(id string) (*papi.Show, bool) {
 
 	show, ok := c.shows[id]
 	return show, ok
+}
+
+// fetchMovieImage fetches a movie image file selected by pick.
+func (c *APIClient) fetchMovieImage(id string, pick func(*papi.Movie) *papi.File) (image.Image, error) {
+	movie, ok := c.getMovie(id)
+	if !ok {
+		return nil, fmt.Errorf("movie %s not found", id)
+	}
+	f := pick(movie)
+	if f == nil {
+		return nil, fmt.Errorf("movie %s: image file not set", id)
+	}
+	return c.fetchImageFile(f)
+}
+
+// fetchShowImage fetches a show image file selected by pick.
+func (c *APIClient) fetchShowImage(id string, pick func(*papi.Show) *papi.File) (image.Image, error) {
+	show, ok := c.getShow(id)
+	if !ok {
+		return nil, fmt.Errorf("show %s not found", id)
+	}
+	f := pick(show)
+	if f == nil {
+		return nil, fmt.Errorf("show %s: image file not set", id)
+	}
+	return c.fetchImageFile(f)
+}
+
+// fetchImageFile is the shared HTTP GET + decode path for any papi image file.
+func (c *APIClient) fetchImageFile(f papi.Downloadable) (image.Image, error) {
+	rawURL, err := c.getDownloadURL(f)
+	if err != nil {
+		return nil, fmt.Errorf("image URL: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Auth-Token", c.getToken())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("image fetch returned %s", resp.Status)
+	}
+	img, _, err := image.Decode(resp.Body)
+	return img, err
 }
 
 func (c *APIClient) startPeriodicRefresh(stopCh <-chan struct{}) {
