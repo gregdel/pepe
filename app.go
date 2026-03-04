@@ -978,8 +978,13 @@ func (a *App) renderFanartBg(gtx C, movieID string) D {
 	}
 
 	// Not cached yet — kick off fetch if not already in flight.
+	// Apply a box blur so the background is soft and text stays readable.
 	a.images.fetch("fanart:"+movieID, func() (image.Image, error) {
-		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Fanart })
+		img, err := a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Fanart })
+		if err != nil || img == nil {
+			return img, err
+		}
+		return blurImage(img, 14), nil
 	}, a.w)
 	return D{Size: gtx.Constraints.Max}
 }
@@ -997,11 +1002,21 @@ func (a *App) renderThumbColumn(gtx C, movieID string) D {
 
 	if img, ok := a.images.get("thumb:" + movieID); ok {
 		if img == nil {
-			// Fetch failed permanently — render a translucent placeholder.
-			defer clip.Rect{Max: image.Pt(colW, colH)}.Push(gtx.Ops).Pop()
+			// Fetch failed permanently — render a translucent rounded placeholder.
+			defer clip.RRect{
+				Rect: image.Rectangle{Max: image.Pt(colW, colH)},
+				NE:   gtx.Dp(unit.Dp(8)), NW: gtx.Dp(unit.Dp(8)),
+				SE: gtx.Dp(unit.Dp(8)), SW: gtx.Dp(unit.Dp(8)),
+			}.Push(gtx.Ops).Pop()
 			paint.Fill(gtx.Ops, color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0x80})
 			return D{Size: image.Pt(colW, colH)}
 		}
+		// Clip poster to rounded corners before drawing.
+		defer clip.RRect{
+			Rect: image.Rectangle{Max: image.Pt(colW, colH)},
+			NE:   gtx.Dp(unit.Dp(8)), NW: gtx.Dp(unit.Dp(8)),
+			SE: gtx.Dp(unit.Dp(8)), SW: gtx.Dp(unit.Dp(8)),
+		}.Push(gtx.Ops).Pop()
 		return widget.Image{
 			Src:      paint.NewImageOp(img),
 			Fit:      widget.Contain,
@@ -1017,8 +1032,8 @@ func (a *App) renderThumbColumn(gtx C, movieID string) D {
 	// Loading placeholder: dim rounded rect at poster proportions.
 	defer clip.RRect{
 		Rect: image.Rectangle{Max: image.Pt(colW, colH)},
-		NE:   gtx.Dp(unit.Dp(4)), NW: gtx.Dp(unit.Dp(4)),
-		SE: gtx.Dp(unit.Dp(4)), SW: gtx.Dp(unit.Dp(4)),
+		NE:   gtx.Dp(unit.Dp(8)), NW: gtx.Dp(unit.Dp(8)),
+		SE: gtx.Dp(unit.Dp(8)), SW: gtx.Dp(unit.Dp(8)),
 	}.Push(gtx.Ops).Pop()
 	paint.Fill(gtx.Ops, color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0x80})
 	return D{Size: image.Pt(colW, colH)}
