@@ -6,11 +6,12 @@ import (
 	"log/slog"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	"gioui.org/app"
+	"gioui.org/unit"
 )
 
 func main() {
-	logFilePath := flag.String("logFile", "polochon-tui.log", "log file path")
+	logFilePath := flag.String("logFile", "polochon-gio.log", "log file path")
 	flag.Parse()
 
 	logFile, err := os.OpenFile(*logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -25,7 +26,7 @@ func main() {
 		}()
 	}
 
-	log := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{})).With("app", "polochon-tui")
+	log := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{})).With("app", "polochon-gio")
 
 	// Load configuration
 	config, err := loadConfig()
@@ -55,12 +56,17 @@ func main() {
 	defer close(stopCh)
 	go apiClient.startPeriodicRefresh(stopCh)
 
-	// Create and run the TUI
-	model := initialModel(apiClient)
-	p := tea.NewProgram(model, tea.WithAltScreen())
-
-	if _, err := p.Run(); err != nil {
-		log.Error("error running TUI", "error", err)
-		os.Exit(1)
-	}
+	// Launch Gio window in a goroutine (app.Main() must run on the main thread)
+	go func() {
+		w := new(app.Window)
+		w.Option(
+			app.Title("Polochon"),
+			app.Size(unit.Dp(1200), unit.Dp(700)),
+		)
+		if err := run(w, apiClient); err != nil {
+			log.Error("error running app", "error", err)
+		}
+		os.Exit(0)
+	}()
+	app.Main()
 }
