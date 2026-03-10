@@ -82,11 +82,14 @@ type App struct {
 	nav *NavigationState
 
 	// player
-	playerStatus  PlayerStatus
-	playerMode    PlayerMode
-	playerError   string
-	playerCommand string
-	playerDone    chan error // goroutine → event loop
+	playerStatus    PlayerStatus
+	playerMode      PlayerMode
+	playerError     string
+	playerCommand   string
+	playerDone      chan error // goroutine → event loop
+	resumePos       map[string]float64 // mediaKey -> last position (seconds)
+	ipcEvents       chan ipcEvent       // nil when idle
+	currentMediaKey string
 
 	// library refresh
 	refreshing  bool
@@ -126,6 +129,7 @@ func newApp(w *app.Window, client *APIClient, sseCh <-chan struct{}) *App {
 		showCount:       snapshot.showCount,
 		nav:             newNavigationState(),
 		playerStatus:    PlayerStatusIdle,
+		resumePos:       make(map[string]float64),
 		keyTag:          keyTag,
 		w:               w,
 		th:              th,
@@ -191,6 +195,19 @@ func (a *App) drainChannels() {
 				a.playerError = ""
 			}
 			a.playerDone = nil
+			a.ipcEvents = nil
+		default:
+		}
+	}
+
+	if a.ipcEvents != nil {
+		select {
+		case ev := <-a.ipcEvents:
+			if ev.pos < 0 {
+				delete(a.resumePos, ev.mediaKey)
+			} else {
+				a.resumePos[ev.mediaKey] = ev.pos
+			}
 		default:
 		}
 	}
@@ -384,23 +401,27 @@ func (a *App) toggleSection() {
 // ── Player ────────────────────────────────────────────────────────────────────
 
 func (a *App) launchMovie(media *MediaItem) {
-	_, execArgs, mode, ok := a.buildMovieCommand(media)
+	_, mediaKey, sockPath, execArgs, mode, ok := a.buildMovieCommand(media)
 	if !ok {
 		a.playerStatus = PlayerStatusError
 		a.playerError = "failed to build movie command"
 		return
 	}
+	a.currentMediaKey = mediaKey
 	a.startPlayer(execArgs, mode)
+	a.ipcEvents = startIPC(sockPath, mediaKey, a.w)
 }
 
 func (a *App) launchEpisode(node *DynamicNode) {
-	_, execArgs, mode, ok := a.buildEpisodeCommand(node)
+	_, mediaKey, sockPath, execArgs, mode, ok := a.buildEpisodeCommand(node)
 	if !ok {
 		a.playerStatus = PlayerStatusError
 		a.playerError = "failed to build episode command"
 		return
 	}
+	a.currentMediaKey = mediaKey
 	a.startPlayer(execArgs, mode)
+	a.ipcEvents = startIPC(sockPath, mediaKey, a.w)
 }
 
 func (a *App) startPlayer(execArgs []string, mode PlayerMode) {
@@ -862,6 +883,15 @@ func (a *App) renderMediaDetails(gtx C, media *MediaItem) D {
 		})
 	}
 
+	// Resume position
+	movieKey := "movie:" + movie.ImdbID
+	if pos, ok := a.resumePos[movieKey]; ok && pos > 30 {
+		p := pos
+		sections = append(sections, func(gtx C) D {
+			return a.renderKV(gtx, "Resume", formatResumePos(p))
+		})
+	}
+
 	// Player status
 	sections = append(sections, spacerFn(dp12))
 	sections = append(sections, func(gtx C) D {
@@ -936,52 +966,6 @@ func (a *App) buildMovieBadges(movie *papi.Movie) []badge {
 	return badges
 }
 
-// renderThumb displays the movie poster thumbnail.
-// If the image is cached it renders it immediately; otherwise it kicks off an
-// async fetch and shows a muted placeholder rectangle in the meantime.
-func (a *App) renderThumb(gtx C, movieID string) D {
-	const maxHeightDp = unit.Dp(300)
-	maxH := gtx.Dp(maxHeightDp)
-
-	// Constrain height to maxH while keeping full available width.
-	thumbConstraints := gtx.Constraints
-	if thumbConstraints.Max.Y > maxH {
-		thumbConstraints.Max.Y = maxH
-	}
-	thumbConstraints.Min = image.Point{}
-
-	if img, ok := a.images.get("thumb:" + movieID); ok {
-		if img == nil {
-			// Fetch failed permanently — render nothing.
-			return D{}
-		}
-		// Image is ready — render it.
-		gtx2 := gtx
-		gtx2.Constraints = thumbConstraints
-		return widget.Image{
-			Src:      paint.NewImageOp(img),
-			Fit:      widget.Contain,
-			Position: layout.NW,
-		}.Layout(gtx2)
-	}
-
-	// Not cached yet — kick off fetch if not already in flight.
-	a.images.fetch("thumb:"+movieID, func() (image.Image, error) {
-		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Thumb })
-	}, a.w)
-
-	// Placeholder: a muted-colour rectangle at the constrained size.
-	w := thumbConstraints.Max.X
-	h := maxH
-	// Estimate poster size (2:3 ratio) so placeholder doesn't take full width.
-	if w > h*2/3 {
-		w = h * 2 / 3
-	}
-	sz := image.Pt(w, h)
-	defer clip.Rect{Max: sz}.Push(gtx.Ops).Pop()
-	paint.Fill(gtx.Ops, colorMuted)
-	return D{Size: sz}
-}
 
 // renderGlassCard draws a semi-transparent dark panel with rounded corners and
 // a subtle white border, then renders content inside it. This gives a
@@ -1203,6 +1187,15 @@ func (a *App) renderEpisodeDetails(gtx C, episodeNode *DynamicNode) D {
 		plot := ep.Plot
 		sections = append(sections, func(gtx C) D {
 			return a.renderMultiline(gtx, plot)
+		})
+	}
+
+	// Resume position
+	epMediaKey := fmt.Sprintf("episode:%s:%d:%d", episodeNode.ShowID, ep.Season, ep.Episode)
+	if pos, ok := a.resumePos[epMediaKey]; ok && pos > 30 {
+		p := pos
+		sections = append(sections, func(gtx C) D {
+			return a.renderKV(gtx, "Resume", formatResumePos(p))
 		})
 	}
 
@@ -1513,9 +1506,12 @@ func detectPlayerMode() PlayerMode {
 	return PlayerModeKMS
 }
 
-func buildMPVArgs(title, videoURL string, subtitleURLs []string, mode PlayerMode) []string {
+func buildMPVArgs(title, videoURL string, subtitleURLs []string, mode PlayerMode, startPos float64, sockPath string) []string {
 	args := []string{"mpv"}
 	args = append(args, "--http-header-fields=X-Auth-Token: $POLOCHON_TOKEN")
+	if startPos > 30 {
+		args = append(args, fmt.Sprintf("--start=%d", int(startPos)))
+	}
 	if mode == PlayerModeKMS {
 		args = append(args, "--vo=gpu", "--gpu-context=drm", "--opengl-es=yes", "--fs", "--no-border", "--ontop")
 	}
@@ -1527,6 +1523,7 @@ func buildMPVArgs(title, videoURL string, subtitleURLs []string, mode PlayerMode
 			args = append(args, "--sub-file="+sub)
 		}
 	}
+	args = append(args, "--input-ipc-server="+sockPath)
 	args = append(args, videoURL)
 	return args
 }
@@ -1574,14 +1571,14 @@ func replaceMpvToken(args []string, token string) []string {
 	return out
 }
 
-func (a *App) buildMovieCommand(media *MediaItem) (string, []string, PlayerMode, bool) {
+func (a *App) buildMovieCommand(media *MediaItem) (string, string, string, []string, PlayerMode, bool) {
 	movie, ok := a.client.getMovie(media.ID)
 	if !ok {
-		return "", nil, "", false
+		return "", "", "", nil, "", false
 	}
 	videoURL, err := a.client.getDownloadURL(movie)
 	if err != nil {
-		return "", nil, "", false
+		return "", "", "", nil, "", false
 	}
 	videoURL = addQueryParam(videoURL, "title", media.Title)
 
@@ -1597,24 +1594,28 @@ func (a *App) buildMovieCommand(media *MediaItem) (string, []string, PlayerMode,
 		subs = append(subs, addQueryParam(u, "lang", string(sub.Lang)))
 	}
 
+	mediaKey := "movie:" + movie.ImdbID
+	sockPath := fmt.Sprintf("/tmp/polochon-mpv-%d.sock", os.Getpid())
+	startPos := a.resumePos[mediaKey]
 	mode := detectPlayerMode()
-	execArgs := buildMPVArgs(media.Title, videoURL, subs, mode)
+	execArgs := buildMPVArgs(media.Title, videoURL, subs, mode, startPos, sockPath)
 	execArgs = replaceMpvToken(execArgs, a.client.getToken())
-	return buildMPVCommand(execArgs), execArgs, mode, true
+	return buildMPVCommand(execArgs), mediaKey, sockPath, execArgs, mode, true
 }
 
-func (a *App) buildEpisodeCommand(node *DynamicNode) (string, []string, PlayerMode, bool) {
+func (a *App) buildEpisodeCommand(node *DynamicNode) (string, string, string, []string, PlayerMode, bool) {
 	if node == nil || node.Episode == nil {
-		return "", nil, "", false
+		return "", "", "", nil, "", false
 	}
-	videoURL, err := a.client.getDownloadURL(node.Episode)
+	ep := node.Episode
+	videoURL, err := a.client.getDownloadURL(ep)
 	if err != nil {
-		return "", nil, "", false
+		return "", "", "", nil, "", false
 	}
 	videoURL = addQueryParam(videoURL, "title", node.Label)
 
 	var subs []string
-	for _, sub := range node.Episode.Subtitles {
+	for _, sub := range ep.Subtitles {
 		if sub == nil || sub.Embedded {
 			continue
 		}
@@ -1625,8 +1626,11 @@ func (a *App) buildEpisodeCommand(node *DynamicNode) (string, []string, PlayerMo
 		subs = append(subs, addQueryParam(u, "lang", string(sub.Lang)))
 	}
 
+	mediaKey := fmt.Sprintf("episode:%s:%d:%d", node.ShowID, ep.Season, ep.Episode)
+	sockPath := fmt.Sprintf("/tmp/polochon-mpv-%d.sock", os.Getpid())
+	startPos := a.resumePos[mediaKey]
 	mode := detectPlayerMode()
-	execArgs := buildMPVArgs(node.Label, videoURL, subs, mode)
+	execArgs := buildMPVArgs(node.Label, videoURL, subs, mode, startPos, sockPath)
 	execArgs = replaceMpvToken(execArgs, a.client.getToken())
-	return buildMPVCommand(execArgs), execArgs, mode, true
+	return buildMPVCommand(execArgs), mediaKey, sockPath, execArgs, mode, true
 }
