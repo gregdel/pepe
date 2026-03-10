@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -39,22 +40,23 @@ func main() {
 	}
 
 	// Create API client
-	apiClient, err := newAPIClient(config.PolochonURL, config.Token, config.RefreshInterval, log)
+	apiClient, err := newAPIClient(config.PolochonURL, config.Token, log)
 	if err != nil {
 		log.Error("failed to create API client", "error", err)
 		os.Exit(1)
 	}
 
-	// Initial fetch
+	// Subscribe to SSE before the initial fetch so no change event is missed.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sseCh := apiClient.Events(ctx)
+
+	// Initial library load
 	if err := apiClient.fetchLibrary(); err != nil {
 		log.Error("failed to fetch library", "error", err)
 		os.Exit(1)
 	}
-
-	// Start background refresh
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-	go apiClient.startPeriodicRefresh(stopCh)
 
 	// Launch Gio window in a goroutine (app.Main() must run on the main thread)
 	go func() {
@@ -63,7 +65,7 @@ func main() {
 			app.Title("Polochon"),
 			app.Size(unit.Dp(1200), unit.Dp(700)),
 		)
-		if err := run(w, apiClient); err != nil {
+		if err := run(w, apiClient, sseCh); err != nil {
 			log.Error("error running app", "error", err)
 		}
 		os.Exit(0)

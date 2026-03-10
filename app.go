@@ -91,6 +91,7 @@ type App struct {
 	// library refresh
 	refreshing  bool
 	refreshDone chan LibrarySnapshot // goroutine → event loop
+	sseCh       <-chan struct{}      // SSE events from server
 
 	// image cache (thumbs, fanarts, posters — all media types)
 	images *imageCache
@@ -110,7 +111,7 @@ type App struct {
 	th *material.Theme
 }
 
-func newApp(w *app.Window, client *APIClient) *App {
+func newApp(w *app.Window, client *APIClient, sseCh <-chan struct{}) *App {
 	snapshot := client.getSnapshot()
 	th := material.NewTheme()
 
@@ -133,13 +134,14 @@ func newApp(w *app.Window, client *APIClient) *App {
 		playerLinesList: layout.List{Axis: layout.Vertical},
 		images:          newImageCache(),
 		nfos:            newNFOCache(),
+		sseCh:           sseCh,
 	}
 }
 
 // ── Main event loop ───────────────────────────────────────────────────────────
 
-func run(w *app.Window, client *APIClient) error {
-	a := newApp(w, client)
+func run(w *app.Window, client *APIClient, sseCh <-chan struct{}) error {
+	a := newApp(w, client, sseCh)
 	var ops op.Ops
 	requestFocus := true // grab focus on the very first frame
 
@@ -207,6 +209,18 @@ func (a *App) drainChannels() {
 			// invalidate cached images since the library has changed
 			a.images.reset()
 			a.nfos.reset()
+		default:
+		}
+	}
+
+	// Drain SSE events: each signal means the server library changed.
+	if a.sseCh != nil {
+		select {
+		case _, ok := <-a.sseCh:
+			if ok {
+				a.client.log.Info("SSE: library changed, triggering refresh")
+				a.startRefresh()
+			}
 		default:
 		}
 	}

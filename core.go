@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"log/slog"
@@ -8,7 +9,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	polochon "github.com/odwrtw/polochon/lib"
 	"github.com/odwrtw/polochon/lib/nfo"
@@ -23,12 +23,11 @@ type MediaItem struct {
 	Type  string // "movie" or "show"
 }
 
-// APIClient wraps the papi client with caching and periodic refresh
+// APIClient wraps the papi client with caching
 type APIClient struct {
-	client          *papi.Client
-	refreshInterval time.Duration
-	token           string
-	endpoint        string
+	client   *papi.Client
+	token    string
+	endpoint string
 
 	mu           sync.RWMutex
 	movies       map[string]*papi.Movie
@@ -50,7 +49,7 @@ type LibrarySnapshot struct {
 	showCount    int
 }
 
-func newAPIClient(endpoint, token string, refreshInterval time.Duration, log *slog.Logger) (*APIClient, error) {
+func newAPIClient(endpoint, token string, log *slog.Logger) (*APIClient, error) {
 	papiClient, err := papi.New(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create papi client: %w", err)
@@ -59,14 +58,13 @@ func newAPIClient(endpoint, token string, refreshInterval time.Duration, log *sl
 	papiClient.SetToken(token)
 
 	c := &APIClient{
-		client:          papiClient,
-		refreshInterval: refreshInterval,
-		token:           token,
-		endpoint:        endpoint,
-		movies:          make(map[string]*papi.Movie),
-		shows:           make(map[string]*papi.Show),
-		titleToMedia:    make(map[string]*MediaItem),
-		log:             log,
+		client:       papiClient,
+		token:        token,
+		endpoint:     endpoint,
+		movies:       make(map[string]*papi.Movie),
+		shows:        make(map[string]*papi.Show),
+		titleToMedia: make(map[string]*MediaItem),
+		log:          log,
 	}
 
 	return c, nil
@@ -310,28 +308,17 @@ func (c *APIClient) fetchMovieNFO(id string) (*polochon.Movie, error) {
 	return m, nil
 }
 
-func (c *APIClient) startPeriodicRefresh(stopCh <-chan struct{}) {
-	ticker := time.NewTicker(c.refreshInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if err := c.fetchLibrary(); err != nil {
-				c.log.Error("failed to refresh library", "error", err)
-			}
-		case <-stopCh:
-			c.log.Info("stopping periodic refresh")
-			return
-		}
-	}
+// Events returns a channel that emits a signal whenever the server reports a
+// library change via SSE.  The channel is closed when ctx is cancelled.
+// Internally the papi client reconnects with exponential backoff.
+func (c *APIClient) Events(ctx context.Context) <-chan struct{} {
+	return c.client.Events(ctx)
 }
 
 // Config holds the application configuration
 type Config struct {
-	PolochonURL     string
-	Token           string
-	RefreshInterval time.Duration
+	PolochonURL string
+	Token       string
 }
 
 func loadConfig() (*Config, error) {
@@ -345,18 +332,8 @@ func loadConfig() (*Config, error) {
 		return nil, fmt.Errorf("POLOCHON_TOKEN environment variable is required")
 	}
 
-	refreshInterval := 5 * time.Minute
-	if intervalStr := os.Getenv("POLOCHON_REFRESH_INTERVAL"); intervalStr != "" {
-		interval, err := time.ParseDuration(intervalStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid POLOCHON_REFRESH_INTERVAL: %w", err)
-		}
-		refreshInterval = interval
-	}
-
 	return &Config{
-		PolochonURL:     url,
-		Token:           token,
-		RefreshInterval: refreshInterval,
+		PolochonURL: url,
+		Token:       token,
 	}, nil
 }
