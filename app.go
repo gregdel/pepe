@@ -32,12 +32,12 @@ import (
 
 var (
 	colorBg         = color.NRGBA{R: 0x1c, G: 0x1c, B: 0x1c, A: 0xff}
-	colorFg         = color.NRGBA{R: 0xd0, G: 0xd0, B: 0xd0, A: 0xff}
+	colorFg         = color.NRGBA{R: 0xe0, G: 0xe0, B: 0xe0, A: 0xff}
 	colorSubtle     = color.NRGBA{R: 0xa8, G: 0xa8, B: 0xa8, A: 0xff} // secondary text on glass card
 	colorPrimary    = color.NRGBA{R: 0x87, G: 0x5f, B: 0xff, A: 0xff} // 256-colour 99  (purple)
-	colorMuted      = color.NRGBA{R: 0x60, G: 0x60, B: 0x60, A: 0xff} // 256-colour 240 (grey)
+	colorMuted      = color.NRGBA{R: 0x88, G: 0x88, B: 0x88, A: 0xff} // help bar, muted text
 	colorTerminal   = color.NRGBA{R: 0xff, G: 0x69, B: 0xb4, A: 0xff} // 256-colour 212 (pink)
-	colorSelectedBg = color.NRGBA{R: 0x00, G: 0x5f, B: 0xaf, A: 0xff} // 256-colour 25  (blue bg)
+	colorSelectedBg = color.NRGBA{R: 0x15, G: 0x65, B: 0xc0, A: 0xff} // bright blue, 7.8:1 contrast
 	colorSelectedFg = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
 	colorDivider    = color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xff}
 
@@ -446,17 +446,19 @@ const (
 	rightFlex = 0.62
 
 	// Font sizes — calibrated for 10-foot / TV viewing distance at 1080p.
-	sp      = unit.Sp(20) // default body text (KV rows, help, nav)
-	spBody  = unit.Sp(22) // plot, subtitles, multi-line text
-	spTitle = unit.Sp(36) // movie / show title
+	sp      = unit.Sp(20) // secondary/meta/KV rows
+	spBody  = unit.Sp(24) // plot, subtitles, multi-line text
+	spTitle = unit.Sp(40) // hero title
 	spMeta  = unit.Sp(20) // year · runtime · genres line
-	spBadge = unit.Sp(16) // tech badge pills
+	spBadge = unit.Sp(18) // tech badge pills
+	spHelp  = unit.Sp(18) // help bar
 
 	// Spacing
 	dp1  = unit.Dp(1)
 	dp4  = unit.Dp(4)
 	dp8  = unit.Dp(8)
 	dp12 = unit.Dp(12)
+	dp14 = unit.Dp(14) // nav item inset
 	dp16 = unit.Dp(16)
 	dp20 = unit.Dp(20)
 	dp24 = unit.Dp(24)
@@ -510,7 +512,7 @@ func (a *App) layoutPanelTitle(gtx C) D {
 		}
 	}
 	return layout.UniformInset(dp8).Layout(gtx, func(gtx C) D {
-		lbl := material.Label(a.th, unit.Sp(16), title)
+		lbl := material.Label(a.th, sp, title)
 		lbl.Color = colorPrimary
 		lbl.Font.Weight = font.Bold
 		return lbl.Layout(gtx)
@@ -518,7 +520,7 @@ func (a *App) layoutPanelTitle(gtx C) D {
 }
 
 func (a *App) layoutLeftList(gtx C) D {
-	inset := layout.Inset{Left: dp8, Right: dp8, Top: dp4, Bottom: dp4}
+	inset := layout.Inset{Left: dp14, Right: dp14, Top: dp8, Bottom: dp8}
 
 	if a.nav.isAtRoot() {
 		items := []struct {
@@ -702,7 +704,7 @@ func (a *App) layoutRightContent(gtx C) D {
 
 func (a *App) renderSectionInfo(gtx C, name string, count int) D {
 	lines := []labelLine{
-		{text: name, color: colorPrimary, size: unit.Sp(18), weight: font.Bold},
+		{text: name, color: colorPrimary, size: sp, weight: font.Bold},
 		{text: "", color: colorFg, size: sp},
 		{text: fmt.Sprintf("Total items: %d", count), color: colorFg, size: sp},
 		{text: "", color: colorFg, size: sp},
@@ -718,7 +720,7 @@ func (a *App) renderNodeChildren(gtx C, node *RadixNode) D {
 	selectedPrefix := currentPath + node.Label
 
 	var lines []labelLine
-	lines = append(lines, labelLine{text: "Children", color: colorPrimary, size: unit.Sp(16), weight: font.Bold})
+	lines = append(lines, labelLine{text: "Children", color: colorPrimary, size: sp, weight: font.Bold})
 	lines = append(lines, labelLine{text: ""})
 	lines = append(lines, labelLine{text: fmt.Sprintf("%d items in this group:", node.SubtreeCount), color: colorFg, size: sp})
 	lines = append(lines, labelLine{text: ""})
@@ -1095,7 +1097,7 @@ func (a *App) renderThumbColumn(gtx C, movieID string) D {
 
 func (a *App) renderSeasonDetails(gtx C, season *DynamicNode) D {
 	var lines []labelLine
-	lines = append(lines, labelLine{text: season.Label, color: colorPrimary, size: unit.Sp(16), weight: font.Bold})
+	lines = append(lines, labelLine{text: season.Label, color: colorPrimary, size: sp, weight: font.Bold})
 	lines = append(lines, labelLine{text: ""})
 	lines = append(lines, labelLine{text: fmt.Sprintf("%d episodes", len(season.Children)), color: colorFg, size: sp})
 	lines = append(lines, labelLine{text: ""})
@@ -1145,7 +1147,7 @@ func (a *App) renderEpisodeDetails(gtx C, episodeNode *DynamicNode) D {
 	var sections []func(C) D
 
 	sections = append(sections, func(gtx C) D {
-		lbl := material.Label(a.th, unit.Sp(18), title)
+		lbl := material.Label(a.th, sp, title)
 		lbl.Color = colorFg
 		lbl.Font.Weight = font.Bold
 		return lbl.Layout(gtx)
@@ -1289,7 +1291,7 @@ func (a *App) layoutHelp(gtx C) D {
 	}
 
 	return layout.Inset{Left: dp8, Right: dp8, Top: dp4, Bottom: dp4}.Layout(gtx, func(gtx C) D {
-		lbl := material.Label(a.th, unit.Sp(12), helpText)
+		lbl := material.Label(a.th, spHelp, helpText)
 		lbl.Color = colorMuted
 		return lbl.Layout(gtx)
 	})
