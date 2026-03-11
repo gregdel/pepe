@@ -232,6 +232,18 @@ func (c *APIClient) fetchMovieImage(id string, pick func(*papi.Movie) *papi.File
 	return c.fetchImageFile(f)
 }
 
+// fetchShowImage fetches a show image file selected by pick.
+func (c *APIClient) fetchShowImage(id string, pick func(*papi.Show) *papi.File) (image.Image, error) {
+	show, ok := c.getShow(id)
+	if !ok {
+		return nil, fmt.Errorf("show %s not found", id)
+	}
+	f := pick(show)
+	if f == nil {
+		return nil, fmt.Errorf("show %s: image file not set", id)
+	}
+	return c.fetchImageFile(f)
+}
 
 // fetchImageFile is the shared HTTP GET + decode path for any papi image file.
 func (c *APIClient) fetchImageFile(f papi.Downloadable) (image.Image, error) {

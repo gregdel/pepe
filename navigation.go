@@ -23,6 +23,7 @@ type NavigationState struct {
 	cursor       int            // Current cursor position in the children list
 	inDynamicNav bool           // True when navigating seasons/episodes
 	dynamicTitle string         // Show title for dynamic navigation
+	dynamicShowID string        // ImdbID of show being navigated
 }
 
 func newNavigationState() *NavigationState {
@@ -32,7 +33,8 @@ func newNavigationState() *NavigationState {
 		dynamicPath:  []*DynamicNode{},
 		cursor:       0,
 		inDynamicNav: false,
-		dynamicTitle: "",
+		dynamicTitle:  "",
+		dynamicShowID: "",
 	}
 }
 
@@ -80,6 +82,7 @@ func (n *NavigationState) goBack() {
 			if len(n.dynamicPath) == 0 {
 				n.inDynamicNav = false
 				n.dynamicTitle = ""
+				n.dynamicShowID = ""
 			}
 		}
 	} else {
@@ -111,6 +114,7 @@ func (n *NavigationState) resetToSection(section Section, rootNode *RadixNode) {
 	n.inDynamicNav = false
 	n.dynamicPath = []*DynamicNode{}
 	n.dynamicTitle = ""
+	n.dynamicShowID = ""
 }
 
 // moveCursorUp moves the cursor up (decrements), bounded at 0
@@ -188,7 +192,7 @@ func (n *NavigationState) getSelectedDynamicChild() *DynamicNode {
 }
 
 // enterDynamicNav enters dynamic navigation mode with season nodes
-func (n *NavigationState) enterDynamicNav(seasonNodes []*DynamicNode, showTitle string) {
+func (n *NavigationState) enterDynamicNav(seasonNodes []*DynamicNode, showTitle, showID string) {
 	// Create a virtual root node for seasons
 	root := &DynamicNode{
 		Type:         DynamicNodeSeason,
@@ -201,6 +205,7 @@ func (n *NavigationState) enterDynamicNav(seasonNodes []*DynamicNode, showTitle 
 	n.dynamicPath = []*DynamicNode{root}
 	n.cursor = 0
 	n.dynamicTitle = showTitle
+	n.dynamicShowID = showID
 }
 
 // goForwardDynamic enters the selected dynamic child

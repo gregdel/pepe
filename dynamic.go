@@ -62,6 +62,7 @@ func createSeasonNodes(show *papi.Show) []*DynamicNode {
 		node := &DynamicNode{
 			Type:         DynamicNodeSeason,
 			Label:        fmt.Sprintf("Season %d", num),
+			ShowID:       show.ImdbID,
 			Children:     episodeNodes,
 			SubtreeCount: len(episodeNodes),
 		}

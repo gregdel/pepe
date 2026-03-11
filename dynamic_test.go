@@ -138,7 +138,7 @@ func TestDynamicNodeNavigation(t *testing.T) {
 	}
 
 	// Enter dynamic navigation
-	nav.enterDynamicNav(seasonNodes, "Breaking Bad")
+	nav.enterDynamicNav(seasonNodes, "Breaking Bad", "tt0903747")
 
 	if !nav.inDynamicNav {
 		t.Error("Should be in dynamic nav mode")

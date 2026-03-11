@@ -378,7 +378,7 @@ func (a *App) navigateRight() {
 			}
 			seasonNodes := createSeasonNodes(show)
 			if len(seasonNodes) > 0 {
-				a.nav.enterDynamicNav(seasonNodes, show.Title)
+				a.nav.enterDynamicNav(seasonNodes, show.Title, show.ImdbID)
 			}
 			return
 		}
@@ -715,7 +715,12 @@ func (a *App) layoutRightContent(gtx C) D {
 		if !ok {
 			return a.renderText(gtx, colorMuted, "Media details not found")
 		}
-		return a.renderMediaDetails(gtx, media)
+		switch media.Type {
+		case "show":
+			return a.renderShowDetails(gtx, media)
+		default:
+			return a.renderMediaDetails(gtx, media)
+		}
 	}
 	return a.renderNodeChildren(gtx, child)
 }
@@ -961,6 +966,168 @@ func (a *App) buildMovieBadges(movie *papi.Movie) []badge {
 	return badges
 }
 
+// ── Right panel: show details ─────────────────────────────────────────────────
+
+func (a *App) renderShowDetails(gtx C, media *MediaItem) D {
+	show, ok := a.client.getShow(media.ID)
+	if !ok {
+		return a.renderText(gtx, colorMuted, "Show details not available")
+	}
+
+	showID := show.ImdbID
+
+	var sections []func(C) D
+
+	// Title — large, bold
+	sections = append(sections, func(gtx C) D {
+		lbl := material.Label(a.th, spTitle, media.Title)
+		lbl.Color = colorFg
+		lbl.Font.Weight = font.Bold
+		lbl.MaxLines = 0
+		return lbl.Layout(gtx)
+	})
+	sections = append(sections, spacerFn(dp8))
+
+	// Meta line: "Year · Rating"
+	if metaLine := buildShowMetaLine(show.Year, float64(show.Rating)); metaLine != "" {
+		sections = append(sections, func(gtx C) D {
+			lbl := material.Label(a.th, spMeta, metaLine)
+			lbl.Color = colorSubtle
+			return lbl.Layout(gtx)
+		})
+		sections = append(sections, spacerFn(dp12))
+	}
+
+	// Plot
+	if show.Plot != "" {
+		p := show.Plot
+		sections = append(sections, func(gtx C) D {
+			return a.renderBody(gtx, p)
+		})
+		sections = append(sections, spacerFn(dp16))
+	}
+
+	// Season/episode counts
+	seasonCount := len(show.Seasons)
+	episodeCount := 0
+	for _, s := range show.Seasons {
+		episodeCount += len(s.Episodes)
+	}
+	sections = append(sections, func(gtx C) D {
+		return a.renderKV(gtx, "Seasons", fmt.Sprintf("%d", seasonCount))
+	})
+	sections = append(sections, func(gtx C) D {
+		return a.renderKV(gtx, "Episodes", fmt.Sprintf("%d", episodeCount))
+	})
+
+	// FirstAired
+	if show.FirstAired != nil {
+		aired := show.FirstAired.Format("2006-01-02")
+		sections = append(sections, func(gtx C) D {
+			return a.renderKV(gtx, "First Aired", aired)
+		})
+	}
+
+	// Two-column layout: [poster | info] floating on a glass card over the fanart.
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx C) D {
+			return a.renderShowFanartBg(gtx, showID)
+		}),
+		layout.Stacked(func(gtx C) D {
+			return a.renderGlassCard(gtx, func(gtx C) D {
+				return layout.Inset{
+					Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
+				}.Layout(gtx, func(gtx C) D {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+						// Left column: poster
+						layout.Rigid(func(gtx C) D {
+							return a.renderShowPosterColumn(gtx, showID)
+						}),
+						layout.Rigid(layout.Spacer{Width: dp24}.Layout),
+						// Right column: scrollable info
+						layout.Flexed(1, func(gtx C) D {
+							return a.renderSections(gtx, sections)
+						}),
+					)
+				})
+			})
+		}),
+	)
+}
+
+func buildShowMetaLine(year int, rating float64) string {
+	var parts []string
+	if year > 0 {
+		parts = append(parts, fmt.Sprintf("%d", year))
+	}
+	if rating > 0 {
+		parts = append(parts, fmt.Sprintf("%.1f", rating))
+	}
+	return strings.Join(parts, "  ·  ")
+}
+
+func (a *App) renderShowFanartBg(gtx C, showID string) D {
+	if img, ok := a.images.get("fanart:" + showID); ok {
+		if img != nil {
+			widget.Image{
+				Src:      paint.NewImageOp(img),
+				Fit:      widget.Cover,
+				Position: layout.Center,
+			}.Layout(gtx)
+			defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, color.NRGBA{A: 0x40})
+		}
+		return D{Size: gtx.Constraints.Max}
+	}
+
+	a.images.fetch("fanart:"+showID, func() (image.Image, error) {
+		return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Fanart })
+	}, a.w)
+	return D{Size: gtx.Constraints.Max}
+}
+
+func (a *App) renderShowPosterColumn(gtx C, showID string) D {
+	const colWidthDp = unit.Dp(200)
+	colW := gtx.Dp(colWidthDp)
+	colH := colW * 3 / 2 // 2:3 poster ratio
+
+	gtx2 := gtx
+	gtx2.Constraints = layout.Exact(image.Pt(colW, colH))
+
+	if img, ok := a.images.get("poster:" + showID); ok {
+		if img == nil {
+			defer clip.RRect{
+				Rect: image.Rectangle{Max: image.Pt(colW, colH)},
+				NE:   gtx.Dp(unit.Dp(8)), NW: gtx.Dp(unit.Dp(8)),
+				SE:   gtx.Dp(unit.Dp(8)), SW: gtx.Dp(unit.Dp(8)),
+			}.Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0x80})
+			return D{Size: image.Pt(colW, colH)}
+		}
+		defer clip.RRect{
+			Rect: image.Rectangle{Max: image.Pt(colW, colH)},
+			NE:   gtx.Dp(unit.Dp(8)), NW: gtx.Dp(unit.Dp(8)),
+			SE:   gtx.Dp(unit.Dp(8)), SW: gtx.Dp(unit.Dp(8)),
+		}.Push(gtx.Ops).Pop()
+		return widget.Image{
+			Src:      paint.NewImageOp(img),
+			Fit:      widget.Contain,
+			Position: layout.N,
+		}.Layout(gtx2)
+	}
+
+	a.images.fetch("poster:"+showID, func() (image.Image, error) {
+		return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Poster })
+	}, a.w)
+
+	defer clip.RRect{
+		Rect: image.Rectangle{Max: image.Pt(colW, colH)},
+		NE:   gtx.Dp(unit.Dp(8)), NW: gtx.Dp(unit.Dp(8)),
+		SE:   gtx.Dp(unit.Dp(8)), SW: gtx.Dp(unit.Dp(8)),
+	}.Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0x80})
+	return D{Size: image.Pt(colW, colH)}
+}
 
 // renderGlassCard draws a full-bleed semi-transparent dark overlay over the
 // fanart background, then renders content inside it. Edge-to-edge with no
@@ -1051,24 +1218,78 @@ func (a *App) renderThumbColumn(gtx C, movieID string) D {
 // ── Right panel: season details ───────────────────────────────────────────────
 
 func (a *App) renderSeasonDetails(gtx C, season *DynamicNode) D {
-	var lines []labelLine
-	lines = append(lines, labelLine{text: season.Label, color: colorPrimary, size: sp, weight: font.Bold})
-	lines = append(lines, labelLine{text: ""})
-	lines = append(lines, labelLine{text: fmt.Sprintf("%d episodes", len(season.Children)), color: colorFg, size: sp})
-	lines = append(lines, labelLine{text: ""})
+	showID := a.nav.dynamicShowID
 
-	maxShow := 20
+	var sections []func(C) D
+
+	// Season label — large, bold
+	sections = append(sections, func(gtx C) D {
+		lbl := material.Label(a.th, spTitle, season.Label)
+		lbl.Color = colorFg
+		lbl.Font.Weight = font.Bold
+		return lbl.Layout(gtx)
+	})
+	sections = append(sections, spacerFn(dp8))
+
+	// Show title (muted)
+	if a.nav.dynamicTitle != "" {
+		t := a.nav.dynamicTitle
+		sections = append(sections, func(gtx C) D {
+			lbl := material.Label(a.th, spMeta, t)
+			lbl.Color = colorSubtle
+			return lbl.Layout(gtx)
+		})
+		sections = append(sections, spacerFn(dp12))
+	}
+
+	// Episode count
+	sections = append(sections, func(gtx C) D {
+		return a.renderKV(gtx, "Episodes", fmt.Sprintf("%d", len(season.Children)))
+	})
+	sections = append(sections, spacerFn(dp12))
+
+	// Episode listing
+	maxShow := 30
 	for i, ep := range season.Children {
 		if i >= maxShow {
-			lines = append(lines, labelLine{
-				text:  fmt.Sprintf("… and %d more", len(season.Children)-maxShow),
-				color: colorMuted, size: sp,
+			remaining := len(season.Children) - maxShow
+			sections = append(sections, func(gtx C) D {
+				lbl := material.Label(a.th, sp, fmt.Sprintf("… and %d more", remaining))
+				lbl.Color = colorMuted
+				return lbl.Layout(gtx)
 			})
 			break
 		}
-		lines = append(lines, labelLine{text: "  " + ep.Label, color: colorFg, size: sp})
+		label := ep.Label
+		sections = append(sections, func(gtx C) D {
+			lbl := material.Label(a.th, sp, "  "+label)
+			lbl.Color = colorFg
+			return lbl.Layout(gtx)
+		})
 	}
-	return a.renderLines(gtx, lines)
+
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx C) D {
+			return a.renderShowFanartBg(gtx, showID)
+		}),
+		layout.Stacked(func(gtx C) D {
+			return a.renderGlassCard(gtx, func(gtx C) D {
+				return layout.Inset{
+					Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
+				}.Layout(gtx, func(gtx C) D {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+						layout.Rigid(func(gtx C) D {
+							return a.renderShowPosterColumn(gtx, showID)
+						}),
+						layout.Rigid(layout.Spacer{Width: dp24}.Layout),
+						layout.Flexed(1, func(gtx C) D {
+							return a.renderSections(gtx, sections)
+						}),
+					)
+				})
+			})
+		}),
+	)
 }
 
 // ── Right panel: episode details ─────────────────────────────────────────────
@@ -1079,50 +1300,48 @@ func (a *App) renderEpisodeDetails(gtx C, episodeNode *DynamicNode) D {
 		return a.renderText(gtx, colorMuted, "Episode details not available")
 	}
 
+	showID := episodeNode.ShowID
+
 	showTitle := ep.ShowTitle
 	if showTitle == "" {
 		showTitle = a.nav.dynamicTitle
 	}
 
-	var titleParts []string
-	if showTitle != "" {
-		titleParts = append(titleParts, showTitle)
-	}
-	if ep.Season > 0 {
-		titleParts = append(titleParts, fmt.Sprintf("Season %d", ep.Season))
-	}
-	if ep.Episode > 0 {
-		titleParts = append(titleParts, fmt.Sprintf("Episode %d", ep.Episode))
-	}
-	if len(titleParts) == 0 {
-		titleParts = append(titleParts, episodeNode.Label)
-	}
-	title := strings.Join(titleParts, " · ")
+	// Episode title: "S01E05 - Episode Title"
+	epTitle := episodeNode.Label
 
 	var sections []func(C) D
 
+	// Title — large, bold
 	sections = append(sections, func(gtx C) D {
-		lbl := material.Label(a.th, sp, title)
+		lbl := material.Label(a.th, spTitle, epTitle)
 		lbl.Color = colorFg
 		lbl.Font.Weight = font.Bold
+		lbl.MaxLines = 0
 		return lbl.Layout(gtx)
 	})
 	sections = append(sections, spacerFn(dp8))
+
+	// Show title (muted, below episode title)
+	if showTitle != "" {
+		st := showTitle
+		sections = append(sections, func(gtx C) D {
+			lbl := material.Label(a.th, spMeta, st)
+			lbl.Color = colorSubtle
+			return lbl.Layout(gtx)
+		})
+		sections = append(sections, spacerFn(dp12))
+	}
 
 	// Badges
 	if badges := a.buildEpisodeBadges(ep); len(badges) > 0 {
 		sections = append(sections, func(gtx C) D {
 			return a.renderBadgeRow(gtx, badges)
 		})
-		sections = append(sections, spacerFn(dp8))
+		sections = append(sections, spacerFn(dp12))
 	}
 
-	if showTitle != "" {
-		st := showTitle
-		sections = append(sections, func(gtx C) D {
-			return a.renderKV(gtx, "Show", st)
-		})
-	}
+	// KV metadata
 	if ep.Aired != "" {
 		aired := ep.Aired
 		sections = append(sections, func(gtx C) D {
@@ -1147,17 +1366,19 @@ func (a *App) renderEpisodeDetails(gtx C, episodeNode *DynamicNode) D {
 		})
 	}
 
+	// Subtitles
 	subText := formatSubtitles(ep.EmbeddedSubtitles, ep.Subtitles)
 	sections = append(sections, spacerFn(dp4))
 	sections = append(sections, func(gtx C) D {
-		return a.renderMultiline(gtx, subText)
+		return a.renderBody(gtx, subText)
 	})
 
+	// Plot
 	if ep.Plot != "" {
-		sections = append(sections, spacerFn(dp8))
+		sections = append(sections, spacerFn(dp12))
 		plot := ep.Plot
 		sections = append(sections, func(gtx C) D {
-			return a.renderMultiline(gtx, plot)
+			return a.renderBody(gtx, plot)
 		})
 	}
 
@@ -1170,12 +1391,35 @@ func (a *App) renderEpisodeDetails(gtx C, episodeNode *DynamicNode) D {
 		})
 	}
 
-	sections = append(sections, spacerFn(dp8))
+	// Player status
+	sections = append(sections, spacerFn(dp12))
 	sections = append(sections, func(gtx C) D {
 		return a.renderPlayerStatus(gtx)
 	})
 
-	return a.renderSections(gtx, sections)
+	// Two-column layout with fanart bg + glass card
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx C) D {
+			return a.renderShowFanartBg(gtx, showID)
+		}),
+		layout.Stacked(func(gtx C) D {
+			return a.renderGlassCard(gtx, func(gtx C) D {
+				return layout.Inset{
+					Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
+				}.Layout(gtx, func(gtx C) D {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+						layout.Rigid(func(gtx C) D {
+							return a.renderShowPosterColumn(gtx, showID)
+						}),
+						layout.Rigid(layout.Spacer{Width: dp24}.Layout),
+						layout.Flexed(1, func(gtx C) D {
+							return a.renderSections(gtx, sections)
+						}),
+					)
+				})
+			})
+		}),
+	)
 }
 
 func (a *App) buildEpisodeBadges(ep *papi.Episode) []badge {
@@ -1331,14 +1575,6 @@ func (a *App) renderKV(gtx C, k, v string) D {
 			return lbl.Layout(gtx)
 		}),
 	)
-}
-
-// renderMultiline renders a pre-formatted multi-line string as individual labels.
-func (a *App) renderMultiline(gtx C, s string) D {
-	lbl := material.Label(a.th, sp, s)
-	lbl.Color = colorFg
-	lbl.MaxLines = 0
-	return lbl.Layout(gtx)
 }
 
 // renderBody renders body text at the larger spBody size for comfortable TV reading.
