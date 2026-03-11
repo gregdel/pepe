@@ -475,7 +475,6 @@ const (
 	spHelp  = unit.Sp(18) // help bar
 
 	// Spacing
-	dp1  = unit.Dp(1)
 	dp4  = unit.Dp(4)
 	dp8  = unit.Dp(8)
 	dp12 = unit.Dp(12)
@@ -904,25 +903,21 @@ func (a *App) renderMediaDetails(gtx C, media *MediaItem) D {
 			return a.renderFanartBg(gtx, movieID)
 		}),
 		layout.Stacked(func(gtx C) D {
-			return layout.Inset{
-				Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
-			}.Layout(gtx, func(gtx C) D {
-				return a.renderGlassCard(gtx, func(gtx C) D {
-					return layout.Inset{
-						Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
-					}.Layout(gtx, func(gtx C) D {
-						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
-							// Left column: poster
-							layout.Rigid(func(gtx C) D {
-								return a.renderThumbColumn(gtx, id)
-							}),
-							layout.Rigid(layout.Spacer{Width: dp24}.Layout),
-							// Right column: scrollable info
-							layout.Flexed(1, func(gtx C) D {
-								return a.renderSections(gtx, sections)
-							}),
-						)
-					})
+			return a.renderGlassCard(gtx, func(gtx C) D {
+				return layout.Inset{
+					Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
+				}.Layout(gtx, func(gtx C) D {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+						// Left column: poster
+						layout.Rigid(func(gtx C) D {
+							return a.renderThumbColumn(gtx, id)
+						}),
+						layout.Rigid(layout.Spacer{Width: dp24}.Layout),
+						// Right column: scrollable info
+						layout.Flexed(1, func(gtx C) D {
+							return a.renderSections(gtx, sections)
+						}),
+					)
 				})
 			})
 		}),
@@ -967,38 +962,14 @@ func (a *App) buildMovieBadges(movie *papi.Movie) []badge {
 }
 
 
-// renderGlassCard draws a semi-transparent dark panel with rounded corners and
-// a subtle white border, then renders content inside it. This gives a
-// "frosted glass card" look floating over the fanart background.
+// renderGlassCard draws a full-bleed semi-transparent dark overlay over the
+// fanart background, then renders content inside it. Edge-to-edge with no
+// rounded corners — Netflix-style dark panel.
 func (a *App) renderGlassCard(gtx C, content layout.Widget) D {
-	r := gtx.Dp(unit.Dp(12))
-	border := gtx.Dp(dp1)
 	bounds := image.Rectangle{Max: gtx.Constraints.Max}
-
-	// Outer ring: border colour (~20% white).
-	rrOuter := clip.RRect{
-		Rect: bounds,
-		NE:   r, NW: r, SE: r, SW: r,
-	}
-	defer rrOuter.Push(gtx.Ops).Pop()
-	paint.Fill(gtx.Ops, color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x33})
-
-	// Inner fill: ~80% opaque dark, lets just a whisper of fanart tint through.
-	inner := image.Rectangle{
-		Min: image.Pt(border, border),
-		Max: image.Pt(bounds.Max.X-border, bounds.Max.Y-border),
-	}
-	ri := r - border
-	if ri < 0 {
-		ri = 0
-	}
-	rrInner := clip.RRect{
-		Rect: inner,
-		NE:   ri, NW: ri, SE: ri, SW: ri,
-	}
-	defer rrInner.Push(gtx.Ops).Pop()
-	paint.Fill(gtx.Ops, color.NRGBA{R: 0x12, G: 0x12, B: 0x12, A: 0xcc})
-
+	defer clip.Rect(bounds).Push(gtx.Ops).Pop()
+	// ~88% opaque near-black: fanart is still subtly visible underneath.
+	paint.Fill(gtx.Ops, color.NRGBA{R: 0x0a, G: 0x0a, B: 0x0a, A: 0xe0})
 	return content(gtx)
 }
 
