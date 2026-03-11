@@ -17,22 +17,22 @@ type NavNode interface {
 
 // NavigationState tracks where we are in the navigation tree
 type NavigationState struct {
-	section      Section        // Current section (Movies or Shows)
-	path         []*RadixNode   // Path from root to current position in radix tree
-	dynamicPath  []*DynamicNode // Path in dynamic navigation (seasons/episodes)
-	cursor       int            // Current cursor position in the children list
-	inDynamicNav bool           // True when navigating seasons/episodes
-	dynamicTitle string         // Show title for dynamic navigation
-	dynamicShowID string        // ImdbID of show being navigated
+	section       Section        // Current section (Movies or Shows)
+	path          []*RadixNode   // Path from root to current position in radix tree
+	dynamicPath   []*DynamicNode // Path in dynamic navigation (seasons/episodes)
+	cursor        int            // Current cursor position in the children list
+	inDynamicNav  bool           // True when navigating seasons/episodes
+	dynamicTitle  string         // Show title for dynamic navigation
+	dynamicShowID string         // ImdbID of show being navigated
 }
 
 func newNavigationState() *NavigationState {
 	return &NavigationState{
-		section:      SectionMovies,
-		path:         []*RadixNode{},
-		dynamicPath:  []*DynamicNode{},
-		cursor:       0,
-		inDynamicNav: false,
+		section:       SectionMovies,
+		path:          []*RadixNode{},
+		dynamicPath:   []*DynamicNode{},
+		cursor:        0,
+		inDynamicNav:  false,
 		dynamicTitle:  "",
 		dynamicShowID: "",
 	}

@@ -20,7 +20,7 @@ type DynamicNode struct {
 	Type         DynamicNodeType
 	Label        string
 	Episode      *papi.Episode // Only set for episode nodes
-	ShowID       string         // ImdbID of parent show (only set on episode nodes)
+	ShowID       string        // ImdbID of parent show (only set on episode nodes)
 	Children     []*DynamicNode
 	SubtreeCount int
 }

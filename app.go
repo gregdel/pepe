@@ -86,9 +86,9 @@ type App struct {
 	playerMode      PlayerMode
 	playerError     string
 	playerCommand   string
-	playerDone      chan error // goroutine → event loop
+	playerDone      chan error         // goroutine → event loop
 	resumePos       map[string]float64 // mediaKey -> last position (seconds)
-	ipcEvents       chan ipcEvent       // nil when idle
+	ipcEvents       chan ipcEvent      // nil when idle
 	currentMediaKey string
 
 	// library refresh
@@ -97,10 +97,10 @@ type App struct {
 	sseCh       <-chan struct{}      // SSE events from server
 
 	// image cache (thumbs, fanarts, posters — all media types)
-	images *imageCache
+	images *asyncCache[image.Image]
 
 	// nfo cache — parsed NFO data per movie ID
-	nfos *nfoCache
+	nfos *asyncCache[*polochon.Movie]
 
 	// Gio persistent list state (must survive between frames)
 	leftList        layout.List
@@ -136,8 +136,8 @@ func newApp(w *app.Window, client *APIClient, sseCh <-chan struct{}) *App {
 		leftList:        layout.List{Axis: layout.Vertical},
 		rightList:       layout.List{Axis: layout.Vertical},
 		playerLinesList: layout.List{Axis: layout.Vertical},
-		images:          newImageCache(),
-		nfos:            newNFOCache(),
+		images:          newAsyncCache[image.Image](),
+		nfos:            newAsyncCache[*polochon.Movie](),
 		sseCh:           sseCh,
 	}
 }
@@ -552,7 +552,7 @@ func (a *App) layoutLeftList(gtx C) D {
 		}
 		return a.leftList.Layout(gtx, len(items), func(gtx C, i int) D {
 			return inset.Layout(gtx, func(gtx C) D {
-				return a.drawNavItem(gtx, items[i].name, items[i].count, i == a.nav.cursor, false)
+				return a.drawNavItem(gtx, items[i].name, items[i].count, i == a.nav.cursor, false, "")
 			})
 		})
 	}
@@ -575,7 +575,7 @@ func (a *App) layoutLeftList(gtx C) D {
 				if !node.IsTerminalNode() {
 					count = node.SubtreeCount
 				}
-				return a.drawNavItem(gtx, label, count, isSelected, node.IsTerminalNode())
+				return a.drawNavItem(gtx, label, count, isSelected, node.IsTerminalNode(), "")
 			})
 		})
 	}
@@ -607,23 +607,12 @@ func (a *App) layoutLeftList(gtx C) D {
 				count = node.SubtreeCount
 			}
 
-			return a.drawNavItemWithPrefix(gtx, label, currentPath, count, isSelected, isTerminal)
+			return a.drawNavItem(gtx, label, count, isSelected, isTerminal, currentPath)
 		})
 	})
 }
 
-// drawNavItem renders a simple navigation row (section root or dynamic nodes).
-func (a *App) drawNavItem(gtx C, label string, count int, selected, isTerminal bool) D {
-	text := label
-	if count > 0 {
-		text = fmt.Sprintf("%s (%d)", label, count)
-	}
-	return a.drawNavRow(gtx, text, selected, isTerminal, "")
-}
-
-// drawNavItemWithPrefix renders a radix-tree nav row, highlighting the
-// accumulated prefix in primary colour.
-func (a *App) drawNavItemWithPrefix(gtx C, label, prefix string, count int, selected, isTerminal bool) D {
+func (a *App) drawNavItem(gtx C, label string, count int, selected, isTerminal bool, prefix string) D {
 	text := label
 	if count > 0 {
 		text = fmt.Sprintf("%s (%d)", label, count)
@@ -902,30 +891,18 @@ func (a *App) renderMediaDetails(gtx C, media *MediaItem) D {
 		return a.renderPlayerStatus(gtx)
 	})
 
-	// Two-column layout: [poster | info] floating on a glass card over the fanart.
-	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(func(gtx C) D {
-			return a.renderFanartBg(gtx, movieID)
-		}),
-		layout.Stacked(func(gtx C) D {
-			return a.renderGlassCard(gtx, func(gtx C) D {
-				return layout.Inset{
-					Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
-				}.Layout(gtx, func(gtx C) D {
-					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
-						// Left column: poster
-						layout.Rigid(func(gtx C) D {
-							return a.renderThumbColumn(gtx, id)
-						}),
-						layout.Rigid(layout.Spacer{Width: dp24}.Layout),
-						// Right column: scrollable info
-						layout.Flexed(1, func(gtx C) D {
-							return a.renderSections(gtx, sections)
-						}),
-					)
-				})
+	return a.renderDetailCard(gtx,
+		func(gtx C) D {
+			return a.renderFanartBg(gtx, "fanart:"+movieID, func() (image.Image, error) {
+				return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Fanart })
 			})
-		}),
+		},
+		func(gtx C) D {
+			return a.renderPosterColumn(gtx, "thumb:"+id, func() (image.Image, error) {
+				return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.Thumb })
+			})
+		},
+		sections,
 	)
 }
 
@@ -1028,30 +1005,18 @@ func (a *App) renderShowDetails(gtx C, media *MediaItem) D {
 		})
 	}
 
-	// Two-column layout: [poster | info] floating on a glass card over the fanart.
-	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(func(gtx C) D {
-			return a.renderShowFanartBg(gtx, showID)
-		}),
-		layout.Stacked(func(gtx C) D {
-			return a.renderGlassCard(gtx, func(gtx C) D {
-				return layout.Inset{
-					Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
-				}.Layout(gtx, func(gtx C) D {
-					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
-						// Left column: poster
-						layout.Rigid(func(gtx C) D {
-							return a.renderShowPosterColumn(gtx, showID)
-						}),
-						layout.Rigid(layout.Spacer{Width: dp24}.Layout),
-						// Right column: scrollable info
-						layout.Flexed(1, func(gtx C) D {
-							return a.renderSections(gtx, sections)
-						}),
-					)
-				})
+	return a.renderDetailCard(gtx,
+		func(gtx C) D {
+			return a.renderFanartBg(gtx, "fanart:"+showID, func() (image.Image, error) {
+				return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Fanart })
 			})
-		}),
+		},
+		func(gtx C) D {
+			return a.renderPosterColumn(gtx, "poster:"+showID, func() (image.Image, error) {
+				return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Poster })
+			})
+		},
+		sections,
 	)
 }
 
@@ -1066,49 +1031,21 @@ func buildShowMetaLine(year int, rating float64) string {
 	return strings.Join(parts, "  ·  ")
 }
 
-func (a *App) renderShowFanartBg(gtx C, showID string) D {
-	if img, ok := a.images.get("fanart:" + showID); ok {
-		if img != nil {
-			widget.Image{
-				Src:      paint.NewImageOp(img),
-				Fit:      widget.Cover,
-				Position: layout.Center,
-			}.Layout(gtx)
-			defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
-			paint.Fill(gtx.Ops, color.NRGBA{A: 0x40})
-		}
-		return D{Size: gtx.Constraints.Max}
-	}
-
-	a.images.fetch("fanart:"+showID, func() (image.Image, error) {
-		return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Fanart })
-	}, a.w)
-	return D{Size: gtx.Constraints.Max}
-}
-
-func (a *App) renderShowPosterColumn(gtx C, showID string) D {
+func (a *App) renderPosterColumn(gtx C, cacheKey string, fetchFn func() (image.Image, error)) D {
 	const colWidthDp = unit.Dp(200)
 	colW := gtx.Dp(colWidthDp)
 	colH := colW * 3 / 2 // 2:3 poster ratio
+	size := image.Pt(colW, colH)
 
 	gtx2 := gtx
-	gtx2.Constraints = layout.Exact(image.Pt(colW, colH))
+	gtx2.Constraints = layout.Exact(size)
 
-	if img, ok := a.images.get("poster:" + showID); ok {
+	if img, ok := a.images.get(cacheKey); ok {
+		defer roundedRRect(gtx, size, unit.Dp(8)).Push(gtx.Ops).Pop()
 		if img == nil {
-			defer clip.RRect{
-				Rect: image.Rectangle{Max: image.Pt(colW, colH)},
-				NE:   gtx.Dp(unit.Dp(8)), NW: gtx.Dp(unit.Dp(8)),
-				SE:   gtx.Dp(unit.Dp(8)), SW: gtx.Dp(unit.Dp(8)),
-			}.Push(gtx.Ops).Pop()
 			paint.Fill(gtx.Ops, color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0x80})
-			return D{Size: image.Pt(colW, colH)}
+			return D{Size: size}
 		}
-		defer clip.RRect{
-			Rect: image.Rectangle{Max: image.Pt(colW, colH)},
-			NE:   gtx.Dp(unit.Dp(8)), NW: gtx.Dp(unit.Dp(8)),
-			SE:   gtx.Dp(unit.Dp(8)), SW: gtx.Dp(unit.Dp(8)),
-		}.Push(gtx.Ops).Pop()
 		return widget.Image{
 			Src:      paint.NewImageOp(img),
 			Fit:      widget.Contain,
@@ -1116,17 +1053,39 @@ func (a *App) renderShowPosterColumn(gtx C, showID string) D {
 		}.Layout(gtx2)
 	}
 
-	a.images.fetch("poster:"+showID, func() (image.Image, error) {
-		return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Poster })
-	}, a.w)
-
-	defer clip.RRect{
-		Rect: image.Rectangle{Max: image.Pt(colW, colH)},
-		NE:   gtx.Dp(unit.Dp(8)), NW: gtx.Dp(unit.Dp(8)),
-		SE:   gtx.Dp(unit.Dp(8)), SW: gtx.Dp(unit.Dp(8)),
-	}.Push(gtx.Ops).Pop()
+	a.images.fetch(cacheKey, fetchFn, a.w)
+	defer roundedRRect(gtx, size, unit.Dp(8)).Push(gtx.Ops).Pop()
 	paint.Fill(gtx.Ops, color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0x80})
-	return D{Size: image.Pt(colW, colH)}
+	return D{Size: size}
+}
+
+func (a *App) renderDetailCard(gtx C, fanartFn func(C) D, posterFn func(C) D, sections []func(C) D) D {
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(fanartFn),
+		layout.Stacked(func(gtx C) D {
+			return a.renderGlassCard(gtx, func(gtx C) D {
+				return layout.Inset{
+					Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
+				}.Layout(gtx, func(gtx C) D {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+						layout.Rigid(posterFn),
+						layout.Rigid(layout.Spacer{Width: dp24}.Layout),
+						layout.Flexed(1, func(gtx C) D {
+							return a.renderSections(gtx, sections)
+						}),
+					)
+				})
+			})
+		}),
+	)
+}
+
+func roundedRRect(gtx C, size image.Point, radius unit.Dp) clip.RRect {
+	r := gtx.Dp(radius)
+	return clip.RRect{
+		Rect: image.Rectangle{Max: size},
+		NE:   r, NW: r, SE: r, SW: r,
+	}
 }
 
 // renderGlassCard draws a full-bleed semi-transparent dark overlay over the
@@ -1140,79 +1099,22 @@ func (a *App) renderGlassCard(gtx C, content layout.Widget) D {
 	return content(gtx)
 }
 
-// renderFanartBg fills the right panel with the movie's fanart image and a
-// light dark tint. The glass card drawn on top provides contrast for text.
-func (a *App) renderFanartBg(gtx C, movieID string) D {
-	if img, ok := a.images.get("fanart:" + movieID); ok {
+func (a *App) renderFanartBg(gtx C, cacheKey string, fetchFn func() (image.Image, error)) D {
+	if img, ok := a.images.get(cacheKey); ok {
 		if img != nil {
-			// Draw fanart covering the full panel (cropped, cinema feel).
 			widget.Image{
 				Src:      paint.NewImageOp(img),
 				Fit:      widget.Cover,
 				Position: layout.Center,
 			}.Layout(gtx)
-			// Light tint (~25% black) to tone down very bright fanarts.
 			defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
 			paint.Fill(gtx.Ops, color.NRGBA{A: 0x40})
 		}
 		return D{Size: gtx.Constraints.Max}
 	}
 
-	// Not cached yet — kick off fetch if not already in flight.
-	a.images.fetch("fanart:"+movieID, func() (image.Image, error) {
-		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Fanart })
-	}, a.w)
+	a.images.fetch(cacheKey, fetchFn, a.w)
 	return D{Size: gtx.Constraints.Max}
-}
-
-// renderThumbColumn renders the movie poster in a fixed-width column (~200dp).
-// The poster fills the column width and is constrained to a 2:3 aspect ratio height.
-// Used as the left column in the two-column movie details layout.
-func (a *App) renderThumbColumn(gtx C, movieID string) D {
-	const colWidthDp = unit.Dp(200)
-	colW := gtx.Dp(colWidthDp)
-	colH := colW * 3 / 2 // 2:3 poster ratio
-
-	gtx2 := gtx
-	gtx2.Constraints = layout.Exact(image.Pt(colW, colH))
-
-	if img, ok := a.images.get("thumb:" + movieID); ok {
-		if img == nil {
-			// Fetch failed permanently — render a translucent rounded placeholder.
-			defer clip.RRect{
-				Rect: image.Rectangle{Max: image.Pt(colW, colH)},
-				NE:   gtx.Dp(unit.Dp(8)), NW: gtx.Dp(unit.Dp(8)),
-				SE: gtx.Dp(unit.Dp(8)), SW: gtx.Dp(unit.Dp(8)),
-			}.Push(gtx.Ops).Pop()
-			paint.Fill(gtx.Ops, color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0x80})
-			return D{Size: image.Pt(colW, colH)}
-		}
-		// Clip poster to rounded corners before drawing.
-		defer clip.RRect{
-			Rect: image.Rectangle{Max: image.Pt(colW, colH)},
-			NE:   gtx.Dp(unit.Dp(8)), NW: gtx.Dp(unit.Dp(8)),
-			SE: gtx.Dp(unit.Dp(8)), SW: gtx.Dp(unit.Dp(8)),
-		}.Push(gtx.Ops).Pop()
-		return widget.Image{
-			Src:      paint.NewImageOp(img),
-			Fit:      widget.Contain,
-			Position: layout.N,
-		}.Layout(gtx2)
-	}
-
-	// Not cached yet — kick off fetch.
-	a.images.fetch("thumb:"+movieID, func() (image.Image, error) {
-		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Thumb })
-	}, a.w)
-
-	// Loading placeholder: dim rounded rect at poster proportions.
-	defer clip.RRect{
-		Rect: image.Rectangle{Max: image.Pt(colW, colH)},
-		NE:   gtx.Dp(unit.Dp(8)), NW: gtx.Dp(unit.Dp(8)),
-		SE: gtx.Dp(unit.Dp(8)), SW: gtx.Dp(unit.Dp(8)),
-	}.Push(gtx.Ops).Pop()
-	paint.Fill(gtx.Ops, color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0x80})
-	return D{Size: image.Pt(colW, colH)}
 }
 
 // ── Right panel: season details ───────────────────────────────────────────────
@@ -1268,27 +1170,18 @@ func (a *App) renderSeasonDetails(gtx C, season *DynamicNode) D {
 		})
 	}
 
-	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(func(gtx C) D {
-			return a.renderShowFanartBg(gtx, showID)
-		}),
-		layout.Stacked(func(gtx C) D {
-			return a.renderGlassCard(gtx, func(gtx C) D {
-				return layout.Inset{
-					Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
-				}.Layout(gtx, func(gtx C) D {
-					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
-						layout.Rigid(func(gtx C) D {
-							return a.renderShowPosterColumn(gtx, showID)
-						}),
-						layout.Rigid(layout.Spacer{Width: dp24}.Layout),
-						layout.Flexed(1, func(gtx C) D {
-							return a.renderSections(gtx, sections)
-						}),
-					)
-				})
+	return a.renderDetailCard(gtx,
+		func(gtx C) D {
+			return a.renderFanartBg(gtx, "fanart:"+showID, func() (image.Image, error) {
+				return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Fanart })
 			})
-		}),
+		},
+		func(gtx C) D {
+			return a.renderPosterColumn(gtx, "poster:"+showID, func() (image.Image, error) {
+				return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Poster })
+			})
+		},
+		sections,
 	)
 }
 
@@ -1397,28 +1290,18 @@ func (a *App) renderEpisodeDetails(gtx C, episodeNode *DynamicNode) D {
 		return a.renderPlayerStatus(gtx)
 	})
 
-	// Two-column layout with fanart bg + glass card
-	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(func(gtx C) D {
-			return a.renderShowFanartBg(gtx, showID)
-		}),
-		layout.Stacked(func(gtx C) D {
-			return a.renderGlassCard(gtx, func(gtx C) D {
-				return layout.Inset{
-					Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
-				}.Layout(gtx, func(gtx C) D {
-					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
-						layout.Rigid(func(gtx C) D {
-							return a.renderShowPosterColumn(gtx, showID)
-						}),
-						layout.Rigid(layout.Spacer{Width: dp24}.Layout),
-						layout.Flexed(1, func(gtx C) D {
-							return a.renderSections(gtx, sections)
-						}),
-					)
-				})
+	return a.renderDetailCard(gtx,
+		func(gtx C) D {
+			return a.renderFanartBg(gtx, "fanart:"+showID, func() (image.Image, error) {
+				return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Fanart })
 			})
-		}),
+		},
+		func(gtx C) D {
+			return a.renderPosterColumn(gtx, "poster:"+showID, func() (image.Image, error) {
+				return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Poster })
+			})
+		},
+		sections,
 	)
 }
 

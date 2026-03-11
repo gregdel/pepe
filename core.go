@@ -219,30 +219,24 @@ func (c *APIClient) getShow(id string) (*papi.Show, bool) {
 	return show, ok
 }
 
-// fetchMovieImage fetches a movie image file selected by pick.
-func (c *APIClient) fetchMovieImage(id string, pick func(*papi.Movie) *papi.File) (image.Image, error) {
-	movie, ok := c.getMovie(id)
+func fetchMediaImage[T any](c *APIClient, id string, lookup func(string) (T, bool), pick func(T) *papi.File, kind string) (image.Image, error) {
+	entity, ok := lookup(id)
 	if !ok {
-		return nil, fmt.Errorf("movie %s not found", id)
+		return nil, fmt.Errorf("%s %s not found", kind, id)
 	}
-	f := pick(movie)
+	f := pick(entity)
 	if f == nil {
-		return nil, fmt.Errorf("movie %s: image file not set", id)
+		return nil, fmt.Errorf("%s %s: image file not set", kind, id)
 	}
 	return c.fetchImageFile(f)
 }
 
-// fetchShowImage fetches a show image file selected by pick.
+func (c *APIClient) fetchMovieImage(id string, pick func(*papi.Movie) *papi.File) (image.Image, error) {
+	return fetchMediaImage(c, id, c.getMovie, pick, "movie")
+}
+
 func (c *APIClient) fetchShowImage(id string, pick func(*papi.Show) *papi.File) (image.Image, error) {
-	show, ok := c.getShow(id)
-	if !ok {
-		return nil, fmt.Errorf("show %s not found", id)
-	}
-	f := pick(show)
-	if f == nil {
-		return nil, fmt.Errorf("show %s: image file not set", id)
-	}
-	return c.fetchImageFile(f)
+	return fetchMediaImage(c, id, c.getShow, pick, "show")
 }
 
 // fetchImageFile is the shared HTTP GET + decode path for any papi image file.

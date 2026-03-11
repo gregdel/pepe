@@ -27,13 +27,13 @@ func startIPC(sockPath, mediaKey string, w *app.Window) chan ipcEvent {
 type mpvEvent struct {
 	Event string      `json:"event"`
 	Name  string      `json:"name"`
-	Data  interface{} `json:"data"`
+	Data  any `json:"data"`
 }
 
 // ipcLoop connects to the mpv IPC socket and processes events.
 func ipcLoop(sockPath, mediaKey string, ch chan ipcEvent, w *app.Window) {
 	var conn net.Conn
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		c, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: sockPath, Net: "unix"})
 		if err == nil {
 			conn = c
@@ -44,11 +44,11 @@ func ipcLoop(sockPath, mediaKey string, ch chan ipcEvent, w *app.Window) {
 	if conn == nil {
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Send observe_property commands.
-	fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 1, \"time-pos\"]}\n")
-	fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 2, \"eof-reached\"]}\n")
+	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 1, \"time-pos\"]}\n")
+	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 2, \"eof-reached\"]}\n")
 
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
