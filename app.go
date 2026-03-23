@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gioui.org/app"
+	"gioui.org/f32"
 	"gioui.org/font"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
@@ -31,7 +32,9 @@ import (
 // ── Colour palette (matches the original lipgloss TUI) ──────────────────────
 
 var (
-	colorBg         = color.NRGBA{R: 0x1c, G: 0x1c, B: 0x1c, A: 0xff}
+	colorBg    = color.NRGBA{R: 0x08, G: 0x08, B: 0x08, A: 0xff} // #080808 AMOLED black
+	colorNavBg = color.NRGBA{R: 0x14, G: 0x14, B: 0x18, A: 0xff} // #141418 nav surface
+
 	colorFg         = color.NRGBA{R: 0xe0, G: 0xe0, B: 0xe0, A: 0xff}
 	colorSubtle     = color.NRGBA{R: 0xa8, G: 0xa8, B: 0xa8, A: 0xff} // secondary text on glass card
 	colorPrimary    = color.NRGBA{R: 0x87, G: 0x5f, B: 0xff, A: 0xff} // 256-colour 99  (purple)
@@ -39,8 +42,6 @@ var (
 	colorTerminal   = color.NRGBA{R: 0xff, G: 0x69, B: 0xb4, A: 0xff} // 256-colour 212 (pink)
 	colorSelectedBg = color.NRGBA{R: 0x15, G: 0x65, B: 0xc0, A: 0xff} // bright blue, 7.8:1 contrast
 	colorSelectedFg = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
-	colorDivider    = color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xff}
-
 	// badge backgrounds
 	colorBadgeBg      = color.NRGBA{R: 0x44, G: 0x44, B: 0x44, A: 0xff}
 	colorSizeBadgeBg  = color.NRGBA{R: 0xd7, G: 0x00, B: 0x87, A: 0xff} // 256-colour 162 (pink)
@@ -463,8 +464,8 @@ type (
 )
 
 const (
-	leftFlex  = 0.38
-	rightFlex = 0.62
+	leftFlex  = 0.30
+	rightFlex = 0.70
 
 	// Font sizes — calibrated for 10-foot / TV viewing distance at 1080p.
 	sp      = unit.Sp(20) // secondary/meta/KV rows
@@ -489,9 +490,6 @@ func (a *App) layout(gtx C) D {
 		layout.Flexed(1, func(gtx C) D {
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 				layout.Flexed(leftFlex, a.layoutLeftPanel),
-				layout.Rigid(func(gtx C) D {
-					return divider(gtx)
-				}),
 				layout.Flexed(rightFlex, a.layoutRightPanel),
 			)
 		}),
@@ -501,25 +499,45 @@ func (a *App) layout(gtx C) D {
 	)
 }
 
-// divider draws a 1dp vertical separator.
-func divider(gtx C) D {
-	size := image.Point{X: gtx.Dp(unit.Dp(1)), Y: gtx.Constraints.Max.Y}
-	defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
-	paint.Fill(gtx.Ops, colorDivider)
-	return D{Size: size}
-}
-
 // ── Left panel ────────────────────────────────────────────────────────────────
 
-func (a *App) layoutLeftPanel(gtx C) D {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx C) D {
-			return a.layoutPanelTitle(gtx)
+func (a *App) layoutLeftPanelContent(gtx C) D {
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx C) D {
+			defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, colorNavBg)
+			return D{Size: gtx.Constraints.Max}
 		}),
-		layout.Flexed(1, func(gtx C) D {
-			return a.layoutLeftList(gtx)
+		layout.Stacked(func(gtx C) D {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx C) D {
+					return a.layoutPanelTitle(gtx)
+				}),
+				layout.Flexed(1, func(gtx C) D {
+					return a.layoutLeftList(gtx)
+				}),
+			)
 		}),
 	)
+}
+
+func (a *App) layoutLeftPanel(gtx C) D {
+	dims := a.layoutLeftPanelContent(gtx)
+	// Right-edge gradient fade: 60dp dissolve from nav surface to window bg.
+	fadeW := gtx.Dp(60)
+	x := dims.Size.X - fadeW
+	if x > 0 {
+		paint.LinearGradientOp{
+			Stop1:  f32.Pt(float32(x), 0),
+			Stop2:  f32.Pt(float32(dims.Size.X), 0),
+			Color1: color.NRGBA{A: 0},
+			Color2: colorBg,
+		}.Add(gtx.Ops)
+		stack := clip.Rect{Min: image.Pt(x, 0), Max: dims.Size}.Push(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		stack.Pop()
+	}
+	return dims
 }
 
 func (a *App) layoutPanelTitle(gtx C) D {
@@ -540,7 +558,7 @@ func (a *App) layoutPanelTitle(gtx C) D {
 }
 
 func (a *App) layoutLeftList(gtx C) D {
-	inset := layout.Inset{Left: dp14, Right: dp14, Top: dp8, Bottom: dp8}
+	inset := layout.Inset{Left: dp14, Top: dp8, Bottom: dp8}
 
 	if a.nav.isAtRoot() {
 		items := []struct {
@@ -622,7 +640,7 @@ func (a *App) drawNavItem(gtx C, label string, count int, selected, isTerminal b
 
 // drawNavRow is the low-level row renderer.
 func (a *App) drawNavRow(gtx C, text string, selected, isTerminal bool, highlightPrefix string) D {
-	bg := colorBg
+	bg := colorNavBg
 	fg := colorFg
 	if selected {
 		bg = colorSelectedBg
@@ -633,11 +651,29 @@ func (a *App) drawNavRow(gtx C, text string, selected, isTerminal bool, highligh
 
 	return layout.Stack{}.Layout(gtx,
 		layout.Expanded(func(gtx C) D {
-			defer clip.Rect{Max: gtx.Constraints.Min}.Push(gtx.Ops).Pop()
+			size := gtx.Constraints.Min
+			defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
 			paint.Fill(gtx.Ops, bg)
-			return D{Size: gtx.Constraints.Min}
+			// Selected row: fade blue → panel bg on right edge.
+			if selected {
+				fadeW := gtx.Dp(60)
+				x := size.X - fadeW
+				if x > 0 {
+					paint.LinearGradientOp{
+						Stop1:  f32.Pt(float32(x), 0),
+						Stop2:  f32.Pt(float32(size.X), 0),
+						Color1: color.NRGBA{A: 0},
+						Color2: colorNavBg,
+					}.Add(gtx.Ops)
+					fadeStack := clip.Rect{Min: image.Pt(x, 0), Max: size}.Push(gtx.Ops)
+					paint.PaintOp{}.Add(gtx.Ops)
+					fadeStack.Pop()
+				}
+			}
+			return D{Size: size}
 		}),
 		layout.Stacked(func(gtx C) D {
+			gtx.Constraints.Min.X = gtx.Constraints.Max.X // fill full width
 			return layout.Inset{Top: dp4, Bottom: dp4, Left: dp8, Right: dp8}.Layout(gtx, func(gtx C) D {
 				if highlightPrefix != "" && !selected && strings.HasPrefix(text, highlightPrefix) {
 					// Two-part label: highlighted prefix + normal remainder
@@ -670,24 +706,27 @@ func (a *App) drawNavRow(gtx C, text string, selected, isTerminal bool, highligh
 // ── Right panel ───────────────────────────────────────────────────────────────
 
 func (a *App) layoutRightPanel(gtx C) D {
-	inset := layout.UniformInset(dp12)
-	return inset.Layout(gtx, func(gtx C) D {
-		return a.layoutRightContent(gtx)
-	})
+	return a.layoutRightContent(gtx)
 }
 
 func (a *App) layoutRightContent(gtx C) D {
+	inset := layout.UniformInset(dp12)
+
 	if a.nav.isAtRoot() {
-		if a.nav.cursor == 0 {
-			return a.renderSectionInfo(gtx, "Movies", a.movieCount)
-		}
-		return a.renderSectionInfo(gtx, "Shows", a.showCount)
+		return inset.Layout(gtx, func(gtx C) D {
+			if a.nav.cursor == 0 {
+				return a.renderSectionInfo(gtx, "Movies", a.movieCount)
+			}
+			return a.renderSectionInfo(gtx, "Shows", a.showCount)
+		})
 	}
 
 	if a.nav.inDynamicNav {
 		child := a.nav.getSelectedDynamicChild()
 		if child == nil {
-			return a.renderText(gtx, colorMuted, "No item selected")
+			return inset.Layout(gtx, func(gtx C) D {
+				return a.renderText(gtx, colorMuted, "No item selected")
+			})
 		}
 		if child.Type == DynamicNodeSeason {
 			return a.renderSeasonDetails(gtx, child)
@@ -697,12 +736,16 @@ func (a *App) layoutRightContent(gtx C) D {
 
 	child := a.nav.getSelectedChild()
 	if child == nil {
-		return a.renderText(gtx, colorMuted, "No item selected")
+		return inset.Layout(gtx, func(gtx C) D {
+			return a.renderText(gtx, colorMuted, "No item selected")
+		})
 	}
 	if child.IsTerminal {
 		media, ok := a.titleToMedia[child.FullString]
 		if !ok {
-			return a.renderText(gtx, colorMuted, "Media details not found")
+			return inset.Layout(gtx, func(gtx C) D {
+				return a.renderText(gtx, colorMuted, "Media details not found")
+			})
 		}
 		switch media.Type {
 		case "show":
@@ -711,7 +754,9 @@ func (a *App) layoutRightContent(gtx C) D {
 			return a.renderMediaDetails(gtx, media)
 		}
 	}
-	return a.renderNodeChildren(gtx, child)
+	return inset.Layout(gtx, func(gtx C) D {
+		return a.renderNodeChildren(gtx, child)
+	})
 }
 
 // ── Right panel: section info ─────────────────────────────────────────────────
@@ -1092,10 +1137,16 @@ func roundedRRect(gtx C, size image.Point, radius unit.Dp) clip.RRect {
 // fanart background, then renders content inside it. Edge-to-edge with no
 // rounded corners — Netflix-style dark panel.
 func (a *App) renderGlassCard(gtx C, content layout.Widget) D {
-	bounds := image.Rectangle{Max: gtx.Constraints.Max}
-	defer clip.Rect(bounds).Push(gtx.Ops).Pop()
-	// ~88% opaque near-black: fanart is still subtly visible underneath.
-	paint.Fill(gtx.Ops, color.NRGBA{R: 0x0a, G: 0x0a, B: 0x0a, A: 0xe0})
+	// Cinematic vertical gradient: fanart bleeds through at top, solid dark at bottom.
+	paint.LinearGradientOp{
+		Stop1:  f32.Pt(0, 0),
+		Stop2:  f32.Pt(0, float32(gtx.Constraints.Max.Y)),
+		Color1: color.NRGBA{R: 0x08, G: 0x08, B: 0x08, A: 0x4d}, // top ~30% opaque
+		Color2: color.NRGBA{R: 0x08, G: 0x08, B: 0x08, A: 0xeb}, // bottom ~92% opaque
+	}.Add(gtx.Ops)
+	stack := clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	stack.Pop()
 	return content(gtx)
 }
 
@@ -1107,8 +1158,19 @@ func (a *App) renderFanartBg(gtx C, cacheKey string, fetchFn func() (image.Image
 				Fit:      widget.Cover,
 				Position: layout.Center,
 			}.Layout(gtx)
-			defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
-			paint.Fill(gtx.Ops, color.NRGBA{A: 0x40})
+			// Left-edge fade: fanart dissolves from colorBg into full image.
+			fadeW := gtx.Dp(200)
+			if fadeW > 0 {
+				paint.LinearGradientOp{
+					Stop1:  f32.Pt(0, 0),
+					Stop2:  f32.Pt(float32(fadeW), 0),
+					Color1: colorBg,
+					Color2: color.NRGBA{A: 0},
+				}.Add(gtx.Ops)
+				stack := clip.Rect{Max: image.Pt(fadeW, gtx.Constraints.Max.Y)}.Push(gtx.Ops)
+				paint.PaintOp{}.Add(gtx.Ops)
+				stack.Pop()
+			}
 		}
 		return D{Size: gtx.Constraints.Max}
 	}
@@ -1381,11 +1443,21 @@ func (a *App) layoutHelp(gtx C) D {
 		helpText += "  ·  player: running"
 	}
 
-	return layout.Inset{Left: dp8, Right: dp8, Top: dp4, Bottom: dp4}.Layout(gtx, func(gtx C) D {
-		lbl := material.Label(a.th, spHelp, helpText)
-		lbl.Color = colorMuted
-		return lbl.Layout(gtx)
-	})
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx C) D {
+			size := image.Point{X: gtx.Constraints.Max.X, Y: gtx.Dp(1)}
+			defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, color.NRGBA{R: 0x28, G: 0x28, B: 0x28, A: 0xff})
+			return D{Size: size}
+		}),
+		layout.Rigid(func(gtx C) D {
+			return layout.Inset{Left: dp8, Right: dp8, Top: dp4, Bottom: dp4}.Layout(gtx, func(gtx C) D {
+				lbl := material.Label(a.th, spHelp, helpText)
+				lbl.Color = colorMuted
+				return lbl.Layout(gtx)
+			})
+		}),
+	)
 }
 
 // ── Rendering helpers ─────────────────────────────────────────────────────────
