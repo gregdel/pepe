@@ -192,6 +192,12 @@ func run(w *app.Window, client *APIClient, sseCh <-chan struct{}) error {
 			// Draw the UI
 			a.layout(gtx)
 
+			// Schedule another frame while async fetches are in flight
+			// so drain() picks up results promptly.
+			if a.images.hasLoading() || a.nfos.hasLoading() {
+				gtx.Execute(op.InvalidateCmd{})
+			}
+
 			e.Frame(gtx.Ops)
 		}
 	}
@@ -257,15 +263,9 @@ func (a *App) drainChannels() {
 		}
 	}
 
-	// Drain all pending image fetch results.
-	if a.images.drain() {
-		a.w.Invalidate()
-	}
-
-	// Drain all pending NFO fetch results.
-	if a.nfos.drain() {
-		a.w.Invalidate()
-	}
+	// Drain all pending image/NFO fetch results.
+	a.images.drain()
+	a.nfos.drain()
 }
 
 // ── Key handling ──────────────────────────────────────────────────────────────
@@ -844,7 +844,7 @@ func (a *App) renderMediaDetails(gtx C, media *MediaItem) D {
 	nfoKey := "nfo:" + movieID
 	a.nfos.fetch(nfoKey, func() (*polochon.Movie, error) {
 		return a.client.fetchMovieNFO(movieID)
-	}, a.w)
+	})
 
 	// Merge NFO data with API data — NFO wins for text fields.
 	// nfoData is nil until the fetch completes (or permanently nil on error).
@@ -1120,7 +1120,7 @@ func (a *App) renderPosterColumn(gtx C, cacheKey string, fetchFn func() (image.I
 		}.Layout(gtx2)
 	}
 
-	a.images.fetch(cacheKey, fetchFn, a.w)
+	a.images.fetch(cacheKey, fetchFn)
 	defer roundedRRect(gtx, size, unit.Dp(8)).Push(gtx.Ops).Pop()
 	paint.Fill(gtx.Ops, color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0x80})
 	return D{Size: size}
@@ -1197,7 +1197,7 @@ func (a *App) renderFanartBg(gtx C, cacheKey string, fetchFn func() (image.Image
 		return D{Size: gtx.Constraints.Max}
 	}
 
-	a.images.fetch(cacheKey, fetchFn, a.w)
+	a.images.fetch(cacheKey, fetchFn)
 	return D{Size: gtx.Constraints.Max}
 }
 

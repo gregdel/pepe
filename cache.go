@@ -3,8 +3,6 @@ package main
 import (
 	_ "image/jpeg"
 	_ "image/png"
-
-	"gioui.org/app"
 )
 
 // cacheResult carries the result of an async fetch.
@@ -54,9 +52,10 @@ func (c *asyncCache[T]) get(key string) (T, bool) {
 }
 
 // fetch triggers an async load for key if it is not already cached or in-flight.
-// fetchFn is called in a goroutine; on completion the result is sent to done
-// and w.Invalidate() is called to wake the event loop.
-func (c *asyncCache[T]) fetch(key string, fetchFn func() (T, error), w *app.Window) {
+// fetchFn is called in a goroutine; on completion the result is sent to done.
+// The caller must arrange for frame invalidation (e.g. op.InvalidateCmd) while
+// loading keys exist so that drain() gets called.
+func (c *asyncCache[T]) fetch(key string, fetchFn func() (T, error)) {
 	if c.resolved[key] {
 		return // already resolved (success or permanent failure)
 	}
@@ -67,8 +66,12 @@ func (c *asyncCache[T]) fetch(key string, fetchFn func() (T, error), w *app.Wind
 	go func() {
 		val, err := fetchFn()
 		c.done <- cacheResult[T]{key: key, val: val, err: err}
-		w.Invalidate()
 	}()
+}
+
+// hasLoading reports whether any fetches are in flight.
+func (c *asyncCache[T]) hasLoading() bool {
+	return len(c.loading) > 0
 }
 
 // drain reads all pending results from done without blocking.
