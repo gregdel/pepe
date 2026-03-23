@@ -159,6 +159,20 @@ func run(w *app.Window, client *APIClient, sseCh <-chan struct{}) error {
 			ops.Reset()
 			gtx := app.NewContext(&ops, e)
 
+			// Scale UI proportionally to window width.
+			// Reference: 1920dp (full HD TV). Smaller windows shrink, larger grow.
+			const refWidth = 1920.0
+			widthDp := float32(gtx.Constraints.Max.X) / gtx.Metric.PxPerDp
+			scale := widthDp / refWidth
+			if scale < 0.4 {
+				scale = 0.4
+			}
+			if scale > 2.0 {
+				scale = 2.0
+			}
+			gtx.Metric.PxPerDp *= scale
+			gtx.Metric.PxPerSp *= scale
+
 			// Paint background
 			paint.Fill(gtx.Ops, colorBg)
 
@@ -464,16 +478,16 @@ type (
 )
 
 const (
-	leftFlex  = 0.30
-	rightFlex = 0.70
+	leftFlex  = 0.25
+	rightFlex = 0.75
 
 	// Font sizes — calibrated for 10-foot / TV viewing distance at 1080p.
-	sp      = unit.Sp(20) // secondary/meta/KV rows
-	spBody  = unit.Sp(24) // plot, subtitles, multi-line text
-	spTitle = unit.Sp(40) // hero title
-	spMeta  = unit.Sp(20) // year · runtime · genres line
-	spBadge = unit.Sp(18) // tech badge pills
-	spHelp  = unit.Sp(18) // help bar
+	sp      = unit.Sp(24) // nav items, meta/KV rows
+	spBody  = unit.Sp(28) // plot, subtitles, multi-line text
+	spTitle = unit.Sp(48) // hero title
+	spMeta  = unit.Sp(24) // year · runtime · genres line
+	spBadge = unit.Sp(20) // tech badge pills
+	spHelp  = unit.Sp(20) // help bar
 
 	// Spacing
 	dp4  = unit.Dp(4)
@@ -482,7 +496,7 @@ const (
 	dp14 = unit.Dp(14) // nav item inset
 	dp16 = unit.Dp(16)
 	dp20 = unit.Dp(20)
-	dp24 = unit.Dp(24)
+	dp32 = unit.Dp(32)
 )
 
 func (a *App) layout(gtx C) D {
@@ -1085,7 +1099,7 @@ func buildShowMetaLine(year int, rating float64) string {
 }
 
 func (a *App) renderPosterColumn(gtx C, cacheKey string, fetchFn func() (image.Image, error)) D {
-	const colWidthDp = unit.Dp(200)
+	const colWidthDp = unit.Dp(240)
 	colW := gtx.Dp(colWidthDp)
 	colH := colW * 3 / 2 // 2:3 poster ratio
 	size := image.Pt(colW, colH)
@@ -1118,11 +1132,11 @@ func (a *App) renderDetailCard(gtx C, fanartFn func(C) D, posterFn func(C) D, se
 		layout.Stacked(func(gtx C) D {
 			return a.renderGlassCard(gtx, func(gtx C) D {
 				return layout.Inset{
-					Top: dp24, Bottom: dp24, Left: dp24, Right: dp24,
+					Top: dp32, Bottom: dp32, Left: dp32, Right: dp32,
 				}.Layout(gtx, func(gtx C) D {
 					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
 						layout.Rigid(posterFn),
-						layout.Rigid(layout.Spacer{Width: dp24}.Layout),
+						layout.Rigid(layout.Spacer{Width: dp32}.Layout),
 						layout.Flexed(1, func(gtx C) D {
 							return a.renderSections(gtx, sections)
 						}),
