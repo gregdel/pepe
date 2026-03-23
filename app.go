@@ -558,6 +558,14 @@ func (a *App) layoutPanelTitle(gtx C) D {
 }
 
 func (a *App) layoutLeftList(gtx C) D {
+	// Keep cursor centered in the visible area (like scrolloff=999).
+	if pos := a.leftList.Position; pos.Count > 0 {
+		target := max(0, a.nav.cursor-pos.Count/2)
+		if pos.First != target {
+			a.leftList.ScrollTo(target)
+		}
+	}
+
 	inset := layout.Inset{Left: dp14, Top: dp8, Bottom: dp8}
 
 	if a.nav.isAtRoot() {
