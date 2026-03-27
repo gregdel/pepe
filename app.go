@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -1712,20 +1711,6 @@ func buildMPVArgs(title, videoURL string, subtitleURLs []string, mode PlayerMode
 	return args
 }
 
-func addQueryParam(rawURL, k, v string) string {
-	if v == "" {
-		return rawURL
-	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return rawURL
-	}
-	q := parsed.Query()
-	q.Set(k, v)
-	parsed.RawQuery = q.Encode()
-	return parsed.String()
-}
-
 func quoteArg(arg string) string {
 	if arg == "" {
 		return `""`
@@ -1764,7 +1749,6 @@ func (a *App) buildMovieCommand(media *MediaItem) (string, string, string, []str
 	if err != nil {
 		return "", "", "", nil, "", false
 	}
-	videoURL = addQueryParam(videoURL, "title", media.Title)
 
 	var subs []string
 	for _, sub := range movie.Subtitles {
@@ -1775,7 +1759,7 @@ func (a *App) buildMovieCommand(media *MediaItem) (string, string, string, []str
 		if err != nil {
 			continue
 		}
-		subs = append(subs, addQueryParam(u, "lang", string(sub.Lang)))
+		subs = append(subs, u)
 	}
 
 	mediaKey := "movie:" + movie.ImdbID
@@ -1796,7 +1780,6 @@ func (a *App) buildEpisodeCommand(node *DynamicNode) (string, string, string, []
 	if err != nil {
 		return "", "", "", nil, "", false
 	}
-	videoURL = addQueryParam(videoURL, "title", node.Label)
 
 	var subs []string
 	for _, sub := range ep.Subtitles {
@@ -1807,7 +1790,7 @@ func (a *App) buildEpisodeCommand(node *DynamicNode) (string, string, string, []
 		if err != nil {
 			continue
 		}
-		subs = append(subs, addQueryParam(u, "lang", string(sub.Lang)))
+		subs = append(subs, u)
 	}
 
 	mediaKey := fmt.Sprintf("episode:%s:%d:%d", node.ShowID, ep.Season, ep.Episode)
