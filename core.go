@@ -219,6 +219,14 @@ func (c *APIClient) getShow(id string) (*papi.Show, bool) {
 	return show, ok
 }
 
+func (c *APIClient) listAvailableSubtitles(video polochon.Video, lang polochon.Language) ([]*polochon.SubtitleEntry, error) {
+	return c.client.ListAvailableSubtitles(video, lang)
+}
+
+func (c *APIClient) downloadSubtitle(video polochon.Video, lang polochon.Language, entry *polochon.SubtitleEntry) error {
+	return c.client.DownloadSubtitle(video, lang, entry)
+}
+
 func fetchMediaImage[T any](c *APIClient, id string, lookup func(string) (T, bool), pick func(T) *papi.File, kind string) (image.Image, error) {
 	entity, ok := lookup(id)
 	if !ok {

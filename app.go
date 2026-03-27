@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -66,6 +67,39 @@ const (
 	PlayerModeKMS PlayerMode = "kms"
 )
 
+// ── Subtitle popup state ──────────────────────────────────────────────────────
+
+type SubtitlePopupState int
+
+const (
+	SubtitlePopupLoading SubtitlePopupState = iota
+	SubtitlePopupReady
+	SubtitlePopupDownloading
+	SubtitlePopupDone
+	SubtitlePopupError
+)
+
+type subPopupListResult struct {
+	entries []*polochon.SubtitleEntry
+	err     error
+}
+
+type subPopupDownloadResult struct{ err error }
+
+// SubtitlePopup holds all state for the subtitle search overlay.
+type SubtitlePopup struct {
+	video        polochon.Video
+	lang         polochon.Language
+	state        SubtitlePopupState
+	entries      []*polochon.SubtitleEntry
+	cursor       int
+	errMsg       string
+	doneAt       time.Time
+	list         layout.List
+	resultCh     chan subPopupListResult
+	downloadDone chan subPopupDownloadResult
+}
+
 // ── App ──────────────────────────────────────────────────────────────────────
 
 // App holds all application state across frames.
@@ -101,6 +135,9 @@ type App struct {
 
 	// nfo cache — parsed NFO data per movie ID
 	nfos *asyncCache[*polochon.Movie]
+
+	// subtitle search popup (nil = closed)
+	subPopup *SubtitlePopup
 
 	// Gio persistent list state (must survive between frames)
 	leftList        layout.List
@@ -262,6 +299,39 @@ func (a *App) drainChannels() {
 		}
 	}
 
+	// Drain subtitle popup channels.
+	if a.subPopup != nil {
+		select {
+		case res := <-a.subPopup.resultCh:
+			if res.err != nil {
+				a.subPopup.state = SubtitlePopupError
+				a.subPopup.errMsg = res.err.Error()
+			} else {
+				a.subPopup.state = SubtitlePopupReady
+				a.subPopup.entries = res.entries
+			}
+		default:
+		}
+		if a.subPopup != nil && a.subPopup.downloadDone != nil {
+			select {
+			case res := <-a.subPopup.downloadDone:
+				if res.err != nil {
+					a.subPopup.state = SubtitlePopupError
+					a.subPopup.errMsg = res.err.Error()
+				} else {
+					a.subPopup.state = SubtitlePopupDone
+					a.subPopup.doneAt = time.Now()
+				}
+				a.subPopup.downloadDone = nil
+			default:
+			}
+		}
+		// Auto-close after showing "Downloaded!" for 1.5s.
+		if a.subPopup != nil && a.subPopup.state == SubtitlePopupDone && time.Since(a.subPopup.doneAt) > 1500*time.Millisecond {
+			a.subPopup = nil
+		}
+	}
+
 	// Drain all pending image/NFO fetch results.
 	a.images.drain()
 	a.nfos.drain()
@@ -278,12 +348,14 @@ var keyFilters = []event.Filter{
 	key.Filter{Focus: nil, Name: key.NameRightArrow},
 	key.Filter{Focus: nil, Name: key.NameReturn},
 	key.Filter{Focus: nil, Name: key.NameEnter},
+	key.Filter{Focus: nil, Name: key.NameEscape},
 	key.Filter{Focus: nil, Name: "H", Optional: key.ModShift},
 	key.Filter{Focus: nil, Name: "J", Optional: key.ModShift},
 	key.Filter{Focus: nil, Name: "K", Optional: key.ModShift},
 	key.Filter{Focus: nil, Name: "L", Optional: key.ModShift},
 	key.Filter{Focus: nil, Name: "Q", Optional: key.ModShift},
 	key.Filter{Focus: nil, Name: "R", Optional: key.ModShift},
+	key.Filter{Focus: nil, Name: "S", Optional: key.ModShift},
 	key.Filter{Focus: nil, Name: key.NameTab},
 }
 
@@ -302,6 +374,25 @@ func (a *App) handleKeys(gtx layout.Context) {
 			continue
 		}
 
+		// Subtitle popup intercepts all keys when active.
+		if a.subPopup != nil {
+			switch ke.Name {
+			case key.NameUpArrow, "K":
+				if a.subPopup.cursor > 0 {
+					a.subPopup.cursor--
+				}
+			case key.NameDownArrow, "J":
+				if a.subPopup.state == SubtitlePopupReady && a.subPopup.cursor < len(a.subPopup.entries)-1 {
+					a.subPopup.cursor++
+				}
+			case key.NameReturn, key.NameEnter, key.NameRightArrow, "L":
+				a.subPopupSelect()
+			case key.NameEscape, key.NameLeftArrow, "H":
+				a.closeSubtitlePopup()
+			}
+			continue
+		}
+
 		switch ke.Name {
 		case key.NameUpArrow, "K":
 			a.navigateUp()
@@ -315,6 +406,8 @@ func (a *App) handleKeys(gtx layout.Context) {
 			a.toggleSection()
 		case "R":
 			a.startRefresh()
+		case "S":
+			a.openSubtitlePopup()
 		case "Q":
 			a.w.Perform(system.ActionClose)
 		}
@@ -499,15 +592,25 @@ const (
 )
 
 func (a *App) layout(gtx C) D {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Flexed(1, func(gtx C) D {
-			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-				layout.Flexed(leftFlex, a.layoutLeftPanel),
-				layout.Flexed(rightFlex, a.layoutRightPanel),
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx C) D {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Flexed(1, func(gtx C) D {
+					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+						layout.Flexed(leftFlex, a.layoutLeftPanel),
+						layout.Flexed(rightFlex, a.layoutRightPanel),
+					)
+				}),
+				layout.Rigid(func(gtx C) D {
+					return a.layoutHelp(gtx)
+				}),
 			)
 		}),
-		layout.Rigid(func(gtx C) D {
-			return a.layoutHelp(gtx)
+		layout.Stacked(func(gtx C) D {
+			if a.subPopup == nil {
+				return D{}
+			}
+			return a.layoutSubtitlePopup(gtx)
 		}),
 	)
 }
@@ -1456,12 +1559,20 @@ func (a *App) renderPlayerStatus(gtx C) D {
 // ── Help bar ──────────────────────────────────────────────────────────────────
 
 func (a *App) layoutHelp(gtx C) D {
-	helpText := "hjkl/arrows: navigate  ·  enter/l: select  ·  h: back  ·  tab: toggle  ·  r: refresh  ·  q: quit"
-	if a.refreshing {
-		helpText += "  ·  refreshing…"
-	}
-	if a.playerStatus == PlayerStatusRunning {
-		helpText += "  ·  player: running"
+	var helpText string
+	if a.subPopup != nil {
+		helpText = "jk/arrows: navigate  ·  enter: download  ·  esc/h: close"
+	} else {
+		helpText = "hjkl/arrows: navigate  ·  enter/l: select  ·  h: back  ·  tab: toggle  ·  r: refresh  ·  q: quit"
+		if a.currentVideo() != nil {
+			helpText += "  ·  s: subtitles"
+		}
+		if a.refreshing {
+			helpText += "  ·  refreshing…"
+		}
+		if a.playerStatus == PlayerStatusRunning {
+			helpText += "  ·  player: running"
+		}
 	}
 
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -1800,4 +1911,254 @@ func (a *App) buildEpisodeCommand(node *DynamicNode) (string, string, string, []
 	execArgs := buildMPVArgs(node.Label, videoURL, subs, mode, startPos, sockPath)
 	execArgs = replaceMpvToken(execArgs, a.client.getToken())
 	return buildMPVCommand(execArgs), mediaKey, sockPath, execArgs, mode, true
+}
+
+// ── Subtitle popup ────────────────────────────────────────────────────────────
+
+// currentVideo returns the polochon.Video for the currently highlighted item, or nil.
+func (a *App) currentVideo() polochon.Video {
+	if a.nav.inDynamicNav {
+		child := a.nav.getSelectedDynamicChild()
+		if child != nil && child.IsTerminalNode() && child.Episode != nil {
+			return child.Episode
+		}
+		return nil
+	}
+	if a.nav.isAtRoot() {
+		return nil
+	}
+	child := a.nav.getSelectedChild()
+	if child == nil || !child.IsTerminal {
+		return nil
+	}
+	media, ok := a.titleToMedia[child.FullString]
+	if !ok || media.Type != "movie" {
+		return nil
+	}
+	movie, ok := a.client.getMovie(media.ID)
+	if !ok {
+		return nil
+	}
+	return movie
+}
+
+func (a *App) openSubtitlePopup() {
+	video := a.currentVideo()
+	if video == nil {
+		return
+	}
+	popup := &SubtitlePopup{
+		video:    video,
+		lang:     polochon.EN,
+		state:    SubtitlePopupLoading,
+		resultCh: make(chan subPopupListResult, 1),
+		list:     layout.List{Axis: layout.Vertical},
+	}
+	a.subPopup = popup
+
+	go func() {
+		entries, err := a.client.listAvailableSubtitles(video, polochon.EN)
+		popup.resultCh <- subPopupListResult{entries: entries, err: err}
+		a.w.Invalidate()
+	}()
+}
+
+func (a *App) closeSubtitlePopup() {
+	a.subPopup = nil
+}
+
+func (a *App) subPopupSelect() {
+	p := a.subPopup
+	if p == nil {
+		return
+	}
+	switch p.state {
+	case SubtitlePopupDone, SubtitlePopupError:
+		a.closeSubtitlePopup()
+	case SubtitlePopupReady:
+		if len(p.entries) == 0 {
+			return
+		}
+		entry := p.entries[p.cursor]
+		p.state = SubtitlePopupDownloading
+		p.downloadDone = make(chan subPopupDownloadResult, 1)
+		go func() {
+			err := a.client.downloadSubtitle(p.video, p.lang, entry)
+			p.downloadDone <- subPopupDownloadResult{err: err}
+			a.w.Invalidate()
+		}()
+	}
+}
+
+// layoutSubtitlePopup draws the full-screen dimmed overlay with the popup box.
+func (a *App) layoutSubtitlePopup(gtx C) D {
+	p := a.subPopup
+	if p == nil {
+		return D{}
+	}
+
+	// Schedule re-invalidation while loading/downloading.
+	if p.state == SubtitlePopupLoading || p.state == SubtitlePopupDownloading {
+		gtx.Execute(op.InvalidateCmd{})
+	}
+	// Schedule auto-close invalidation when done.
+	if p.state == SubtitlePopupDone && !p.doneAt.IsZero() {
+		gtx.Execute(op.InvalidateCmd{At: p.doneAt.Add(1500 * time.Millisecond)})
+	}
+
+	// Dim the whole screen.
+	defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, color.NRGBA{A: 0xb0})
+
+	// Center a box: 60% width, up to 70% height.
+	maxW := gtx.Constraints.Max.X * 6 / 10
+	maxH := gtx.Constraints.Max.Y * 7 / 10
+	boxX := (gtx.Constraints.Max.X - maxW) / 2
+	boxY := (gtx.Constraints.Max.Y - maxH) / 2
+
+	// Draw box background.
+	boxRect := image.Rectangle{
+		Min: image.Pt(boxX, boxY),
+		Max: image.Pt(boxX+maxW, boxY+maxH),
+	}
+	r := gtx.Dp(unit.Dp(8))
+	boxStack := clip.RRect{
+		Rect: boxRect,
+		NW:   r, NE: r, SW: r, SE: r,
+	}.Push(gtx.Ops)
+	paint.Fill(gtx.Ops, colorNavBg)
+	boxStack.Pop()
+
+	// Lay out content inside the box.
+	boxGtx := gtx
+	boxGtx.Constraints = layout.Exact(image.Pt(maxW, maxH))
+	macro := op.Record(gtx.Ops)
+	a.layoutSubtitlePopupContent(boxGtx, p)
+	call := macro.Stop()
+	op.Offset(image.Pt(boxX, boxY)).Add(gtx.Ops)
+	call.Add(gtx.Ops)
+
+	return D{Size: gtx.Constraints.Max}
+}
+
+func (a *App) layoutSubtitlePopupContent(gtx C, p *SubtitlePopup) D {
+	filename := ""
+	if f := p.video.GetFile(); f != nil && f.Path != "" {
+		filename = filepath.Base(f.Path)
+	}
+
+	inset := layout.UniformInset(dp16)
+	return inset.Layout(gtx, func(gtx C) D {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx C) D {
+				lbl := material.Label(a.th, sp, "Subtitles — English")
+				lbl.Color = colorPrimary
+				lbl.Font.Weight = font.Bold
+				return lbl.Layout(gtx)
+			}),
+			layout.Rigid(func(gtx C) D {
+				if filename == "" {
+					return D{}
+				}
+				return layout.Inset{Top: dp4}.Layout(gtx, func(gtx C) D {
+					lbl := material.Label(a.th, sp, filename)
+					lbl.Color = colorSubtle
+					return lbl.Layout(gtx)
+				})
+			}),
+			layout.Rigid(layout.Spacer{Height: dp12}.Layout),
+			layout.Flexed(1, func(gtx C) D {
+				return a.layoutSubtitlePopupBody(gtx, p)
+			}),
+		)
+	})
+}
+
+func (a *App) layoutSubtitlePopupBody(gtx C, p *SubtitlePopup) D {
+	switch p.state {
+	case SubtitlePopupLoading:
+		lbl := material.Label(a.th, sp, "Searching…")
+		lbl.Color = colorMuted
+		return lbl.Layout(gtx)
+	case SubtitlePopupDownloading:
+		lbl := material.Label(a.th, sp, "Downloading…")
+		lbl.Color = colorMuted
+		return lbl.Layout(gtx)
+	case SubtitlePopupDone:
+		lbl := material.Label(a.th, spTitle, "Downloaded!")
+		lbl.Color = colorPrimary
+		return lbl.Layout(gtx)
+	case SubtitlePopupError:
+		lbl := material.Label(a.th, sp, "Error: "+p.errMsg)
+		lbl.Color = colorTerminal
+		lbl.MaxLines = 0
+		return lbl.Layout(gtx)
+	case SubtitlePopupReady:
+		if len(p.entries) == 0 {
+			lbl := material.Label(a.th, sp, "No subtitles found")
+			lbl.Color = colorMuted
+			return lbl.Layout(gtx)
+		}
+		return p.list.Layout(gtx, len(p.entries), func(gtx C, i int) D {
+			entry := p.entries[i]
+			selected := i == p.cursor
+			return a.drawSubtitleEntry(gtx, entry, selected)
+		})
+	}
+	return D{}
+}
+
+// drawSubtitleEntry renders one subtitle result row as two aligned columns:
+// left = Source (fixed 180dp), right = Release (fills remaining width).
+func (a *App) drawSubtitleEntry(gtx C, entry *polochon.SubtitleEntry, selected bool) D {
+	bg := colorNavBg
+	fg := colorFg
+	fgSecondary := colorSubtle
+	if selected {
+		bg = colorSelectedBg
+		fg = colorSelectedFg
+		fgSecondary = colorSelectedFg
+	}
+
+	source := entry.Source
+	release := entry.Description
+
+	const sourceColDp = unit.Dp(180)
+
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx C) D {
+			size := image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Min.Y)
+			defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, bg)
+			return D{Size: size}
+		}),
+		layout.Stacked(func(gtx C) D {
+			gtx.Constraints.Min.X = gtx.Constraints.Max.X
+			return layout.Inset{Top: dp4, Bottom: dp4, Left: dp8, Right: dp8}.Layout(gtx, func(gtx C) D {
+				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+					layout.Rigid(func(gtx C) D {
+						// Fixed-width source column — pin X only, let Y be natural.
+						colW := gtx.Dp(sourceColDp)
+						gtx.Constraints.Min.X = colW
+						gtx.Constraints.Max.X = colW
+						lbl := material.Label(a.th, sp, source)
+						lbl.Color = fgSecondary
+						if selected {
+							lbl.Font.Weight = font.Bold
+						}
+						return lbl.Layout(gtx)
+					}),
+					layout.Flexed(1, func(gtx C) D {
+						lbl := material.Label(a.th, sp, release)
+						lbl.Color = fg
+						if selected {
+							lbl.Font.Weight = font.Bold
+						}
+						lbl.MaxLines = 1
+						return lbl.Layout(gtx)
+					}),
+				)
+			})
+		}),
+	)
 }
