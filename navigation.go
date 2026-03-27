@@ -1,5 +1,7 @@
 package main
 
+import "strings"
+
 // Section represents which main section we're in
 type Section int
 
@@ -17,13 +19,14 @@ type NavNode interface {
 
 // NavigationState tracks where we are in the navigation tree
 type NavigationState struct {
-	section       Section        // Current section (Movies or Shows)
-	path          []*RadixNode   // Path from root to current position in radix tree
-	dynamicPath   []*DynamicNode // Path in dynamic navigation (seasons/episodes)
-	cursor        int            // Current cursor position in the children list
-	inDynamicNav  bool           // True when navigating seasons/episodes
-	dynamicTitle  string         // Show title for dynamic navigation
-	dynamicShowID string         // ImdbID of show being navigated
+	section               Section        // Current section (Movies or Shows)
+	path                  []*RadixNode   // Path from root to current position in radix tree
+	dynamicPath           []*DynamicNode // Path in dynamic navigation (seasons/episodes)
+	cursor                int            // Current cursor position in the children list
+	inDynamicNav          bool           // True when navigating seasons/episodes
+	dynamicTitle          string         // Show title for dynamic navigation
+	dynamicShowID         string         // ImdbID of show being navigated
+	dynamicFormattedTitle string         // Formatted title (with year) of the show in the radix tree
 }
 
 func newNavigationState() *NavigationState {
@@ -83,6 +86,7 @@ func (n *NavigationState) goBack() {
 				n.inDynamicNav = false
 				n.dynamicTitle = ""
 				n.dynamicShowID = ""
+				n.dynamicFormattedTitle = ""
 			}
 		}
 	} else {
@@ -115,6 +119,7 @@ func (n *NavigationState) resetToSection(section Section, rootNode *RadixNode) {
 	n.dynamicPath = []*DynamicNode{}
 	n.dynamicTitle = ""
 	n.dynamicShowID = ""
+	n.dynamicFormattedTitle = ""
 }
 
 // moveCursorUp moves the cursor up (decrements), bounded at 0
@@ -191,8 +196,41 @@ func (n *NavigationState) getSelectedDynamicChild() *DynamicNode {
 	return nil
 }
 
+// navigateToTitle walks the radix tree rooted at root to the terminal node
+// whose FullString == target, reconstructing path and cursor.
+// Returns true on success; on failure path is left in a partial state — caller
+// should reset navigation.
+func (n *NavigationState) navigateToTitle(root *RadixNode, target string) bool {
+	n.path = []*RadixNode{root}
+	n.cursor = 0
+	remaining := target
+
+	for remaining != "" {
+		current := n.path[len(n.path)-1]
+		found := false
+		for i, child := range current.Children {
+			if strings.HasPrefix(remaining, child.Label) {
+				rest := remaining[len(child.Label):]
+				n.cursor = i
+				if rest == "" {
+					return child.IsTerminal
+				}
+				n.path = append(n.path, child)
+				n.cursor = 0
+				remaining = rest
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return false
+}
+
 // enterDynamicNav enters dynamic navigation mode with season nodes
-func (n *NavigationState) enterDynamicNav(seasonNodes []*DynamicNode, showTitle, showID string) {
+func (n *NavigationState) enterDynamicNav(seasonNodes []*DynamicNode, showTitle, showID, formattedTitle string) {
 	// Create a virtual root node for seasons
 	root := &DynamicNode{
 		Type:         DynamicNodeSeason,
@@ -206,6 +244,7 @@ func (n *NavigationState) enterDynamicNav(seasonNodes []*DynamicNode, showTitle,
 	n.cursor = 0
 	n.dynamicTitle = showTitle
 	n.dynamicShowID = showID
+	n.dynamicFormattedTitle = formattedTitle
 }
 
 // goForwardDynamic enters the selected dynamic child

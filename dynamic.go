@@ -19,6 +19,7 @@ const (
 type DynamicNode struct {
 	Type         DynamicNodeType
 	Label        string
+	Num          int           // Season number for season nodes; episode number for episode nodes
 	Episode      *papi.Episode // Only set for episode nodes
 	ShowID       string        // ImdbID of parent show (only set on episode nodes)
 	Children     []*DynamicNode
@@ -62,6 +63,7 @@ func createSeasonNodes(show *papi.Show) []*DynamicNode {
 		node := &DynamicNode{
 			Type:         DynamicNodeSeason,
 			Label:        fmt.Sprintf("Season %d", num),
+			Num:          num,
 			ShowID:       show.ImdbID,
 			Children:     episodeNodes,
 			SubtreeCount: len(episodeNodes),
@@ -100,6 +102,7 @@ func createEpisodeNodes(season *papi.Season, showID string) []*DynamicNode {
 		node := &DynamicNode{
 			Type:         DynamicNodeEpisode,
 			Label:        label,
+			Num:          episode.Episode,
 			Episode:      episode,
 			ShowID:       showID,
 			Children:     nil,

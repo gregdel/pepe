@@ -151,6 +151,111 @@ type App struct {
 	th *material.Theme
 }
 
+// savedSelection captures the identity of the currently selected media item so
+// navigation can be restored after a library refresh.
+type savedSelection struct {
+	section        Section
+	formattedTitle string // radix FullString of the selected terminal
+	showID         string // set when in dynamic nav
+	seasonNum      int    // set when inside an episode list
+	episodeNum     int    // set when cursor is on a specific episode
+}
+
+// captureSelection records what is currently selected, or returns nil if
+// nothing meaningful is selected (e.g. browsing prefix nodes or at root).
+func (a *App) captureSelection() *savedSelection {
+	nav := a.nav
+	if nav.isAtRoot() {
+		return nil
+	}
+
+	if !nav.inDynamicNav {
+		child := nav.getSelectedChild()
+		if child == nil || !child.IsTerminal {
+			return nil
+		}
+		return &savedSelection{
+			section:        nav.section,
+			formattedTitle: child.FullString,
+		}
+	}
+
+	if nav.dynamicFormattedTitle == "" {
+		return nil
+	}
+	sel := &savedSelection{
+		section:        SectionShows,
+		formattedTitle: nav.dynamicFormattedTitle,
+		showID:         nav.dynamicShowID,
+	}
+	if len(nav.dynamicPath) >= 2 {
+		sel.seasonNum = nav.dynamicPath[1].Num
+		ep := nav.getSelectedDynamicChild()
+		if ep != nil && ep.Type == DynamicNodeEpisode {
+			sel.episodeNum = ep.Num
+		}
+	}
+	return sel
+}
+
+// restoreSelection navigates to the previously captured selection in the
+// freshly applied library snapshot. Falls back to root if the item was removed.
+func (a *App) restoreSelection(sel *savedSelection) {
+	if sel == nil {
+		return
+	}
+
+	var sectionRoot *RadixNode
+	if sel.section == SectionMovies {
+		sectionRoot = a.movieRadix.Root()
+	} else {
+		sectionRoot = a.showRadix.Root()
+	}
+
+	a.nav.section = sel.section
+	if !a.nav.navigateToTitle(sectionRoot, sel.formattedTitle) {
+		a.nav = newNavigationState()
+		return
+	}
+
+	if sel.showID == "" {
+		return
+	}
+
+	show, ok := a.client.getShow(sel.showID)
+	if !ok {
+		return
+	}
+	seasonNodes := createSeasonNodes(show)
+	if len(seasonNodes) == 0 {
+		return
+	}
+	a.nav.enterDynamicNav(seasonNodes, show.Title, show.ImdbID, sel.formattedTitle)
+
+	if sel.seasonNum == 0 {
+		return
+	}
+
+	dynRoot := a.nav.getCurrentDynamicNode()
+	for i, sn := range dynRoot.Children {
+		if sn.Num == sel.seasonNum {
+			a.nav.cursor = i
+			if sel.episodeNum == 0 {
+				return
+			}
+			a.nav.goForwardDynamic(sn)
+			epList := a.nav.getCurrentDynamicNode()
+			for j, ep := range epList.Children {
+				if ep.Num == sel.episodeNum {
+					a.nav.cursor = j
+					return
+				}
+			}
+			return
+		}
+	}
+}
+
 func newApp(w *app.Window, client *APIClient, sseCh <-chan struct{}) *App {
 	snapshot := client.getSnapshot()
 	th := material.NewTheme()
@@ -272,6 +377,7 @@ func (a *App) drainChannels() {
 	if a.refreshDone != nil {
 		select {
 		case snapshot := <-a.refreshDone:
+			sel := a.captureSelection()
 			a.movieRadix = snapshot.movieRadix
 			a.showRadix = snapshot.showRadix
 			a.titleToMedia = snapshot.titleToMedia
@@ -283,6 +389,7 @@ func (a *App) drainChannels() {
 			// invalidate cached images since the library has changed
 			a.images.reset()
 			a.nfos.reset()
+			a.restoreSelection(sel)
 		default:
 		}
 	}
@@ -485,7 +592,7 @@ func (a *App) navigateRight() {
 			}
 			seasonNodes := createSeasonNodes(show)
 			if len(seasonNodes) > 0 {
-				a.nav.enterDynamicNav(seasonNodes, show.Title, show.ImdbID)
+				a.nav.enterDynamicNav(seasonNodes, show.Title, show.ImdbID, child.FullString)
 			}
 			return
 		}
