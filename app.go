@@ -124,7 +124,7 @@ type App struct {
 	playerFullscreen bool
 	playerDone       chan error         // goroutine → event loop
 	resumePos        map[string]float64 // mediaKey -> last position (seconds)
-	ipcEvents        chan ipcEvent      // nil when idle
+	playbackTracker  *playbackTracker
 	currentMediaKey  string
 
 	// library refresh
@@ -346,9 +346,9 @@ func run(w *app.Window, client *APIClient, sseCh <-chan struct{}, config *Config
 			a.layout(gtx)
 
 			// Schedule another frame while async fetches are in flight
-			// so drain() picks up results promptly.
-			if a.images.hasLoading() || a.nfos.hasLoading() {
-				gtx.Execute(op.InvalidateCmd{})
+			// so drain() picks up results promptly without spinning the UI.
+			if a.playerStatus != PlayerStatusRunning && (a.images.hasLoading() || a.nfos.hasLoading()) {
+				gtx.Execute(op.InvalidateCmd{At: time.Now().Add(100 * time.Millisecond)})
 			}
 
 			e.Frame(gtx.Ops)
@@ -361,6 +361,7 @@ func (a *App) drainChannels() {
 	if a.playerDone != nil {
 		select {
 		case err := <-a.playerDone:
+			a.applyPlaybackSnapshot(a.playbackTracker)
 			if err != nil {
 				a.playerStatus = PlayerStatusError
 				a.playerError = err.Error()
@@ -369,19 +370,7 @@ func (a *App) drainChannels() {
 				a.playerError = ""
 			}
 			a.playerDone = nil
-			a.ipcEvents = nil
-		default:
-		}
-	}
-
-	if a.ipcEvents != nil {
-		select {
-		case ev := <-a.ipcEvents:
-			if ev.pos < 0 {
-				delete(a.resumePos, ev.mediaKey)
-			} else {
-				a.resumePos[ev.mediaKey] = ev.pos
-			}
+			a.playbackTracker = nil
 		default:
 		}
 	}
@@ -454,6 +443,24 @@ func (a *App) drainChannels() {
 	// Drain all pending image/NFO fetch results.
 	a.images.drain()
 	a.nfos.drain()
+}
+
+func (a *App) applyPlaybackSnapshot(tracker *playbackTracker) {
+	if tracker == nil {
+		return
+	}
+	tracker.wait(100 * time.Millisecond)
+	mediaKey, pos, eof := tracker.snapshot()
+	if mediaKey == "" {
+		return
+	}
+	if eof {
+		delete(a.resumePos, mediaKey)
+		return
+	}
+	if pos > 30 {
+		a.resumePos[mediaKey] = pos
+	}
 }
 
 // ── Key handling ──────────────────────────────────────────────────────────────
@@ -635,7 +642,7 @@ func (a *App) launchMovie(media *MediaItem) {
 	}
 	a.currentMediaKey = mediaKey
 	a.startPlayer(execArgs, mode)
-	a.ipcEvents = startIPC(sockPath, mediaKey, a.w)
+	a.playbackTracker = startIPC(sockPath, mediaKey)
 }
 
 func (a *App) launchEpisode(node *DynamicNode) {
@@ -647,7 +654,7 @@ func (a *App) launchEpisode(node *DynamicNode) {
 	}
 	a.currentMediaKey = mediaKey
 	a.startPlayer(execArgs, mode)
-	a.ipcEvents = startIPC(sockPath, mediaKey, a.w)
+	a.playbackTracker = startIPC(sockPath, mediaKey)
 }
 
 func (a *App) startPlayer(execArgs []string, mode PlayerMode) {
@@ -1636,18 +1643,18 @@ func (a *App) renderPlayerStatus(gtx C) D {
 	}
 
 	var lines []labelLine
+	statusText := string(status)
+	if status == PlayerStatusRunning {
+		statusText = "Playing"
+	}
 	lines = append(lines, labelLine{text: "Player", color: colorPrimary, size: unit.Sp(14), weight: font.Bold})
-	lines = append(lines, labelLine{text: fmt.Sprintf("Status: %s", status), color: colorFg, size: sp})
+	lines = append(lines, labelLine{text: fmt.Sprintf("Status: %s", statusText), color: colorFg, size: sp})
 	if a.playerMode != "" {
 		lines = append(lines, labelLine{text: fmt.Sprintf("Mode: %s", a.playerMode), color: colorFg, size: sp})
 	}
 	if status == PlayerStatusError && a.playerError != "" {
 		lines = append(lines, labelLine{text: "Error:", color: colorMuted, size: sp})
 		lines = append(lines, labelLine{text: a.playerError, color: colorTerminal, size: sp})
-	}
-	if status == PlayerStatusRunning && a.playerCommand != "" {
-		lines = append(lines, labelLine{text: "Command:", color: colorMuted, size: sp})
-		lines = append(lines, labelLine{text: a.playerCommand, color: colorFg, size: sp})
 	}
 	return a.playerLinesList.Layout(gtx, len(lines), func(gtx C, i int) D {
 		l := lines[i]

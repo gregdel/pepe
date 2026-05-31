@@ -5,33 +5,71 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"sync"
 	"time"
-
-	"gioui.org/app"
 )
 
-// ipcEvent is sent from the IPC goroutine to the Gio event loop.
-type ipcEvent struct {
+// playbackTracker is updated by the mpv IPC goroutine without waking the UI.
+type playbackTracker struct {
+	mu       sync.RWMutex
 	mediaKey string
-	pos      float64 // -1 means eof (clear resume position)
+	pos      float64
+	eof      bool
+	done     chan struct{}
 }
 
-// startIPC launches ipcLoop in a goroutine and returns a buffered channel (cap 32).
-func startIPC(sockPath, mediaKey string, w *app.Window) chan ipcEvent {
-	ch := make(chan ipcEvent, 32)
-	go ipcLoop(sockPath, mediaKey, ch, w)
-	return ch
+func newPlaybackTracker(mediaKey string) *playbackTracker {
+	return &playbackTracker{
+		mediaKey: mediaKey,
+		done:     make(chan struct{}),
+	}
+}
+
+func (t *playbackTracker) updatePos(pos float64) {
+	t.mu.Lock()
+	t.pos = pos
+	t.mu.Unlock()
+}
+
+func (t *playbackTracker) markEOF() {
+	t.mu.Lock()
+	t.eof = true
+	t.mu.Unlock()
+}
+
+func (t *playbackTracker) snapshot() (mediaKey string, pos float64, eof bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.mediaKey, t.pos, t.eof
+}
+
+func (t *playbackTracker) wait(timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-t.done:
+	case <-timer.C:
+	}
+}
+
+// startIPC launches ipcLoop in a goroutine and returns a passive playback tracker.
+func startIPC(sockPath, mediaKey string) *playbackTracker {
+	tracker := newPlaybackTracker(mediaKey)
+	go ipcLoop(sockPath, tracker)
+	return tracker
 }
 
 // mpvEvent is the JSON event structure sent by mpv over IPC.
 type mpvEvent struct {
-	Event string      `json:"event"`
-	Name  string      `json:"name"`
-	Data  any `json:"data"`
+	Event string `json:"event"`
+	Name  string `json:"name"`
+	Data  any    `json:"data"`
 }
 
 // ipcLoop connects to the mpv IPC socket and processes events.
-func ipcLoop(sockPath, mediaKey string, ch chan ipcEvent, w *app.Window) {
+func ipcLoop(sockPath string, tracker *playbackTracker) {
+	defer close(tracker.done)
+
 	var conn net.Conn
 	for range 30 {
 		c, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: sockPath, Net: "unix"})
@@ -63,13 +101,11 @@ func ipcLoop(sockPath, mediaKey string, ch chan ipcEvent, w *app.Window) {
 		switch ev.Name {
 		case "time-pos":
 			if pos, ok := ev.Data.(float64); ok && pos > 30.0 {
-				ch <- ipcEvent{mediaKey, pos}
-				w.Invalidate()
+				tracker.updatePos(pos)
 			}
 		case "eof-reached":
 			if reached, ok := ev.Data.(bool); ok && reached {
-				ch <- ipcEvent{mediaKey, -1}
-				w.Invalidate()
+				tracker.markEOF()
 				return
 			}
 		}
