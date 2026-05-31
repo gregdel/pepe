@@ -116,14 +116,16 @@ type App struct {
 	nav *NavigationState
 
 	// player
-	playerStatus    PlayerStatus
-	playerMode      PlayerMode
-	playerError     string
-	playerCommand   string
-	playerDone      chan error         // goroutine → event loop
-	resumePos       map[string]float64 // mediaKey -> last position (seconds)
-	ipcEvents       chan ipcEvent      // nil when idle
-	currentMediaKey string
+	playerStatus     PlayerStatus
+	playerMode       PlayerMode
+	playerError      string
+	playerCommand    string
+	mpvPath          string
+	playerFullscreen bool
+	playerDone       chan error         // goroutine → event loop
+	resumePos        map[string]float64 // mediaKey -> last position (seconds)
+	ipcEvents        chan ipcEvent      // nil when idle
+	currentMediaKey  string
 
 	// library refresh
 	refreshing  bool
@@ -256,38 +258,48 @@ func (a *App) restoreSelection(sel *savedSelection) {
 	}
 }
 
-func newApp(w *app.Window, client *APIClient, sseCh <-chan struct{}) *App {
+func newApp(w *app.Window, client *APIClient, sseCh <-chan struct{}, config *Config) *App {
 	snapshot := client.getSnapshot()
 	th := material.NewTheme()
 
 	keyTag := new(bool)
+	mpvPath := "mpv"
+	playerFullscreen := false
+	if config != nil {
+		if strings.TrimSpace(config.MPVPath) != "" {
+			mpvPath = strings.TrimSpace(config.MPVPath)
+		}
+		playerFullscreen = config.PlayerFullscreen
+	}
 
 	return &App{
-		client:          client,
-		movieRadix:      snapshot.movieRadix,
-		showRadix:       snapshot.showRadix,
-		titleToMedia:    snapshot.titleToMedia,
-		movieCount:      snapshot.movieCount,
-		showCount:       snapshot.showCount,
-		nav:             newNavigationState(),
-		playerStatus:    PlayerStatusIdle,
-		resumePos:       make(map[string]float64),
-		keyTag:          keyTag,
-		w:               w,
-		th:              th,
-		leftList:        layout.List{Axis: layout.Vertical},
-		rightList:       layout.List{Axis: layout.Vertical},
-		playerLinesList: layout.List{Axis: layout.Vertical},
-		images:          newAsyncCache[image.Image](),
-		nfos:            newAsyncCache[*polochon.Movie](),
-		sseCh:           sseCh,
+		client:           client,
+		movieRadix:       snapshot.movieRadix,
+		showRadix:        snapshot.showRadix,
+		titleToMedia:     snapshot.titleToMedia,
+		movieCount:       snapshot.movieCount,
+		showCount:        snapshot.showCount,
+		nav:              newNavigationState(),
+		playerStatus:     PlayerStatusIdle,
+		mpvPath:          mpvPath,
+		playerFullscreen: playerFullscreen,
+		resumePos:        make(map[string]float64),
+		keyTag:           keyTag,
+		w:                w,
+		th:               th,
+		leftList:         layout.List{Axis: layout.Vertical},
+		rightList:        layout.List{Axis: layout.Vertical},
+		playerLinesList:  layout.List{Axis: layout.Vertical},
+		images:           newAsyncCache[image.Image](),
+		nfos:             newAsyncCache[*polochon.Movie](),
+		sseCh:            sseCh,
 	}
 }
 
 // ── Main event loop ───────────────────────────────────────────────────────────
 
-func run(w *app.Window, client *APIClient, sseCh <-chan struct{}) error {
-	a := newApp(w, client, sseCh)
+func run(w *app.Window, client *APIClient, sseCh <-chan struct{}, config *Config) error {
+	a := newApp(w, client, sseCh, config)
 	var ops op.Ops
 	requestFocus := true // grab focus on the very first frame
 
@@ -505,7 +517,7 @@ func (a *App) handleKeys(gtx layout.Context) {
 			a.navigateUp()
 		case key.NameDownArrow, "J":
 			a.navigateDown()
-		case key.NameLeftArrow, "H":
+		case key.NameLeftArrow, key.NameEscape, "H":
 			a.navigateLeft()
 		case key.NameRightArrow, "L", key.NameReturn, key.NameEnter:
 			a.navigateRight()
@@ -1907,14 +1919,19 @@ func detectPlayerMode() PlayerMode {
 	return PlayerModeKMS
 }
 
-func buildMPVArgs(title, videoURL string, subtitleURLs []string, mode PlayerMode, startPos float64, sockPath string) []string {
-	args := []string{"mpv"}
+func buildMPVArgs(mpvPath, title, videoURL string, subtitleURLs []string, mode PlayerMode, startPos float64, sockPath string, fullscreen bool) []string {
+	if strings.TrimSpace(mpvPath) == "" {
+		mpvPath = "mpv"
+	}
+	args := []string{mpvPath}
 	args = append(args, "--http-header-fields=X-Auth-Token: $POLOCHON_TOKEN")
 	if startPos > 30 {
 		args = append(args, fmt.Sprintf("--start=%d", int(startPos)))
 	}
 	if mode == PlayerModeKMS {
 		args = append(args, "--vo=gpu", "--gpu-context=drm", "--opengl-es=yes", "--fs", "--no-border", "--ontop")
+	} else if fullscreen {
+		args = append(args, "--fs", "--no-border")
 	}
 	if title != "" {
 		args = append(args, "--title="+title)
@@ -1984,7 +2001,7 @@ func (a *App) buildMovieCommand(media *MediaItem) (string, string, string, []str
 	sockPath := fmt.Sprintf("/tmp/polochon-mpv-%d.sock", os.Getpid())
 	startPos := a.resumePos[mediaKey]
 	mode := detectPlayerMode()
-	execArgs := buildMPVArgs(media.Title, videoURL, subs, mode, startPos, sockPath)
+	execArgs := buildMPVArgs(a.mpvPath, media.Title, videoURL, subs, mode, startPos, sockPath, a.playerFullscreen)
 	execArgs = replaceMpvToken(execArgs, a.client.getToken())
 	return buildMPVCommand(execArgs), mediaKey, sockPath, execArgs, mode, true
 }
@@ -2015,7 +2032,7 @@ func (a *App) buildEpisodeCommand(node *DynamicNode) (string, string, string, []
 	sockPath := fmt.Sprintf("/tmp/polochon-mpv-%d.sock", os.Getpid())
 	startPos := a.resumePos[mediaKey]
 	mode := detectPlayerMode()
-	execArgs := buildMPVArgs(node.Label, videoURL, subs, mode, startPos, sockPath)
+	execArgs := buildMPVArgs(a.mpvPath, node.Label, videoURL, subs, mode, startPos, sockPath, a.playerFullscreen)
 	execArgs = replaceMpvToken(execArgs, a.client.getToken())
 	return buildMPVCommand(execArgs), mediaKey, sockPath, execArgs, mode, true
 }

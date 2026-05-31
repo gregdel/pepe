@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"image"
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -321,21 +323,72 @@ func (c *APIClient) Events(ctx context.Context) <-chan struct{} {
 type Config struct {
 	PolochonURL string
 	Token       string
+	MPVPath     string
+
+	Fullscreen       bool
+	PlayerFullscreen bool
 }
 
-func loadConfig() (*Config, error) {
+type fileConfig struct {
+	PolochonURL      string `json:"polochon_url"`
+	Token            string `json:"polochon_token"`
+	MPVPath          string `json:"mpv_path"`
+	Fullscreen       bool   `json:"fullscreen"`
+	PlayerFullscreen bool   `json:"player_fullscreen"`
+}
+
+func defaultConfigPath() string {
+	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
+		return filepath.Join(dir, "polochon-gio", "config.json")
+	}
+	return filepath.Join(".", "polochon-gio.json")
+}
+
+func loadConfig(path string) (*Config, error) {
+	cfg := &Config{
+		MPVPath: "mpv",
+	}
+
+	if path != "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("read config file %s: %w", path, err)
+			}
+		} else {
+			var fc fileConfig
+			if err := json.Unmarshal(b, &fc); err != nil {
+				return nil, fmt.Errorf("parse config file %s: %w", path, err)
+			}
+			cfg.PolochonURL = strings.TrimSpace(fc.PolochonURL)
+			cfg.Token = strings.TrimSpace(fc.Token)
+			if strings.TrimSpace(fc.MPVPath) != "" {
+				cfg.MPVPath = strings.TrimSpace(fc.MPVPath)
+			}
+			cfg.Fullscreen = fc.Fullscreen
+			cfg.PlayerFullscreen = fc.PlayerFullscreen
+		}
+	}
+
 	url := os.Getenv("POLOCHON_URL")
-	if url == "" {
+	if url != "" {
+		cfg.PolochonURL = strings.TrimSpace(url)
+	}
+	if cfg.PolochonURL == "" {
 		return nil, fmt.Errorf("POLOCHON_URL environment variable is required")
 	}
 
 	token := os.Getenv("POLOCHON_TOKEN")
-	if token == "" {
+	if token != "" {
+		cfg.Token = strings.TrimSpace(token)
+	}
+	if cfg.Token == "" {
 		return nil, fmt.Errorf("POLOCHON_TOKEN environment variable is required")
 	}
 
-	return &Config{
-		PolochonURL: url,
-		Token:       token,
-	}, nil
+	if mpvPath := strings.TrimSpace(os.Getenv("POLOCHON_MPV")); mpvPath != "" {
+		cfg.MPVPath = mpvPath
+	}
+
+	return cfg, nil
 }

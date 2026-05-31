@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Polochon
+Comment=Polochon Gio client
+Exec=@INSTALL_DIR@/run-polochon-gio.sh
+Path=@INSTALL_DIR@
+Terminal=false
+Categories=AudioVideo;Video;Player;
