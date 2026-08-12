@@ -10,40 +10,24 @@ const (
 	SectionShows
 )
 
-// NavNode is a common interface for both RadixNode and DynamicNode
-type NavNode interface {
-	GetLabel() string
-	GetSubtreeCount() int
-	IsTerminalNode() bool
-}
-
 // NavigationState tracks where we are in the navigation tree
 type NavigationState struct {
-	section               Section        // Current section (Movies or Shows)
-	path                  []*RadixNode   // Path from root to current position in radix tree
-	dynamicPath           []*DynamicNode // Path in dynamic navigation (seasons/episodes)
-	cursor                int            // Current cursor position in the children list
-	inDynamicNav          bool           // True when navigating seasons/episodes
-	dynamicTitle          string         // Show title for dynamic navigation
-	dynamicShowID         string         // ImdbID of show being navigated
-	dynamicFormattedTitle string         // Formatted title (with year) of the show in the radix tree
+	section Section      // Current section (Movies or Shows)
+	path    []*RadixNode // Path from root to current position in radix tree
+	cursor  int          // Current cursor position in the children list
 }
 
 func newNavigationState() *NavigationState {
 	return &NavigationState{
-		section:       SectionMovies,
-		path:          []*RadixNode{},
-		dynamicPath:   []*DynamicNode{},
-		cursor:        0,
-		inDynamicNav:  false,
-		dynamicTitle:  "",
-		dynamicShowID: "",
+		section: SectionMovies,
+		path:    []*RadixNode{},
+		cursor:  0,
 	}
 }
 
 // isAtRoot returns true if we're at the root level (selecting Movies/Shows)
 func (n *NavigationState) isAtRoot() bool {
-	return len(n.path) == 0 && !n.inDynamicNav
+	return len(n.path) == 0
 }
 
 // isAtSectionRoot returns true if we're at the root of a section (first level in tree)
@@ -75,26 +59,9 @@ func (n *NavigationState) getSelectedChild() *RadixNode {
 
 // goBack moves up one level in the tree
 func (n *NavigationState) goBack() {
-	if n.inDynamicNav {
-		// In dynamic nav, go back through dynamic path
-		if len(n.dynamicPath) > 0 {
-			n.dynamicPath = n.dynamicPath[:len(n.dynamicPath)-1]
-			n.cursor = 0
-
-			// If we've exhausted dynamic path, return to radix tree
-			if len(n.dynamicPath) == 0 {
-				n.inDynamicNav = false
-				n.dynamicTitle = ""
-				n.dynamicShowID = ""
-				n.dynamicFormattedTitle = ""
-			}
-		}
-	} else {
-		// In radix tree nav
-		if len(n.path) > 0 {
-			n.path = n.path[:len(n.path)-1]
-			n.cursor = 0
-		}
+	if len(n.path) > 0 {
+		n.path = n.path[:len(n.path)-1]
+		n.cursor = 0
 	}
 }
 
@@ -115,11 +82,6 @@ func (n *NavigationState) resetToSection(section Section, rootNode *RadixNode) {
 		n.path = []*RadixNode{}
 	}
 	n.cursor = 0
-	n.inDynamicNav = false
-	n.dynamicPath = []*DynamicNode{}
-	n.dynamicTitle = ""
-	n.dynamicShowID = ""
-	n.dynamicFormattedTitle = ""
 }
 
 // moveCursorUp moves the cursor up (decrements), bounded at 0
@@ -138,14 +100,6 @@ func (n *NavigationState) moveCursorDown(maxChildren int) {
 
 // getChildrenCount returns the number of children for the current node
 func (n *NavigationState) getChildrenCount() int {
-	if n.inDynamicNav {
-		current := n.getCurrentDynamicNode()
-		if current == nil {
-			return 0
-		}
-		return len(current.Children)
-	}
-
 	current := n.getCurrentNode()
 	if current == nil {
 		return 0
@@ -155,11 +109,6 @@ func (n *NavigationState) getChildrenCount() int {
 
 // getCurrentPath returns the accumulated path string (current prefix being explored)
 func (n *NavigationState) getCurrentPath() string {
-	// Don't show path in dynamic navigation
-	if n.inDynamicNav {
-		return ""
-	}
-
 	if len(n.path) <= 1 {
 		// At root or section root, no path to show
 		return ""
@@ -172,28 +121,6 @@ func (n *NavigationState) getCurrentPath() string {
 	}
 
 	return pathStr
-}
-
-// getCurrentDynamicNode returns the current node in dynamic navigation
-func (n *NavigationState) getCurrentDynamicNode() *DynamicNode {
-	if len(n.dynamicPath) == 0 {
-		return nil
-	}
-	return n.dynamicPath[len(n.dynamicPath)-1]
-}
-
-// getSelectedDynamicChild returns the currently selected dynamic child
-func (n *NavigationState) getSelectedDynamicChild() *DynamicNode {
-	current := n.getCurrentDynamicNode()
-	if current == nil {
-		return nil
-	}
-
-	if n.cursor >= 0 && n.cursor < len(current.Children) {
-		return current.Children[n.cursor]
-	}
-
-	return nil
 }
 
 // navigateToTitle walks the radix tree rooted at root to the terminal node
@@ -227,30 +154,4 @@ func (n *NavigationState) navigateToTitle(root *RadixNode, target string) bool {
 		}
 	}
 	return false
-}
-
-// enterDynamicNav enters dynamic navigation mode with season nodes
-func (n *NavigationState) enterDynamicNav(seasonNodes []*DynamicNode, showTitle, showID, formattedTitle string) {
-	// Create a virtual root node for seasons
-	root := &DynamicNode{
-		Type:         DynamicNodeSeason,
-		Label:        "Seasons",
-		Children:     seasonNodes,
-		SubtreeCount: len(seasonNodes),
-	}
-
-	n.inDynamicNav = true
-	n.dynamicPath = []*DynamicNode{root}
-	n.cursor = 0
-	n.dynamicTitle = showTitle
-	n.dynamicShowID = showID
-	n.dynamicFormattedTitle = formattedTitle
-}
-
-// goForwardDynamic enters the selected dynamic child
-func (n *NavigationState) goForwardDynamic(child *DynamicNode) {
-	if child != nil {
-		n.dynamicPath = append(n.dynamicPath, child)
-		n.cursor = 0
-	}
 }
