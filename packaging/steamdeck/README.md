@@ -18,7 +18,7 @@ This bundle is for a personal Steam Deck install from Desktop Mode.
 
    ```sh
    mkdir -p "$HOME/.config/polochon-gio"
-   cp config.example.json "$HOME/.config/polochon-gio/config.json"
+   cp config.example.yaml "$HOME/.config/polochon-gio/config.yaml"
    ```
 
    Edit `polochon_url` and `polochon_token`.

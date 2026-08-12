@@ -2,7 +2,7 @@
 set -eu
 
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-CONFIG_FILE="${POLOCHON_GIO_CONFIG:-$HOME/.config/polochon-gio/config.json}"
+CONFIG_FILE="${POLOCHON_GIO_CONFIG:-$HOME/.config/polochon-gio/config.yaml}"
 
 export PATH="$APP_DIR:$PATH"
 

@@ -12,14 +12,13 @@ func TestLoadConfigFromFile(t *testing.T) {
 	t.Setenv("POLOCHON_TOKEN", "")
 	t.Setenv("POLOCHON_MPV", "")
 
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{
-		"polochon_url": "http://deck.local:8080",
-		"polochon_token": "file-token",
-		"mpv_path": "/usr/bin/mpv",
-		"fullscreen": true,
-		"player_fullscreen": true
-	}`), 0o600); err != nil {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(`polochon_url: http://deck.local:8080
+polochon_token: file-token
+mpv_path: /usr/bin/mpv
+fullscreen: true
+player_fullscreen: true
+`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -43,12 +42,11 @@ func TestLoadConfigFromFile(t *testing.T) {
 }
 
 func TestLoadConfigEnvOverridesFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{
-		"polochon_url": "http://file.example",
-		"polochon_token": "file-token",
-		"mpv_path": "mpv"
-	}`), 0o600); err != nil {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(`polochon_url: http://file.example
+polochon_token: file-token
+mpv_path: mpv
+`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

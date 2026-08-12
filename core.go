@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"image"
 	"log/slog"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	yaml "github.com/goccy/go-yaml"
 	polochon "github.com/odwrtw/polochon/lib"
 	"github.com/odwrtw/polochon/lib/nfo"
 	"github.com/odwrtw/polochon/lib/papi"
@@ -330,23 +330,25 @@ type Config struct {
 }
 
 type fileConfig struct {
-	PolochonURL      string `json:"polochon_url"`
-	Token            string `json:"polochon_token"`
-	MPVPath          string `json:"mpv_path"`
-	Fullscreen       bool   `json:"fullscreen"`
-	PlayerFullscreen bool   `json:"player_fullscreen"`
+	PolochonURL      string `yaml:"polochon_url"`
+	Token            string `yaml:"polochon_token"`
+	MPVPath          string `yaml:"mpv_path"`
+	Fullscreen       bool   `yaml:"fullscreen"`
+	PlayerFullscreen bool   `yaml:"player_fullscreen"`
 }
 
 func defaultConfigPath() string {
 	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
-		return filepath.Join(dir, "polochon-gio", "config.json")
+		return filepath.Join(dir, "polochon-gio", "config.yaml")
 	}
-	return filepath.Join(".", "polochon-gio.json")
+	return filepath.Join(".", "polochon-gio.yaml")
 }
 
 func loadConfig(path string) (*Config, error) {
 	cfg := &Config{
-		MPVPath: "mpv",
+		MPVPath:          "mpv",
+		Fullscreen:       false,
+		PlayerFullscreen: false,
 	}
 
 	if path != "" {
@@ -357,7 +359,7 @@ func loadConfig(path string) (*Config, error) {
 			}
 		} else {
 			var fc fileConfig
-			if err := json.Unmarshal(b, &fc); err != nil {
+			if err := yaml.Unmarshal(b, &fc); err != nil {
 				return nil, fmt.Errorf("parse config file %s: %w", path, err)
 			}
 			cfg.PolochonURL = strings.TrimSpace(fc.PolochonURL)
