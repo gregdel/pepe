@@ -2,13 +2,11 @@ module github.com/gregdel/polochon-gio
 
 go 1.26.1
 
-replace github.com/odwrtw/polochon => ../polochon
-
 require (
 	gioui.org v0.10.2
 	github.com/dustin/go-humanize v1.0.1
 	github.com/goccy/go-yaml v1.19.2
-	github.com/odwrtw/polochon v0.0.0-20260309194504-aaaffabec6bb
+	github.com/odwrtw/polochon v0.0.0-20260601073335-6f700a7ca1cf
 )
 
 require (
