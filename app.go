@@ -106,7 +106,7 @@ type App struct {
 	sseCh       <-chan struct{}      // SSE events from server
 
 	// image cache (thumbs, fanarts, posters — all media types)
-	images *asyncCache[image.Image]
+	images *asyncCache[paint.ImageOp]
 
 	// nfo cache — parsed NFO data per movie ID
 	nfos *asyncCache[*polochon.Movie]
@@ -185,7 +185,7 @@ func newApp(w *app.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 		playerFullscreen = config.PlayerFullscreen
 	}
 
-	return &App{
+	app := &App{
 		client:           client,
 		movieRadix:       snapshot.movieRadix,
 		showRadix:        snapshot.showRadix,
@@ -204,10 +204,13 @@ func newApp(w *app.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 		rightList:        layout.List{Axis: layout.Vertical},
 		playerLinesList:  layout.List{Axis: layout.Vertical},
 		detailList:       layout.List{Axis: layout.Vertical},
-		images:           newAsyncCache[image.Image](),
-		nfos:             newAsyncCache[*polochon.Movie](),
+		images:           newAsyncCache[paint.ImageOp](3, 24),
+		nfos:             newAsyncCache[*polochon.Movie](1, 4),
 		sseCh:            sseCh,
 	}
+	app.images.onDone = w.Invalidate
+	app.nfos.onDone = w.Invalidate
+	return app
 }
 
 // ── Main event loop ───────────────────────────────────────────────────────────
@@ -258,12 +261,6 @@ func run(w *app.Window, client *APIClient, sseCh <-chan struct{}, config *Config
 
 			// Draw the UI
 			a.layout(gtx)
-
-			// Schedule another frame while async fetches are in flight
-			// so drain() picks up results promptly without spinning the UI.
-			if a.playerStatus != PlayerStatusRunning && (a.images.hasLoading() || a.nfos.hasLoading()) {
-				gtx.Execute(op.InvalidateCmd{At: time.Now().Add(100 * time.Millisecond)})
-			}
 
 			e.Frame(gtx.Ops)
 		}

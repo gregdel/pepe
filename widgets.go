@@ -104,6 +104,17 @@ func (a *App) twoTone(gtx C, size unit.Sp, prefix, rest string, restCol color.NR
 
 // ── Poster / fanart images ────────────────────────────────────────────────────
 
+func fetchImageOp(fetchFn func() (image.Image, error)) (paint.ImageOp, error) {
+	img, err := fetchFn()
+	if err != nil {
+		return paint.ImageOp{}, err
+	}
+	if img == nil {
+		return paint.ImageOp{}, nil
+	}
+	return paint.NewImageOp(img), nil
+}
+
 // posterImage renders a 2:3 poster at the given width, asynchronously fetching
 // it on first use. A placeholder surface is drawn while loading or on failure.
 func (a *App) posterImage(gtx C, cacheKey string, fetchFn func() (image.Image, error), width, radius unit.Dp) D {
@@ -118,18 +129,18 @@ func (a *App) posterImage(gtx C, cacheKey string, fetchFn func() (image.Image, e
 			Rect: image.Rectangle{Max: size},
 			NE:   gtx.Dp(radius), NW: gtx.Dp(radius), SE: gtx.Dp(radius), SW: gtx.Dp(radius),
 		}.Push(gtx.Ops).Pop()
-		if img == nil {
+		if img.Size().X == 0 || img.Size().Y == 0 {
 			paint.Fill(gtx.Ops, colorSurface2)
 			return D{Size: size}
 		}
 		return widget.Image{
-			Src:      paint.NewImageOp(img),
+			Src:      img,
 			Fit:      widget.Cover,
 			Position: layout.Center,
 		}.Layout(gtx2)
 	}
 
-	a.images.fetch(cacheKey, fetchFn)
+	a.images.fetch(cacheKey, func() (paint.ImageOp, error) { return fetchImageOp(fetchFn) })
 	defer clip.RRect{
 		Rect: image.Rectangle{Max: size},
 		NE:   gtx.Dp(radius), NW: gtx.Dp(radius), SE: gtx.Dp(radius), SW: gtx.Dp(radius),
@@ -141,16 +152,16 @@ func (a *App) posterImage(gtx C, cacheKey string, fetchFn func() (image.Image, e
 // fanart renders a full-bleed cover image filling the constraints.
 func (a *App) fanart(gtx C, cacheKey string, fetchFn func() (image.Image, error)) D {
 	if img, ok := a.images.get(cacheKey); ok {
-		if img != nil {
+		if img.Size().X != 0 && img.Size().Y != 0 {
 			widget.Image{
-				Src:      paint.NewImageOp(img),
+				Src:      img,
 				Fit:      widget.Cover,
 				Position: layout.Center,
 			}.Layout(gtx)
 		}
 		return D{Size: gtx.Constraints.Max}
 	}
-	a.images.fetch(cacheKey, fetchFn)
+	a.images.fetch(cacheKey, func() (paint.ImageOp, error) { return fetchImageOp(fetchFn) })
 	return D{Size: gtx.Constraints.Max}
 }
 
