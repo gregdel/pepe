@@ -84,18 +84,28 @@ func (n *NavigationState) resetToSection(section Section, rootNode *RadixNode) {
 	n.cursor = 0
 }
 
-// moveCursorUp moves the cursor up (decrements), bounded at 0
-func (n *NavigationState) moveCursorUp() {
-	if n.cursor > 0 {
-		n.cursor--
+// moveCursorUp moves the cursor up, wrapping to the last child at the top.
+func (n *NavigationState) moveCursorUp(maxChildren int) {
+	if maxChildren <= 0 {
+		return
 	}
+	if n.cursor <= 0 {
+		n.cursor = maxChildren - 1
+		return
+	}
+	n.cursor--
 }
 
-// moveCursorDown moves the cursor down (increments), bounded by maxChildren
+// moveCursorDown moves the cursor down, wrapping to the first child at the end.
 func (n *NavigationState) moveCursorDown(maxChildren int) {
-	if n.cursor < maxChildren-1 {
-		n.cursor++
+	if maxChildren <= 0 {
+		return
 	}
+	if n.cursor >= maxChildren-1 {
+		n.cursor = 0
+		return
+	}
+	n.cursor++
 }
 
 // getChildrenCount returns the number of children for the current node

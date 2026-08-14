@@ -117,7 +117,7 @@ func (s *showPage) down() {
 	}
 }
 
-// left switches to the previous season (both focus zones).
+// left switches to the previous season.
 func (s *showPage) left() { s.switchSeason(-1) }
 
 // right switches to the next season (both focus zones).

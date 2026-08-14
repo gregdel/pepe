@@ -20,21 +20,26 @@ func waitForCache(t *testing.T, condition func() bool) {
 
 func TestAsyncCacheLimitsActiveFetchesAndStartsQueuedWork(t *testing.T) {
 	c := newAsyncCache[int](2, 4)
-	release := make(chan struct{})
+	activeRelease := make(chan struct{})
+	queuedRelease := make(chan struct{})
 	var startCount atomic.Int32
 	var running atomic.Int32
 	var maxRunning atomic.Int32
 
 	fetch := func() (int, error) {
-		current := running.Add(1)
+		runningNow := running.Add(1)
 		for {
 			max := maxRunning.Load()
-			if current <= max || maxRunning.CompareAndSwap(max, current) {
+			if runningNow <= max || maxRunning.CompareAndSwap(max, runningNow) {
 				break
 			}
 		}
-		startCount.Add(1)
-		<-release
+		startNumber := startCount.Add(1)
+		if startNumber <= 2 {
+			<-activeRelease
+		} else {
+			<-queuedRelease
+		}
 		running.Add(-1)
 		return 1, nil
 	}
@@ -50,10 +55,14 @@ func TestAsyncCacheLimitsActiveFetchesAndStartsQueuedWork(t *testing.T) {
 		t.Fatalf("maximum concurrent fetches = %d, want at most 2", got)
 	}
 
-	close(release)
+	close(activeRelease)
 	waitForCache(t, func() bool { return len(c.done) == 2 })
 	c.drain()
 	waitForCache(t, func() bool { return startCount.Load() == 4 })
+	if got := len(c.done); got != 0 {
+		t.Fatalf("queued fetches completed before release: %d", got)
+	}
+	close(queuedRelease)
 	waitForCache(t, func() bool { return len(c.done) == 2 })
 	c.drain()
 }

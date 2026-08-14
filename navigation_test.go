@@ -160,15 +160,20 @@ func TestNavigationState_moveCursorUp(t *testing.T) {
 	nav := newNavigationState()
 	nav.cursor = 5
 
-	nav.moveCursorUp()
+	nav.moveCursorUp(10)
 	if nav.cursor != 4 {
 		t.Errorf("Expected cursor to be 4, got %d", nav.cursor)
 	}
 
 	nav.cursor = 0
-	nav.moveCursorUp()
-	if nav.cursor != 0 {
-		t.Errorf("Expected cursor to stay at 0, got %d", nav.cursor)
+	nav.moveCursorUp(10)
+	if nav.cursor != 9 {
+		t.Errorf("Expected cursor to wrap to 9, got %d", nav.cursor)
+	}
+
+	nav.moveCursorUp(0)
+	if nav.cursor != 9 {
+		t.Errorf("Expected cursor to stay at 9 for an empty list, got %d", nav.cursor)
 	}
 }
 
@@ -183,8 +188,13 @@ func TestNavigationState_moveCursorDown(t *testing.T) {
 
 	nav.cursor = 9
 	nav.moveCursorDown(10)
-	if nav.cursor != 9 {
-		t.Errorf("Expected cursor to stay at 9, got %d", nav.cursor)
+	if nav.cursor != 0 {
+		t.Errorf("Expected cursor to wrap to 0, got %d", nav.cursor)
+	}
+
+	nav.moveCursorDown(0)
+	if nav.cursor != 0 {
+		t.Errorf("Expected cursor to stay at 0 for an empty list, got %d", nav.cursor)
 	}
 }
 

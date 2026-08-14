@@ -497,7 +497,11 @@ func (a *App) handleShowKeys(ke key.Event, s *showPage) {
 	case key.NameDownArrow, "J":
 		s.down()
 	case key.NameLeftArrow, "H":
-		s.left()
+		if s.focus == focusTabs {
+			s.left()
+		} else {
+			a.popDetail()
+		}
 	case key.NameRightArrow, "L":
 		s.right()
 	case key.NameReturn, key.NameEnter:
@@ -530,17 +534,21 @@ func (a *App) scrollDetail(dir int) {
 
 func (a *App) navigateUp() {
 	if a.nav.isAtRoot() {
-		if a.nav.cursor > 0 {
+		if a.nav.cursor == 0 {
+			a.nav.cursor = 1
+		} else {
 			a.nav.cursor = 0
 		}
 	} else {
-		a.nav.moveCursorUp()
+		a.nav.moveCursorUp(a.nav.getChildrenCount())
 	}
 }
 
 func (a *App) navigateDown() {
 	if a.nav.isAtRoot() {
-		if a.nav.cursor < 1 {
+		if a.nav.cursor == 1 {
+			a.nav.cursor = 0
+		} else {
 			a.nav.cursor = 1
 		}
 	} else {
