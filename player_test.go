@@ -44,3 +44,22 @@ func TestApplyPlaybackSnapshotClearsResumeOnEOF(t *testing.T) {
 		t.Fatal("resume position was not cleared")
 	}
 }
+
+func TestDetectPlayerMode(t *testing.T) {
+	emptyEnv := func(string) string { return "" }
+
+	if got := detectPlayerModeFor("darwin", emptyEnv); got != PlayerModeGUI {
+		t.Fatalf("macOS player mode = %q, want %q", got, PlayerModeGUI)
+	}
+	if got := detectPlayerModeFor("linux", emptyEnv); got != PlayerModeKMS {
+		t.Fatalf("headless Linux player mode = %q, want %q", got, PlayerModeKMS)
+	}
+	if got := detectPlayerModeFor("linux", func(name string) string {
+		if name == "DISPLAY" {
+			return ":0"
+		}
+		return ""
+	}); got != PlayerModeGUI {
+		t.Fatalf("desktop Linux player mode = %q, want %q", got, PlayerModeGUI)
+	}
+}

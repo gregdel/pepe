@@ -5,6 +5,7 @@ import (
 	"image"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -880,12 +881,20 @@ func formatSubtitles(embeddedLangs []polochon.Language, externalSubs []*papi.Sub
 // ── MPV helpers (ported from ui.go) ──────────────────────────────────────────
 
 func detectPlayerMode() PlayerMode {
+	return detectPlayerModeFor(runtime.GOOS, os.Getenv)
+}
+
+func detectPlayerModeFor(goos string, getenv func(string) string) PlayerMode {
+	// DRM/KMS is Linux-specific; other platforms use mpv's native window.
+	if goos != "linux" {
+		return PlayerModeGUI
+	}
 	for _, name := range []string{"WAYLAND_DISPLAY", "DISPLAY"} {
-		if os.Getenv(name) != "" {
+		if getenv(name) != "" {
 			return PlayerModeGUI
 		}
 	}
-	sessionType := strings.ToLower(strings.TrimSpace(os.Getenv("XDG_SESSION_TYPE")))
+	sessionType := strings.ToLower(strings.TrimSpace(getenv("XDG_SESSION_TYPE")))
 	if sessionType == "wayland" || sessionType == "x11" {
 		return PlayerModeGUI
 	}
