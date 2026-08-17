@@ -11,6 +11,7 @@ type RadixNode struct {
 	Label        string       // Edge label (string segment from parent to this node)
 	IsTerminal   bool         // True if this node represents a complete string
 	FullString   string       // The complete string if terminal
+	Media        *MediaItem   // App-owned media identity for listing terminals
 	SubtreeCount int          // Total number of terminal strings in subtree
 	Children     []*RadixNode // Ordered by descending subtree count
 }

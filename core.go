@@ -31,9 +31,13 @@ type APIClient struct {
 	token    string
 	endpoint string
 
-	mu           sync.RWMutex
-	movies       map[string]*papi.Movie
-	shows        map[string]*papi.Show
+	mu     sync.RWMutex
+	movies map[string]*papi.Movie
+	shows  map[string]*papi.Show
+	// Listing items and their referenced media graphs are immutable after publication.
+	// Builders may read them but must not mutate them.
+	movieItems   []*listingItem
+	showItems    []*listingItem
 	movieRadix   *RadixTree
 	showRadix    *RadixTree
 	titleToMedia map[string]*MediaItem
@@ -104,75 +108,39 @@ func (c *APIClient) fetchLibrary() error {
 
 	movies := make(map[string]*papi.Movie)
 	shows := make(map[string]*papi.Show)
-	titleToMedia := make(map[string]*MediaItem)
-
-	var movieTitles []string
-	var showTitles []string
+	movieItems := make([]*listingItem, 0, len(movieList))
+	showItems := make([]*listingItem, 0, len(showList))
 
 	for _, movie := range movieList {
 		movies[movie.ImdbID] = movie
-
-		// Format title with year
-		displayTitle := formatTitle(movie.Title, movie.Year)
-
-		item := MediaItem{
-			ID:    movie.ImdbID,
-			Title: movie.Title,
-			Year:  movie.Year,
-			Type:  "movie",
-		}
-
-		// Add main title
-		movieTitles = append(movieTitles, displayTitle)
-		titleToMedia[displayTitle] = &item
-
-		// Also index without "The " prefix if present
-		if strippedTitle, hasThe := stripThePrefix(displayTitle); hasThe {
-			movieTitles = append(movieTitles, strippedTitle)
-			titleToMedia[strippedTitle] = &item
-		}
+		movieItems = append(movieItems, newMovieListingItem(movie))
 	}
 
 	for _, show := range showList {
 		shows[show.ImdbID] = show
-
-		// Format title with year
-		displayTitle := formatTitle(show.Title, show.Year)
-
-		item := MediaItem{
-			ID:    show.ImdbID,
-			Title: show.Title,
-			Year:  show.Year,
-			Type:  "show",
-		}
-
-		// Add main title
-		showTitles = append(showTitles, displayTitle)
-		titleToMedia[displayTitle] = &item
-
-		// Also index without "The " prefix if present
-		if strippedTitle, hasThe := stripThePrefix(displayTitle); hasThe {
-			showTitles = append(showTitles, strippedTitle)
-			titleToMedia[strippedTitle] = &item
-		}
+		showItems = append(showItems, newShowListingItem(show))
 	}
 
-	// Build radix trees
-	movieRadix := NewRadixTree(movieTitles)
-	showRadix := NewRadixTree(showTitles)
-
-	c.mu.Lock()
-	c.movies = movies
-	c.shows = shows
-	c.movieRadix = movieRadix
-	c.showRadix = showRadix
-	c.titleToMedia = titleToMedia
-	c.movieCount = len(movies)
-	c.showCount = len(shows)
-	c.mu.Unlock()
+	snapshot := buildLibrarySnapshot(radixListingBuilder{}, movieItems, showItems)
+	c.publishLibrary(movies, shows, movieItems, showItems, snapshot)
 
 	c.log.Info("library fetched", "movies", len(movies), "shows", len(shows))
 	return nil
+}
+
+func (c *APIClient) publishLibrary(movies map[string]*papi.Movie, shows map[string]*papi.Show, movieItems, showItems []*listingItem, snapshot LibrarySnapshot) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.movies = movies
+	c.shows = shows
+	c.movieItems = movieItems
+	c.showItems = showItems
+	c.movieRadix = snapshot.movieRadix
+	c.showRadix = snapshot.showRadix
+	c.titleToMedia = snapshot.titleToMedia
+	c.movieCount = snapshot.movieCount
+	c.showCount = snapshot.showCount
 }
 
 func (c *APIClient) getSnapshot() LibrarySnapshot {
@@ -191,6 +159,27 @@ func (c *APIClient) getSnapshot() LibrarySnapshot {
 		movieCount:   c.movieCount,
 		showCount:    c.showCount,
 	}
+}
+
+func (c *APIClient) snapshotFor(builder listingBuilder) (LibrarySnapshot, error) {
+	// Create copies of the data under lock to ensure consistency.
+	// These copies are safe to use for building a snapshot because:
+	// 1. We're working with immutable slices (the original slices aren't modified)
+	// 2. The builder operations work with the copied slices
+	// 3. Any concurrent access to the original data structure remains protected by RLock
+	c.mu.RLock()
+	movieItems := append([]*listingItem(nil), c.movieItems...)
+	showItems := append([]*listingItem(nil), c.showItems...)
+	movieCount := c.movieCount
+	showCount := c.showCount
+	c.mu.RUnlock()
+
+	// The builder operations are safe since we're working with copies of the data,
+	// and any concurrent modification to the original slices would not affect our copy.
+	snapshot := buildLibrarySnapshot(builder, movieItems, showItems)
+	snapshot.movieCount = movieCount
+	snapshot.showCount = showCount
+	return snapshot, nil
 }
 
 func (c *APIClient) getDownloadURL(target papi.Downloadable) (string, error) {
