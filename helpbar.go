@@ -34,10 +34,20 @@ func (a *App) currentHints() []hint {
 		}
 	}
 
+	if a.browseFocus == browseFocusModeRail {
+		return []hint{
+			{key: "↑↓", label: "change mode"},
+			{key: "→/enter", label: "home"},
+			{key: "r", label: "refresh"},
+			{key: "q", label: "quit"},
+		}
+	}
+
 	if a.nav.isAtRoot() {
 		return []hint{
 			{key: "↑↓", label: "navigate"},
 			{key: "enter", label: "browse"},
+			{key: "←", label: "sort mode"},
 			{key: "r", label: "refresh"},
 			{key: "q", label: "quit"},
 		}

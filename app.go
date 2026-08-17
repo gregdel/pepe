@@ -39,6 +39,21 @@ const (
 	PlayerModeKMS PlayerMode = "kms"
 )
 
+type ListingMode int
+
+const (
+	ListingModeTitle ListingMode = iota
+	ListingModeDateAdded
+	listingModeCount
+)
+
+type browseFocus int
+
+const (
+	browseFocusContent browseFocus = iota
+	browseFocusModeRail
+)
+
 // ── Subtitle popup state ──────────────────────────────────────────────────────
 
 type SubtitlePopupState int
@@ -87,6 +102,9 @@ type App struct {
 
 	nav *NavigationState
 
+	listingMode ListingMode
+	browseFocus browseFocus
+
 	// pushed full-screen detail page (nil = browse screen)
 	detail *detailScreen
 
@@ -130,8 +148,9 @@ type App struct {
 // savedSelection captures the identity of the currently selected media item so
 // navigation can be restored after a library refresh.
 type savedSelection struct {
-	section        Section
-	formattedTitle string // radix FullString of the selected terminal
+	section   Section
+	mediaType string
+	mediaID   string
 }
 
 // captureSelection records what is currently selected, or returns nil if
@@ -145,9 +164,14 @@ func (a *App) captureSelection() *savedSelection {
 	if child == nil || !child.IsTerminal {
 		return nil
 	}
+	media := a.mediaForNode(child)
+	if media == nil {
+		return nil
+	}
 	return &savedSelection{
-		section:        nav.section,
-		formattedTitle: child.FullString,
+		section:   nav.section,
+		mediaType: media.Type,
+		mediaID:   media.ID,
 	}
 }
 
@@ -166,9 +190,57 @@ func (a *App) restoreSelection(sel *savedSelection) {
 	}
 
 	a.nav.section = sel.section
-	if !a.nav.navigateToTitle(sectionRoot, sel.formattedTitle) {
+	if !a.nav.navigateToMedia(sectionRoot, sel.mediaType, sel.mediaID) {
 		a.nav = newNavigationState()
 	}
+}
+
+func (a *App) mediaForNode(node *RadixNode) *MediaItem {
+	if node == nil {
+		return nil
+	}
+	if node.Media != nil {
+		return node.Media
+	}
+	return a.titleToMedia[node.FullString]
+}
+
+func (a *App) applyLibrarySnapshot(snapshot LibrarySnapshot) {
+	a.movieRadix = snapshot.movieRadix
+	a.showRadix = snapshot.showRadix
+	a.titleToMedia = snapshot.titleToMedia
+	a.movieCount = snapshot.movieCount
+	a.showCount = snapshot.showCount
+}
+
+func (a *App) snapshotForMode(mode ListingMode) (LibrarySnapshot, error) {
+	if mode == ListingModeDateAdded {
+		return a.client.snapshotFor(dateAddedListingBuilder{})
+	}
+	return a.client.getSnapshot(), nil
+}
+
+func (a *App) applyListingMode(mode ListingMode) bool {
+	wasAtRoot := a.nav.isAtRoot()
+	section := a.nav.section
+	homeCursor := a.nav.cursor
+
+	snapshot, err := a.snapshotForMode(mode)
+	if err != nil {
+		return false
+	}
+	a.applyLibrarySnapshot(snapshot)
+	a.listingMode = mode
+	a.nav = newNavigationState()
+	if wasAtRoot {
+		a.nav.cursor = homeCursor
+	} else if section == SectionShows {
+		a.nav.resetToSection(SectionShows, a.showRadix.Root())
+	} else {
+		a.nav.resetToSection(SectionMovies, a.movieRadix.Root())
+	}
+	a.detail = nil
+	return true
 }
 
 func newApp(w *app.Window, client *APIClient, sseCh <-chan struct{}, config *Config) *App {
@@ -193,6 +265,8 @@ func newApp(w *app.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 		movieCount:       snapshot.movieCount,
 		showCount:        snapshot.showCount,
 		nav:              newNavigationState(),
+		listingMode:      ListingModeTitle,
+		browseFocus:      browseFocusContent,
 		playerStatus:     PlayerStatusIdle,
 		mpvPath:          mpvPath,
 		playerFullscreen: playerFullscreen,
@@ -290,11 +364,12 @@ func (a *App) drainChannels() {
 		select {
 		case snapshot := <-a.refreshDone:
 			sel := a.captureSelection()
-			a.movieRadix = snapshot.movieRadix
-			a.showRadix = snapshot.showRadix
-			a.titleToMedia = snapshot.titleToMedia
-			a.movieCount = snapshot.movieCount
-			a.showCount = snapshot.showCount
+			if a.listingMode == ListingModeDateAdded {
+				if dateSnapshot, err := a.snapshotForMode(a.listingMode); err == nil {
+					snapshot = dateSnapshot
+				}
+			}
+			a.applyLibrarySnapshot(snapshot)
 			a.nav = newNavigationState()
 			a.refreshing = false
 			a.refreshDone = nil
@@ -451,10 +526,14 @@ func (a *App) handleBrowseKeys(ke key.Event) {
 		a.navigateUp()
 	case key.NameDownArrow, "J":
 		a.navigateDown()
-	case key.NameLeftArrow, key.NameEscape, "H":
+	case key.NameLeftArrow, "H":
 		a.navigateLeft()
-	case key.NameRightArrow, "L", key.NameReturn, key.NameEnter:
+	case key.NameEscape:
+		a.navigateEscape()
+	case key.NameRightArrow, "L":
 		a.navigateRight()
+	case key.NameReturn, key.NameEnter:
+		a.activateBrowseSelection()
 	case key.NameTab:
 		a.toggleSection()
 	case "R":
@@ -533,6 +612,14 @@ func (a *App) scrollDetail(dir int) {
 // ── Browse navigation ─────────────────────────────────────────────────────────
 
 func (a *App) navigateUp() {
+	if a.browseFocus == browseFocusModeRail {
+		if a.listingMode == ListingModeTitle {
+			a.applyListingMode(listingModeCount - 1)
+		} else {
+			a.applyListingMode(a.listingMode - 1)
+		}
+		return
+	}
 	if a.nav.isAtRoot() {
 		if a.nav.cursor == 0 {
 			a.nav.cursor = 1
@@ -545,6 +632,10 @@ func (a *App) navigateUp() {
 }
 
 func (a *App) navigateDown() {
+	if a.browseFocus == browseFocusModeRail {
+		a.applyListingMode((a.listingMode + 1) % listingModeCount)
+		return
+	}
 	if a.nav.isAtRoot() {
 		if a.nav.cursor == 1 {
 			a.nav.cursor = 0
@@ -557,15 +648,51 @@ func (a *App) navigateDown() {
 }
 
 func (a *App) navigateLeft() {
+	if a.browseFocus == browseFocusModeRail {
+		return
+	}
+	if a.nav.isAtRoot() {
+		a.browseFocus = browseFocusModeRail
+		return
+	}
 	if a.nav.isAtSectionRoot() {
 		a.nav.path = []*RadixNode{}
 		a.nav.cursor = int(a.nav.section)
-	} else {
-		a.nav.goBack()
+		return
 	}
+	a.nav.goBack()
+}
+
+func (a *App) navigateEscape() {
+	if a.browseFocus == browseFocusModeRail {
+		a.browseFocus = browseFocusContent
+		return
+	}
+	if a.nav.isAtSectionRoot() {
+		a.nav.path = []*RadixNode{}
+		a.nav.cursor = int(a.nav.section)
+		return
+	}
+	a.nav.goBack()
 }
 
 func (a *App) navigateRight() {
+	if a.browseFocus == browseFocusModeRail {
+		a.browseFocus = browseFocusContent
+		return
+	}
+	a.activateContentSelection()
+}
+
+func (a *App) activateBrowseSelection() {
+	if a.browseFocus == browseFocusModeRail {
+		a.navigateRight()
+		return
+	}
+	a.activateContentSelection()
+}
+
+func (a *App) activateContentSelection() {
 	if a.nav.isAtRoot() {
 		if a.nav.cursor == 0 {
 			a.nav.resetToSection(SectionMovies, a.movieRadix.Root())
@@ -581,8 +708,8 @@ func (a *App) navigateRight() {
 	}
 
 	if child.IsTerminal {
-		media, ok := a.titleToMedia[child.FullString]
-		if !ok {
+		media := a.mediaForNode(child)
+		if media == nil {
 			return
 		}
 		if media.Type == "show" {
@@ -597,6 +724,7 @@ func (a *App) navigateRight() {
 }
 
 func (a *App) toggleSection() {
+	a.browseFocus = browseFocusContent
 	if a.nav.section == SectionMovies {
 		a.nav.resetToSection(SectionShows, a.showRadix.Root())
 	} else {

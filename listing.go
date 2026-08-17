@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sort"
 	"time"
 
 	"github.com/odwrtw/polochon/lib/papi"
@@ -37,8 +38,6 @@ func newShowListingItem(show *papi.Show) *listingItem {
 	}
 }
 
-// A future date builder must sort newest first, put zero dates last, then
-// resolve equal dates by display title, media type, and IMDb ID.
 func (item *listingItem) dateAdded() time.Time {
 	if item == nil || (item.movie == nil && item.show == nil) || (item.movie != nil && item.show != nil) {
 		return time.Time{}
@@ -102,6 +101,58 @@ func (radixListingBuilder) build(items []*listingItem) mediaListing {
 	attachListingMedia(tree.Root(), titleToMedia)
 
 	return mediaListing{tree: tree, titleToMedia: titleToMedia}
+}
+
+type dateAddedListingBuilder struct{}
+
+func (dateAddedListingBuilder) build(items []*listingItem) mediaListing {
+	sortedItems := append([]*listingItem(nil), items...)
+	sort.SliceStable(sortedItems, func(i, j int) bool {
+		left, right := sortedItems[i], sortedItems[j]
+		leftDate, rightDate := left.dateAdded(), right.dateAdded()
+		if leftDate.IsZero() != rightDate.IsZero() {
+			return !leftDate.IsZero()
+		}
+		if !leftDate.Equal(rightDate) {
+			return leftDate.After(rightDate)
+		}
+
+		leftTitle := formatTitle(left.media.Title, left.media.Year)
+		rightTitle := formatTitle(right.media.Title, right.media.Year)
+		if leftTitle != rightTitle {
+			return leftTitle < rightTitle
+		}
+		if left.media.Type != right.media.Type {
+			return left.media.Type < right.media.Type
+		}
+		return left.media.ID < right.media.ID
+	})
+
+	root := &RadixNode{
+		Children:     make([]*RadixNode, 0, len(sortedItems)),
+		SubtreeCount: len(sortedItems),
+	}
+	for _, item := range sortedItems {
+		title := formatTitle(item.media.Title, item.media.Year)
+		root.Children = append(root.Children, &RadixNode{
+			Label:        title,
+			IsTerminal:   true,
+			FullString:   title,
+			Media:        item.media,
+			SubtreeCount: 1,
+		})
+	}
+
+	// Preserve catalog-order collision winners independently of display sorting.
+	titleToMedia := make(map[string]*MediaItem, len(items))
+	for _, item := range items {
+		titleToMedia[formatTitle(item.media.Title, item.media.Year)] = item.media
+	}
+
+	return mediaListing{
+		tree:         &RadixTree{root: root},
+		titleToMedia: titleToMedia,
+	}
 }
 
 func attachListingMedia(node *RadixNode, titleToMedia map[string]*MediaItem) {

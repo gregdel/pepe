@@ -11,13 +11,15 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
+	"gioui.org/widget"
 	"github.com/odwrtw/polochon/lib/papi"
+	"golang.org/x/exp/shiny/materialdesign/icons"
 )
 
 // ── Browse screen ─────────────────────────────────────────────────────────────
 //
-// Header (wordmark + radix query + counts) on top, nav list on the left,
-// contextual preview on the right. This is the home of the radix tree search.
+// Header (wordmark + radix query + counts) on top, mode rail and nav list on
+// the left, contextual preview on the right.
 
 func (a *App) layoutBrowse(gtx C) D {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -25,17 +27,87 @@ func (a *App) layoutBrowse(gtx C) D {
 		layout.Rigid(hairline),
 		layout.Flexed(1, func(gtx C) D {
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+				layout.Rigid(a.layoutModeRail),
+				layout.Rigid(verticalHairline),
 				layout.Flexed(navFlex, a.layoutNavPanel),
-				layout.Rigid(func(gtx C) D {
-					size := image.Point{X: gtx.Dp(1), Y: gtx.Constraints.Max.Y}
-					defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
-					paint.Fill(gtx.Ops, colorOutline)
-					return D{Size: size}
-				}),
+				layout.Rigid(verticalHairline),
 				layout.Flexed(previewFlex, a.layoutPreview),
 			)
 		}),
 	)
+}
+
+func verticalHairline(gtx C) D {
+	size := image.Point{X: gtx.Dp(1), Y: gtx.Constraints.Max.Y}
+	defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, colorOutline)
+	return D{Size: size}
+}
+
+// ── Mode rail ─────────────────────────────────────────────────────────────────
+
+var (
+	radixModeIcon     = mustModeIcon(icons.HardwareDeviceHub)
+	dateAddedModeIcon = mustModeIcon(icons.ActionSchedule)
+)
+
+func mustModeIcon(data []byte) *widget.Icon {
+	icon, err := widget.NewIcon(data)
+	if err != nil {
+		panic(err)
+	}
+	return icon
+}
+
+func (a *App) layoutModeRail(gtx C) D {
+	width := min(gtx.Dp(modeRailWidth), gtx.Constraints.Max.X)
+	gtx.Constraints.Min.X = width
+	gtx.Constraints.Max.X = width
+
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx C) D {
+			defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, colorBg)
+			return D{Size: gtx.Constraints.Max}
+		}),
+		layout.Stacked(func(gtx C) D {
+			return layout.Inset{Top: dp20}.Layout(gtx, func(gtx C) D {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(func(gtx C) D {
+						return a.layoutModeOption(gtx, ListingModeTitle)
+					}),
+					layout.Rigid(func(gtx C) D {
+						return a.layoutModeOption(gtx, ListingModeDateAdded)
+					}),
+				)
+			})
+		}),
+	)
+}
+
+func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
+	active := a.listingMode == mode
+	focused := a.browseFocus == browseFocusModeRail && active
+	icon := radixModeIcon
+	if mode == ListingModeDateAdded {
+		icon = dateAddedModeIcon
+	}
+
+	return a.navRowShell(gtx, focused, unit.Dp(64), func(gtx C) D {
+		iconColor := colorSubtle
+		if active {
+			iconColor = colorPrimary
+		}
+		if focused {
+			iconColor = colorSelectFg
+		}
+
+		return layout.Center.Layout(gtx, func(gtx C) D {
+			size := gtx.Dp(unit.Dp(36))
+			gtx.Constraints = layout.Exact(image.Pt(size, size))
+			return icon.Layout(gtx, iconColor)
+		})
+	})
 }
 
 // ── Header ────────────────────────────────────────────────────────────────────
@@ -158,7 +230,8 @@ func (a *App) layoutNavList(gtx C) D {
 			{"Shows", a.showCount},
 		}
 		return a.leftList.Layout(gtx, len(items), func(gtx C, i int) D {
-			return a.groupRow(gtx, "", items[i].name, items[i].count, i == a.nav.cursor)
+			selected := a.browseFocus == browseFocusContent && i == a.nav.cursor
+			return a.groupRow(gtx, "", items[i].name, items[i].count, selected)
 		})
 	}
 
@@ -170,10 +243,10 @@ func (a *App) layoutNavList(gtx C) D {
 	children := current.Children
 	return a.leftList.Layout(gtx, len(children), func(gtx C, i int) D {
 		node := children[i]
-		selected := i == a.nav.cursor
+		selected := a.browseFocus == browseFocusContent && i == a.nav.cursor
 
 		if node.IsTerminal && node.SubtreeCount == 1 {
-			return a.terminalRow(gtx, node.FullString, currentPath, selected)
+			return a.terminalRow(gtx, node, currentPath, selected)
 		}
 
 		label := node.Label
@@ -229,8 +302,9 @@ func (a *App) groupRow(gtx C, prefix, label string, count int, selected bool) D 
 }
 
 // terminalRow renders a playable movie/show with a poster thumbnail.
-func (a *App) terminalRow(gtx C, fullString, currentPath string, selected bool) D {
+func (a *App) terminalRow(gtx C, node *RadixNode, currentPath string, selected bool) D {
 	const thumbW = unit.Dp(44)
+	fullString := node.FullString
 
 	return a.navRowShell(gtx, selected, thumbW*3/2, func(gtx C) D {
 		titleCol := colorTerminal
@@ -240,7 +314,7 @@ func (a *App) terminalRow(gtx C, fullString, currentPath string, selected bool) 
 			subCol = colorSelectFg
 		}
 
-		media := a.titleToMedia[fullString]
+		media := a.mediaForNode(node)
 
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {

@@ -318,6 +318,74 @@ func TestListingItemDateAddedMissing(t *testing.T) {
 	}
 }
 
+func TestDateAddedListingBuilderOrdersCanonicalItemsWithoutMutation(t *testing.T) {
+	newest := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	tied := time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC)
+	oldest := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+	zero := newMovieListingItem(testMovie("tt005", "Zero", 2005))
+	older := newMovieListingItem(testMovie("tt004", "Older", 2004))
+	older.movie.VideoMetadata.DateAdded = oldest
+	latest := newMovieListingItem(testMovie("tt003", "The Latest", 2003))
+	latest.movie.VideoMetadata.DateAdded = newest
+	alphaLast := newMovieListingItem(testMovie("tt002", "Alpha", 2002))
+	alphaLast.movie.VideoMetadata.DateAdded = tied
+	alphaFirst := newMovieListingItem(testMovie("tt001", "Alpha", 2002))
+	alphaFirst.movie.VideoMetadata.DateAdded = tied
+	items := []*listingItem{zero, older, latest, alphaLast, alphaFirst}
+	original := append([]*listingItem(nil), items...)
+
+	listing := (dateAddedListingBuilder{}).build(items)
+
+	if !reflect.DeepEqual(items, original) {
+		t.Fatal("date builder mutated its input slice")
+	}
+	root := listing.tree.Root()
+	if root.SubtreeCount != len(items) || len(root.Children) != len(items) {
+		t.Fatalf("flat root = (%d count, %d children), want (%d, %d)", root.SubtreeCount, len(root.Children), len(items), len(items))
+	}
+	wantIDs := []string{"tt003", "tt001", "tt002", "tt004", "tt005"}
+	for i, wantID := range wantIDs {
+		node := root.Children[i]
+		if !node.IsTerminal || node.SubtreeCount != 1 || node.Media == nil || node.Media.ID != wantID {
+			t.Errorf("child %d = %#v, want terminal media %s", i, node, wantID)
+		}
+	}
+	if got := root.Children[0].FullString; got != "The Latest (2003)" {
+		t.Errorf("newest title = %q, want canonical title", got)
+	}
+	if strings := listing.tree.AllStrings(); len(strings) != len(items) {
+		t.Errorf("AllStrings() returned %d rows, want %d", len(strings), len(items))
+	}
+	for _, title := range listing.tree.AllStrings() {
+		if title == "Latest (2003)" {
+			t.Error("date builder added a stripped 'The' alias")
+		}
+	}
+}
+
+func TestDateAddedListingBuilderKeepsDuplicateRowsAndCatalogCollisionWinner(t *testing.T) {
+	newerDate := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	olderDate := time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC)
+	newer := newMovieListingItem(testMovie("tt001", "Duplicate", 2000))
+	newer.movie.VideoMetadata.DateAdded = newerDate
+	older := newMovieListingItem(testMovie("tt002", "Duplicate", 2000))
+	older.movie.VideoMetadata.DateAdded = olderDate
+
+	listing := (dateAddedListingBuilder{}).build([]*listingItem{newer, older})
+	root := listing.tree.Root()
+
+	if len(root.Children) != 2 {
+		t.Fatalf("duplicate rows = %d, want 2", len(root.Children))
+	}
+	if root.Children[0].Media != newer.media || root.Children[1].Media != older.media {
+		t.Errorf("duplicate row identities = (%p, %p), want (%p, %p)", root.Children[0].Media, root.Children[1].Media, newer.media, older.media)
+	}
+	if got := listing.titleToMedia["Duplicate (2000)"]; got != older.media {
+		t.Errorf("title map winner = %p, want last catalog item %p", got, older.media)
+	}
+}
+
 // TestSnapshotForConcurrentAccess tests concurrent access to snapshotFor
 func TestSnapshotForConcurrentAccess(t *testing.T) {
 	movieItems := []*listingItem{
@@ -329,15 +397,15 @@ func TestSnapshotForConcurrentAccess(t *testing.T) {
 	}
 	client := &APIClient{
 		movieItems: movieItems,
-		showItems: showItems,
+		showItems:  showItems,
 		movieCount: len(movieItems),
-		showCount: len(showItems),
+		showCount:  len(showItems),
 	}
 
 	// Create multiple goroutines that call snapshotFor concurrently
 	var wg sync.WaitGroup
 	numGoroutines := 10
-	
+
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(goroutineID int) {
@@ -349,18 +417,18 @@ func TestSnapshotForConcurrentAccess(t *testing.T) {
 				t.Errorf("snapshotFor failed in goroutine %d: %v", goroutineID, err)
 				return
 			}
-			
+
 			// Verify the snapshot is valid
 			if snapshot.movieRadix == nil || snapshot.showRadix == nil {
 				t.Errorf("snapshotFor returned invalid snapshot in goroutine %d", goroutineID)
 			}
 		}(i)
 	}
-	
+
 	wg.Wait()
 }
 
-// TestSnapshotForRaceConditionWithSSEEvents tests behavior when snapshots are created while 
+// TestSnapshotForRaceConditionWithSSEEvents tests behavior when snapshots are created while
 // other operations modify data (simulating SSE events)
 func TestSnapshotForRaceConditionWithSSEEvents(t *testing.T) {
 	movieItems := []*listingItem{
@@ -372,15 +440,15 @@ func TestSnapshotForRaceConditionWithSSEEvents(t *testing.T) {
 	}
 	client := &APIClient{
 		movieItems: movieItems,
-		showItems: showItems,
+		showItems:  showItems,
 		movieCount: len(movieItems),
-		showCount: len(showItems),
+		showCount:  len(showItems),
 	}
 
 	// Test that data consistency is maintained across concurrent accesses
 	var wg sync.WaitGroup
-	
-	// Goroutine 1: Create snapshots concurrently 
+
+	// Goroutine 1: Create snapshots concurrently
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -391,14 +459,14 @@ func TestSnapshotForRaceConditionWithSSEEvents(t *testing.T) {
 				t.Errorf("snapshotFor failed: %v", err)
 				return
 			}
-			
+
 			// Verify snapshot content is reasonable
 			if snapshot.movieCount != len(movieItems) || snapshot.showCount != len(showItems) {
 				t.Errorf("snapshot count mismatch")
 			}
 		}
 	}()
-	
+
 	// Goroutine 2: Simulate data modifications (this would be like SSE events)
 	// In real scenario, this might modify client.movieItems or client.showItems
 	wg.Add(1)
@@ -409,6 +477,6 @@ func TestSnapshotForRaceConditionWithSSEEvents(t *testing.T) {
 			time.Sleep(time.Microsecond * 100) // Small delay to increase chance of race conditions
 		}
 	}()
-	
+
 	wg.Wait()
 }

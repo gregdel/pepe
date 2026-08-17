@@ -218,3 +218,23 @@ func TestNavigationState_getChildrenCount(t *testing.T) {
 		t.Errorf("Expected children count to be 3, got %d", nav.getChildrenCount())
 	}
 }
+
+func TestNavigationStateNavigateToMediaDistinguishesDuplicateTitles(t *testing.T) {
+	first := &MediaItem{ID: "tt001", Type: "movie"}
+	second := &MediaItem{ID: "tt002", Type: "movie"}
+	root := &RadixNode{Children: []*RadixNode{
+		{Label: "Duplicate", FullString: "Duplicate", IsTerminal: true, Media: first, SubtreeCount: 1},
+		{Label: "Duplicate", FullString: "Duplicate", IsTerminal: true, Media: second, SubtreeCount: 1},
+	}}
+	nav := newNavigationState()
+
+	if !nav.navigateToMedia(root, "movie", "tt002") {
+		t.Fatal("navigateToMedia did not find the second duplicate")
+	}
+	if len(nav.path) != 1 || nav.path[0] != root || nav.cursor != 1 {
+		t.Errorf("navigation = (path %v, cursor %d), want root path and cursor 1", nav.path, nav.cursor)
+	}
+	if nav.navigateToMedia(root, "movie", "missing") {
+		t.Error("navigateToMedia found a missing identity")
+	}
+}

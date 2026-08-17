@@ -40,8 +40,8 @@ func (a *App) currentVideo() polochon.Video {
 	if child == nil || !child.IsTerminal {
 		return nil
 	}
-	media, ok := a.titleToMedia[child.FullString]
-	if !ok || media.Type != "movie" {
+	media := a.mediaForNode(child)
+	if media == nil || media.Type != "movie" {
 		return nil
 	}
 	movie, ok := a.client.getMovie(media.ID)

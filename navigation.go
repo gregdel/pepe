@@ -1,7 +1,5 @@
 package main
 
-import "strings"
-
 // Section represents which main section we're in
 type Section int
 
@@ -133,35 +131,34 @@ func (n *NavigationState) getCurrentPath() string {
 	return pathStr
 }
 
-// navigateToTitle walks the radix tree rooted at root to the terminal node
-// whose FullString == target, reconstructing path and cursor.
-// Returns true on success; on failure path is left in a partial state — caller
-// should reset navigation.
-func (n *NavigationState) navigateToTitle(root *RadixNode, target string) bool {
-	n.path = []*RadixNode{root}
-	n.cursor = 0
-	remaining := target
+// navigateToMedia walks the tree and reconstructs the path to a terminal with
+// the requested stable media identity.
+func (n *NavigationState) navigateToMedia(root *RadixNode, mediaType, mediaID string) bool {
+	if root == nil {
+		return false
+	}
 
-	for remaining != "" {
-		current := n.path[len(n.path)-1]
-		found := false
-		for i, child := range current.Children {
-			if strings.HasPrefix(remaining, child.Label) {
-				rest := remaining[len(child.Label):]
-				n.cursor = i
-				if rest == "" {
-					return child.IsTerminal
-				}
-				n.path = append(n.path, child)
-				n.cursor = 0
-				remaining = rest
-				found = true
-				break
+	var path []*RadixNode
+	var cursor int
+	var walk func(*RadixNode, []*RadixNode) bool
+	walk = func(node *RadixNode, ancestors []*RadixNode) bool {
+		for i, child := range node.Children {
+			if child.IsTerminal && child.Media != nil && child.Media.Type == mediaType && child.Media.ID == mediaID {
+				path = append(append([]*RadixNode(nil), ancestors...), node)
+				cursor = i
+				return true
+			}
+			if walk(child, append(ancestors, node)) {
+				return true
 			}
 		}
-		if !found {
-			return false
-		}
+		return false
 	}
-	return false
+
+	if !walk(root, nil) {
+		return false
+	}
+	n.path = path
+	n.cursor = cursor
+	return true
 }

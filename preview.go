@@ -24,8 +24,8 @@ func (a *App) layoutPreview(gtx C) D {
 	}
 
 	if child.IsTerminal && child.SubtreeCount == 1 {
-		media, ok := a.titleToMedia[child.FullString]
-		if !ok {
+		media := a.mediaForNode(child)
+		if media == nil {
 			return a.previewMessage(gtx, "Media details not found")
 		}
 		return a.previewTerminal(gtx, media)

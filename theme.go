@@ -70,6 +70,7 @@ const (
 // ── Layout proportions ───────────────────────────────────────────────────────
 
 const (
-	navFlex     = 0.38 // browse: nav list share of the width
-	previewFlex = 0.62 // browse: preview panel share
+	modeRailWidth = unit.Dp(88)
+	navFlex       = 0.38 // browse: nav list share of the width
+	previewFlex   = 0.62 // browse: preview panel share
 )
