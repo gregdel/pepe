@@ -47,7 +47,7 @@ func verticalHairline(gtx C) D {
 // ── Mode rail ─────────────────────────────────────────────────────────────────
 
 var (
-	radixModeIcon     = mustModeIcon(icons.HardwareDeviceHub)
+	radixModeIcon     = mustModeIcon(icons.ActionList)
 	dateAddedModeIcon = mustModeIcon(icons.ActionSchedule)
 )
 
@@ -71,7 +71,8 @@ func (a *App) layoutModeRail(gtx C) D {
 			return D{Size: gtx.Constraints.Max}
 		}),
 		layout.Stacked(func(gtx C) D {
-			return layout.Inset{Top: dp20}.Layout(gtx, func(gtx C) D {
+			gtx.Constraints.Min = gtx.Constraints.Max
+			return layout.Center.Layout(gtx, func(gtx C) D {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(func(gtx C) D {
 						return a.layoutModeOption(gtx, ListingModeTitle)
@@ -208,7 +209,9 @@ func (a *App) layoutNavPanel(gtx C) D {
 			paint.Fill(gtx.Ops, colorSurface)
 			return D{Size: gtx.Constraints.Max}
 		}),
-		layout.Stacked(a.layoutNavList),
+		layout.Stacked(func(gtx C) D {
+			return layout.Inset{Top: dp8}.Layout(gtx, a.layoutNavList)
+		}),
 	)
 }
 
