@@ -87,7 +87,7 @@ func (a *App) layoutModeRail(gtx C) D {
 }
 
 func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
-	active := a.listingMode == mode
+	active := a.library.mode == mode
 	focused := a.browseFocus == browseFocusModeRail && active
 	icon := radixModeIcon
 	if mode == ListingModeDateAdded {
@@ -198,7 +198,7 @@ func (a *App) layoutHeaderStatus(gtx C) D {
 	}
 	parts = append(parts, layout.Rigid(func(gtx C) D {
 		return a.label(gtx, spTiny,
-			fmt.Sprintf("%d movies · %d shows", a.movieCount, a.showCount),
+			fmt.Sprintf("%d movies · %d shows", a.library.movieCount, a.library.showCount),
 			colorMuted, 0)
 	}))
 
@@ -234,8 +234,8 @@ func (a *App) layoutNavList(gtx C) D {
 			name  string
 			count int
 		}{
-			{"Movies", a.movieCount},
-			{"Shows", a.showCount},
+			{"Movies", a.library.movieCount},
+			{"Shows", a.library.showCount},
 		}
 		return a.leftList.Layout(gtx, len(items), func(gtx C, i int) D {
 			selected := a.browseFocus == browseFocusContent && i == a.nav.cursor

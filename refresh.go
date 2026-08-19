@@ -51,8 +51,8 @@ func (a *App) drainRefresh() {
 
 func (a *App) applyRefreshResult(snapshot LibrarySnapshot) {
 	sel := a.captureSelection()
-	if a.listingMode == ListingModeDateAdded {
-		snapshot = a.snapshotForMode(a.listingMode)
+	if a.library.mode == ListingModeDateAdded {
+		snapshot = a.snapshotForMode(a.library.mode)
 	}
 	a.applyLibrarySnapshot(snapshot)
 	a.nav = newNavigationState()

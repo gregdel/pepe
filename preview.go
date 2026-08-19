@@ -43,9 +43,9 @@ func (a *App) previewMessage(gtx C, msg string) D {
 // ── Root: section hero ────────────────────────────────────────────────────────
 
 func (a *App) previewRoot(gtx C) D {
-	name, count := "Movies", a.movieCount
+	name, count := "Movies", a.library.movieCount
 	if a.nav.cursor == 1 {
-		name, count = "Shows", a.showCount
+		name, count = "Shows", a.library.showCount
 	}
 
 	return layout.UniformInset(dp32).Layout(gtx, func(gtx C) D {

@@ -22,15 +22,10 @@ func newModeTestApp(movieItems, showItems []*listingItem) *App {
 		showCount:    len(showItems),
 	}
 	return &App{
-		client:       client,
-		movieRadix:   snapshot.movieRadix,
-		showRadix:    snapshot.showRadix,
-		titleToMedia: snapshot.titleToMedia,
-		movieCount:   snapshot.movieCount,
-		showCount:    snapshot.showCount,
-		nav:          newNavigationState(),
-		listingMode:  ListingModeTitle,
-		browseFocus:  browseFocusContent,
+		client:      client,
+		library:     libraryView{LibrarySnapshot: snapshot, mode: ListingModeTitle},
+		nav:         newNavigationState(),
+		browseFocus: browseFocusContent,
 	}
 }
 
@@ -42,12 +37,12 @@ func TestModeRailAppliesImmediatelyAndStaysFocused(t *testing.T) {
 		t.Fatal("Left from Home did not focus the mode rail")
 	}
 	a.navigateDown()
-	if a.listingMode != ListingModeDateAdded || a.browseFocus != browseFocusModeRail {
-		t.Errorf("Down = (mode %v, focus %v), want Date added with rail focus", a.listingMode, a.browseFocus)
+	if a.library.mode != ListingModeDateAdded || a.browseFocus != browseFocusModeRail {
+		t.Errorf("Down = (mode %v, focus %v), want Date added with rail focus", a.library.mode, a.browseFocus)
 	}
 	a.navigateUp()
-	if a.listingMode != ListingModeTitle || a.browseFocus != browseFocusModeRail {
-		t.Errorf("Up = (mode %v, focus %v), want Title with rail focus", a.listingMode, a.browseFocus)
+	if a.library.mode != ListingModeTitle || a.browseFocus != browseFocusModeRail {
+		t.Errorf("Up = (mode %v, focus %v), want Title with rail focus", a.library.mode, a.browseFocus)
 	}
 	a.activateBrowseSelection()
 	if a.browseFocus != browseFocusContent || !a.nav.isAtRoot() {
@@ -69,7 +64,7 @@ func TestRemoteFlowAppliesDateModeAndReentersSection(t *testing.T) {
 	newShow := newShowListingItem(testShow("show-new", "New Show", 2001))
 	newShow.show.Seasons = map[int]*papi.Season{1: {Episodes: map[int]*papi.Episode{1: testEpisode(newDate)}}}
 	a := newModeTestApp([]*listingItem{oldMovie, newMovie}, []*listingItem{oldShow, newShow})
-	a.nav.resetToSection(SectionShows, a.showRadix.Root())
+	a.nav.resetToSection(SectionShows, a.sectionRoot(SectionShows))
 	a.navigateLeft()
 	if !a.nav.isAtRoot() || a.nav.cursor != int(SectionShows) || a.browseFocus != browseFocusContent {
 		t.Fatal("Left from Shows did not return to Home with Shows selected")
@@ -80,16 +75,16 @@ func TestRemoteFlowAppliesDateModeAndReentersSection(t *testing.T) {
 	}
 	a.navigateDown()
 
-	if a.listingMode != ListingModeDateAdded || a.browseFocus != browseFocusModeRail {
-		t.Errorf("mode after Down = %v with focus %v, want Date added with rail focus", a.listingMode, a.browseFocus)
+	if a.library.mode != ListingModeDateAdded || a.browseFocus != browseFocusModeRail {
+		t.Errorf("mode after Down = %v with focus %v, want Date added with rail focus", a.library.mode, a.browseFocus)
 	}
 	if !a.nav.isAtRoot() || a.nav.cursor != int(SectionShows) {
 		t.Error("changing mode did not preserve Home with Shows selected")
 	}
-	if got := a.movieRadix.Root().Children[0].Media.ID; got != "movie-new" {
+	if got := a.library.movieRadix.Root().Children[0].Media.ID; got != "movie-new" {
 		t.Errorf("first movie = %q, want movie-new", got)
 	}
-	if got := a.showRadix.Root().Children[0].Media.ID; got != "show-new" {
+	if got := a.library.showRadix.Root().Children[0].Media.ID; got != "show-new" {
 		t.Errorf("first show = %q, want show-new", got)
 	}
 
@@ -121,7 +116,7 @@ func TestChangingModeFromHomePreservesSelectedSection(t *testing.T) {
 
 func TestLeftMovesFromSectionToHomeToModeRail(t *testing.T) {
 	a := newModeTestApp(nil, nil)
-	a.nav.resetToSection(SectionMovies, a.movieRadix.Root())
+	a.nav.resetToSection(SectionMovies, a.sectionRoot(SectionMovies))
 
 	a.navigateLeft()
 	if !a.nav.isAtRoot() || a.nav.cursor != int(SectionMovies) || a.browseFocus != browseFocusContent {
@@ -140,7 +135,7 @@ func TestLeftMovesFromSectionToHomeToModeRail(t *testing.T) {
 func TestMediaForNodePrefersNodeIdentity(t *testing.T) {
 	correct := &MediaItem{ID: "correct", Type: mediaKindMovie}
 	wrong := &MediaItem{ID: "wrong", Type: mediaKindMovie}
-	a := &App{titleToMedia: map[string]*MediaItem{"Duplicate": wrong}}
+	a := &App{library: libraryView{LibrarySnapshot: LibrarySnapshot{titleToMedia: map[string]*MediaItem{"Duplicate": wrong}}}}
 	node := &RadixNode{FullString: "Duplicate", Media: correct}
 
 	if got := a.mediaForNode(node); got != correct {
@@ -148,6 +143,25 @@ func TestMediaForNodePrefersNodeIdentity(t *testing.T) {
 	}
 	if got := a.mediaForNode(&RadixNode{FullString: "Duplicate"}); got != wrong {
 		t.Errorf("string-only fallback = %p, want title map identity %p", got, wrong)
+	}
+}
+
+func TestApplyLibrarySnapshotReplacesActiveViewWithoutChangingMode(t *testing.T) {
+	a := newModeTestApp(nil, nil)
+	a.library.mode = ListingModeDateAdded
+
+	movie := newMovieListingItem(testMovie("tt001", "Replacement", 2001))
+	snapshot := buildLibrarySnapshot(radixListingBuilder{}, []*listingItem{movie}, nil)
+	a.applyLibrarySnapshot(snapshot)
+
+	if a.library.mode != ListingModeDateAdded {
+		t.Fatalf("listing mode = %v, want Date added", a.library.mode)
+	}
+	if a.library.movieRadix != snapshot.movieRadix || a.library.showRadix != snapshot.showRadix {
+		t.Fatal("active radix trees were not replaced from the snapshot")
+	}
+	if a.library.titleToMedia["Replacement"] != snapshot.titleToMedia["Replacement"] || a.library.movieCount != 1 || a.library.showCount != 0 {
+		t.Fatal("active library metadata was not replaced from the snapshot")
 	}
 }
 
@@ -162,7 +176,7 @@ func TestRefreshCompletionRebuildsActiveModeAndRestoresMedia(t *testing.T) {
 	second.movie.VideoMetadata.DateAdded = oldDate
 	a := newModeTestApp([]*listingItem{first, second}, nil)
 	a.applyListingMode(ListingModeDateAdded)
-	a.nav.resetToSection(SectionMovies, a.movieRadix.Root())
+	a.nav.resetToSection(SectionMovies, a.sectionRoot(SectionMovies))
 	a.nav.cursor = 1
 
 	refreshedFirst := newMovieListingItem(testMovie("tt001", "First", 2001))
@@ -182,10 +196,10 @@ func TestRefreshCompletionRebuildsActiveModeAndRestoresMedia(t *testing.T) {
 
 	a.drainChannels()
 
-	if a.listingMode != ListingModeDateAdded {
-		t.Fatalf("active mode = %v, want Date added", a.listingMode)
+	if a.library.mode != ListingModeDateAdded {
+		t.Fatalf("active mode = %v, want Date added", a.library.mode)
 	}
-	if got := a.movieRadix.Root().Children[0].Media.ID; got != "tt002" {
+	if got := a.library.movieRadix.Root().Children[0].Media.ID; got != "tt002" {
 		t.Errorf("first refreshed item = %q, want tt002", got)
 	}
 	selected := a.nav.getSelectedChild()
