@@ -59,8 +59,10 @@ func TestRemoteFlowAppliesDateModeAndReentersSection(t *testing.T) {
 	oldDate := time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC)
 	newDate := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	oldMovie := newMovieListingItem(testMovie("movie-old", "Old Movie", 2000))
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	oldMovie.movie.VideoMetadata.DateAdded = oldDate
 	newMovie := newMovieListingItem(testMovie("movie-new", "New Movie", 2001))
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	newMovie.movie.VideoMetadata.DateAdded = newDate
 	oldShow := newShowListingItem(testShow("show-old", "Old Show", 2000))
 	oldShow.show.Seasons = map[int]*papi.Season{1: {Episodes: map[int]*papi.Episode{1: testEpisode(oldDate)}}}
@@ -153,8 +155,10 @@ func TestRefreshCompletionRebuildsActiveModeAndRestoresMedia(t *testing.T) {
 	oldDate := time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC)
 	newDate := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	first := newMovieListingItem(testMovie("tt001", "First", 2001))
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	first.movie.VideoMetadata.DateAdded = newDate
 	second := newMovieListingItem(testMovie("tt002", "Second", 2002))
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	second.movie.VideoMetadata.DateAdded = oldDate
 	a := newModeTestApp([]*listingItem{first, second}, nil)
 	a.applyListingMode(ListingModeDateAdded)
@@ -162,8 +166,10 @@ func TestRefreshCompletionRebuildsActiveModeAndRestoresMedia(t *testing.T) {
 	a.nav.cursor = 1
 
 	refreshedFirst := newMovieListingItem(testMovie("tt001", "First", 2001))
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	refreshedFirst.movie.VideoMetadata.DateAdded = oldDate
 	refreshedSecond := newMovieListingItem(testMovie("tt002", "Second", 2002))
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	refreshedSecond.movie.VideoMetadata.DateAdded = newDate
 	refreshedItems := []*listingItem{refreshedFirst, refreshedSecond}
 	defaultSnapshot := buildLibrarySnapshot(radixListingBuilder{}, refreshedItems, nil)

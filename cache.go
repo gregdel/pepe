@@ -9,7 +9,6 @@ import (
 type cacheResult[T any] struct {
 	key        string
 	val        T
-	err        error
 	generation uint64
 }
 
@@ -111,11 +110,10 @@ func (c *asyncCache[T]) fetch(key string, fetchFn func() (T, error)) {
 func (c *asyncCache[T]) start(request cacheRequest[T]) {
 	c.active++
 	go func() {
-		val, err := request.fetchFn()
+		val, _ := request.fetchFn()
 		c.done <- cacheResult[T]{
 			key:        request.key,
 			val:        val,
-			err:        err,
 			generation: request.generation,
 		}
 		if c.onDone != nil {
@@ -138,8 +136,7 @@ func (c *asyncCache[T]) startPending() {
 
 // drain reads all pending results from done without blocking. It also starts
 // queued work as active slots become available.
-func (c *asyncCache[T]) drain() bool {
-	invalidate := false
+func (c *asyncCache[T]) drain() {
 	for {
 		select {
 		case res := <-c.done:
@@ -148,13 +145,10 @@ func (c *asyncCache[T]) drain() bool {
 				delete(c.loading, res.key)
 				c.cache[res.key] = res.val
 				c.resolved[res.key] = true
-				if res.err == nil && any(res.val) != nil {
-					invalidate = true
-				}
 			}
 			c.startPending()
 		default:
-			return invalidate
+			return
 		}
 	}
 }

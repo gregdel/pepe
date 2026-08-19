@@ -156,6 +156,18 @@ func TestNavigationState_resetToSection(t *testing.T) {
 	}
 }
 
+func TestNavigationStateReturnToHomeKeepsSectionSelected(t *testing.T) {
+	nav := newNavigationState()
+	nav.resetToSection(SectionShows, NewRadixTree([]string{"show"}).Root())
+	nav.goForward(nav.getSelectedChild())
+
+	nav.returnToHome()
+
+	if !nav.isAtRoot() || nav.cursor != int(SectionShows) {
+		t.Errorf("home state = (root=%t, cursor=%d), want Shows selected at home", nav.isAtRoot(), nav.cursor)
+	}
+}
+
 func TestNavigationState_moveCursorUp(t *testing.T) {
 	nav := newNavigationState()
 	nav.cursor = 5

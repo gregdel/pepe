@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -35,9 +36,8 @@ const (
 
 // APIClient wraps the papi client with caching
 type APIClient struct {
-	client   *papi.Client
-	token    string
-	endpoint string
+	client *papi.Client
+	token  string
 
 	mu     sync.RWMutex
 	movies map[string]*papi.Movie
@@ -74,7 +74,6 @@ func newAPIClient(endpoint, token string, log *slog.Logger) (*APIClient, error) 
 	c := &APIClient{
 		client:       papiClient,
 		token:        token,
-		endpoint:     endpoint,
 		movies:       make(map[string]*papi.Movie),
 		shows:        make(map[string]*papi.Show),
 		titleToMedia: make(map[string]*MediaItem),
@@ -242,25 +241,41 @@ func (c *APIClient) fetchShowImage(id string, pick func(*papi.Show) *papi.File) 
 
 // fetchImageFile is the shared HTTP GET + decode path for any papi image file.
 func (c *APIClient) fetchImageFile(f papi.Downloadable) (image.Image, error) {
-	rawURL, err := c.getDownloadURL(f)
+	body, err := c.downloadFile(f)
 	if err != nil {
-		return nil, fmt.Errorf("image URL: %w", err)
+		return nil, fmt.Errorf("image fetch: %w", err)
 	}
+	defer func() { _ = body.Close() }()
+	img, _, err := image.Decode(body)
+	return img, err
+}
+
+// downloadFile fetches a Polochon download URL with the configured token.
+// Callers own and must close the returned body.
+func (c *APIClient) downloadFile(file papi.Downloadable) (io.ReadCloser, error) {
+	rawURL, err := c.getDownloadURL(file)
+	if err != nil {
+		return nil, fmt.Errorf("download URL: %w", err)
+	}
+	return c.fetchAuthenticatedURL(rawURL)
+}
+
+func (c *APIClient) fetchAuthenticatedURL(rawURL string) (io.ReadCloser, error) {
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("X-Auth-Token", c.getToken())
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("image fetch returned %s", resp.Status)
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("download returned %s", resp.Status)
 	}
-	img, _, err := image.Decode(resp.Body)
-	return img, err
+	return resp.Body, nil
 }
 
 // fetchMovieNFO downloads and parses the NFO file for the given movie ID.
@@ -274,29 +289,14 @@ func (c *APIClient) fetchMovieNFO(id string) (*polochon.Movie, error) {
 		return nil, fmt.Errorf("movie %s: no NFO file", id)
 	}
 
-	rawURL, err := c.getDownloadURL(movie.NFO)
+	body, err := c.downloadFile(movie.NFO)
 	if err != nil {
-		return nil, fmt.Errorf("movie %s: NFO URL: %w", id, err)
+		return nil, fmt.Errorf("movie %s: NFO fetch: %w", id, err)
 	}
-
-	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("X-Auth-Token", c.getToken())
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("movie %s: NFO fetch returned %s", id, resp.Status)
-	}
+	defer func() { _ = body.Close() }()
 
 	m := &polochon.Movie{}
-	if err := nfo.Read(resp.Body, m); err != nil {
+	if err := nfo.Read(body, m); err != nil {
 		return nil, fmt.Errorf("movie %s: NFO parse: %w", id, err)
 	}
 

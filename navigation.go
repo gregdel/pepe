@@ -82,6 +82,12 @@ func (n *NavigationState) resetToSection(section Section, rootNode *RadixNode) {
 	n.cursor = 0
 }
 
+// returnToHome exits the current media section while keeping it selected.
+func (n *NavigationState) returnToHome() {
+	n.path = nil
+	n.cursor = int(n.section)
+}
+
 // moveCursorUp moves the cursor up, wrapping to the last child at the top.
 func (n *NavigationState) moveCursorUp(maxChildren int) {
 	if maxChildren <= 0 {

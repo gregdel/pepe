@@ -137,20 +137,12 @@ type savedSelection struct {
 // captureSelection records what is currently selected, or returns nil if
 // nothing meaningful is selected (e.g. browsing prefix nodes or at root).
 func (a *App) captureSelection() *savedSelection {
-	nav := a.nav
-	if nav.isAtRoot() {
-		return nil
-	}
-	child := nav.getSelectedChild()
-	if child == nil || !child.IsTerminal {
-		return nil
-	}
-	media := a.mediaForNode(child)
+	media := a.selectedBrowseMedia()
 	if media == nil {
 		return nil
 	}
 	return &savedSelection{
-		section:   nav.section,
+		section:   a.nav.section,
 		mediaType: media.Type,
 		mediaID:   media.ID,
 	}
@@ -184,6 +176,17 @@ func (a *App) mediaForNode(node *RadixNode) *MediaItem {
 		return node.Media
 	}
 	return a.titleToMedia[node.FullString]
+}
+
+func (a *App) selectedBrowseMedia() *MediaItem {
+	if a.nav.isAtRoot() {
+		return nil
+	}
+	child := a.nav.getSelectedChild()
+	if child == nil || !child.IsTerminal {
+		return nil
+	}
+	return a.mediaForNode(child)
 }
 
 func (a *App) applyLibrarySnapshot(snapshot LibrarySnapshot) {
@@ -606,8 +609,7 @@ func (a *App) navigateLeft() {
 		return
 	}
 	if a.nav.isAtSectionRoot() {
-		a.nav.path = []*RadixNode{}
-		a.nav.cursor = int(a.nav.section)
+		a.nav.returnToHome()
 		return
 	}
 	a.nav.goBack()
@@ -619,8 +621,7 @@ func (a *App) navigateEscape() {
 		return
 	}
 	if a.nav.isAtSectionRoot() {
-		a.nav.path = []*RadixNode{}
-		a.nav.cursor = int(a.nav.section)
+		a.nav.returnToHome()
 		return
 	}
 	a.nav.goBack()

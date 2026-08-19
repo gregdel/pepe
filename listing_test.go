@@ -259,6 +259,7 @@ func TestFetchPublicationIncludesListingCatalog(t *testing.T) {
 func TestListingItemDateAddedMovie(t *testing.T) {
 	want := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.FixedZone("UTC+1", 3600))
 	movie := testMovie("tt001", "Movie", 2001)
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	movie.VideoMetadata.DateAdded = want
 	if got := newMovieListingItem(movie).dateAdded(); got != want {
 		t.Errorf("dateAdded() = %v, want %v", got, want)
@@ -319,12 +320,16 @@ func TestDateAddedListingBuilderOrdersCanonicalItemsWithoutMutation(t *testing.T
 
 	zero := newMovieListingItem(testMovie("tt005", "Zero", 2005))
 	older := newMovieListingItem(testMovie("tt004", "Older", 2004))
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	older.movie.VideoMetadata.DateAdded = oldest
 	latest := newMovieListingItem(testMovie("tt003", "The Latest", 2003))
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	latest.movie.VideoMetadata.DateAdded = newest
 	alphaLast := newMovieListingItem(testMovie("tt002", "Alpha", 2002))
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	alphaLast.movie.VideoMetadata.DateAdded = tied
 	alphaFirst := newMovieListingItem(testMovie("tt001", "Alpha", 2002))
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	alphaFirst.movie.VideoMetadata.DateAdded = tied
 	items := []*listingItem{zero, older, latest, alphaLast, alphaFirst}
 	original := append([]*listingItem(nil), items...)
@@ -362,8 +367,10 @@ func TestDateAddedListingBuilderKeepsDuplicateRowsAndCatalogCollisionWinner(t *t
 	newerDate := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	olderDate := time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC)
 	newer := newMovieListingItem(testMovie("tt001", "Duplicate", 2000))
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	newer.movie.VideoMetadata.DateAdded = newerDate
 	older := newMovieListingItem(testMovie("tt002", "Duplicate", 2000))
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	older.movie.VideoMetadata.DateAdded = olderDate
 
 	listing := (dateAddedListingBuilder{}).build([]*listingItem{newer, older})

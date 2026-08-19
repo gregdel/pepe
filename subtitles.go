@@ -35,14 +35,7 @@ func (a *App) currentVideo() polochon.Video {
 		return nil
 	}
 
-	if a.nav.isAtRoot() {
-		return nil
-	}
-	child := a.nav.getSelectedChild()
-	if child == nil || !child.IsTerminal {
-		return nil
-	}
-	media := a.mediaForNode(child)
+	media := a.selectedBrowseMedia()
 	if media == nil || media.Type != mediaKindMovie {
 		return nil
 	}
