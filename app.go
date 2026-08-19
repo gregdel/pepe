@@ -1,11 +1,7 @@
 package main
 
 import (
-	"fmt"
 	"image"
-	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -18,27 +14,10 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/widget/material"
-	"github.com/dustin/go-humanize"
 	polochon "github.com/odwrtw/polochon/lib"
-	"github.com/odwrtw/polochon/lib/papi"
 )
 
 // ── Player state ─────────────────────────────────────────────────────────────
-
-type PlayerStatus string
-
-const (
-	PlayerStatusIdle    PlayerStatus = "Idle"
-	PlayerStatusRunning PlayerStatus = "Running"
-	PlayerStatusError   PlayerStatus = "Error"
-)
-
-type PlayerMode string
-
-const (
-	PlayerModeGUI PlayerMode = "gui"
-	PlayerModeKMS PlayerMode = "kms"
-)
 
 type ListingMode int
 
@@ -120,9 +99,10 @@ type App struct {
 	playbackTracker  *playbackTracker
 
 	// library refresh
-	refreshing  bool
-	refreshDone chan LibrarySnapshot // goroutine → event loop
-	sseCh       <-chan struct{}      // SSE events from server
+	refreshing   bool
+	refreshError error
+	refreshDone  chan refreshResult // goroutine → event loop
+	sseCh        <-chan struct{}    // SSE events from server
 
 	// image cache (thumbs, fanarts, posters — all media types)
 	images *asyncCache[paint.ImageOp]
@@ -150,7 +130,7 @@ type App struct {
 // navigation can be restored after a library refresh.
 type savedSelection struct {
 	section   Section
-	mediaType string
+	mediaType MediaKind
 	mediaID   string
 }
 
@@ -214,22 +194,19 @@ func (a *App) applyLibrarySnapshot(snapshot LibrarySnapshot) {
 	a.showCount = snapshot.showCount
 }
 
-func (a *App) snapshotForMode(mode ListingMode) (LibrarySnapshot, error) {
+func (a *App) snapshotForMode(mode ListingMode) LibrarySnapshot {
 	if mode == ListingModeDateAdded {
 		return a.client.snapshotFor(dateAddedListingBuilder{})
 	}
-	return a.client.getSnapshot(), nil
+	return a.client.getSnapshot()
 }
 
-func (a *App) applyListingMode(mode ListingMode) bool {
+func (a *App) applyListingMode(mode ListingMode) {
 	wasAtRoot := a.nav.isAtRoot()
 	section := a.nav.section
 	homeCursor := a.nav.cursor
 
-	snapshot, err := a.snapshotForMode(mode)
-	if err != nil {
-		return false
-	}
+	snapshot := a.snapshotForMode(mode)
 	a.applyLibrarySnapshot(snapshot)
 	a.listingMode = mode
 	a.nav = newNavigationState()
@@ -241,7 +218,6 @@ func (a *App) applyListingMode(mode ListingMode) bool {
 		a.nav.resetToSection(SectionMovies, a.movieRadix.Root())
 	}
 	a.detail = nil
-	return true
 }
 
 func newApp(w *app.Window, client *APIClient, sseCh <-chan struct{}, config *Config) *App {
@@ -361,28 +337,7 @@ func (a *App) drainChannels() {
 		}
 	}
 
-	if a.refreshDone != nil {
-		select {
-		case snapshot := <-a.refreshDone:
-			sel := a.captureSelection()
-			if a.listingMode == ListingModeDateAdded {
-				if dateSnapshot, err := a.snapshotForMode(a.listingMode); err == nil {
-					snapshot = dateSnapshot
-				}
-			}
-			a.applyLibrarySnapshot(snapshot)
-			a.nav = newNavigationState()
-			a.refreshing = false
-			a.refreshDone = nil
-			// invalidate cached images since the library has changed
-			a.images.reset()
-			a.nfos.reset()
-			// pop any open detail page back to browse
-			a.detail = nil
-			a.restoreSelection(sel)
-		default:
-		}
-	}
+	a.drainRefresh()
 
 	// Drain SSE events: each signal means the server library changed.
 	if a.sseCh != nil {
@@ -396,60 +351,11 @@ func (a *App) drainChannels() {
 		}
 	}
 
-	// Drain subtitle popup channels.
-	if a.subPopup != nil {
-		select {
-		case res := <-a.subPopup.resultCh:
-			if res.err != nil {
-				a.subPopup.state = SubtitlePopupError
-				a.subPopup.errMsg = res.err.Error()
-			} else {
-				a.subPopup.state = SubtitlePopupReady
-				a.subPopup.entries = res.entries
-			}
-		default:
-		}
-		if a.subPopup != nil && a.subPopup.downloadDone != nil {
-			select {
-			case res := <-a.subPopup.downloadDone:
-				if res.err != nil {
-					a.subPopup.state = SubtitlePopupError
-					a.subPopup.errMsg = res.err.Error()
-				} else {
-					a.subPopup.state = SubtitlePopupDone
-					a.subPopup.doneAt = time.Now()
-				}
-				a.subPopup.downloadDone = nil
-			default:
-			}
-		}
-		// Auto-close after showing "Downloaded!" for 1.5s.
-		if a.subPopup != nil && a.subPopup.state == SubtitlePopupDone && time.Since(a.subPopup.doneAt) > 1500*time.Millisecond {
-			a.subPopup = nil
-		}
-	}
+	a.drainSubtitlePopup()
 
 	// Drain all pending image/NFO fetch results.
 	a.images.drain()
 	a.nfos.drain()
-}
-
-func (a *App) applyPlaybackSnapshot(tracker *playbackTracker) {
-	if tracker == nil {
-		return
-	}
-	tracker.wait(100 * time.Millisecond)
-	mediaKey, pos, eof := tracker.snapshot()
-	if mediaKey == "" {
-		return
-	}
-	if eof {
-		delete(a.resumePos, mediaKey)
-		return
-	}
-	if pos > 30 {
-		a.resumePos[mediaKey] = pos
-	}
 }
 
 // ── Key handling ──────────────────────────────────────────────────────────────
@@ -472,6 +378,49 @@ var keyFilters = []event.Filter{
 	key.Filter{Focus: nil, Name: "R", Optional: key.ModShift},
 	key.Filter{Focus: nil, Name: "S", Optional: key.ModShift},
 	key.Filter{Focus: nil, Name: key.NameTab},
+}
+
+type appAction int
+
+const (
+	actionUnknown appAction = iota
+	actionUp
+	actionDown
+	actionLeft
+	actionRight
+	actionConfirm
+	actionDismiss
+	actionToggleSection
+	actionRefresh
+	actionSubtitles
+	actionQuit
+)
+
+func actionForKey(name key.Name) appAction {
+	switch name {
+	case key.NameUpArrow, "K":
+		return actionUp
+	case key.NameDownArrow, "J":
+		return actionDown
+	case key.NameLeftArrow, "H":
+		return actionLeft
+	case key.NameRightArrow, "L":
+		return actionRight
+	case key.NameReturn, key.NameEnter:
+		return actionConfirm
+	case key.NameEscape:
+		return actionDismiss
+	case key.NameTab:
+		return actionToggleSection
+	case "R":
+		return actionRefresh
+	case "S":
+		return actionSubtitles
+	case "Q":
+		return actionQuit
+	default:
+		return actionUnknown
+	}
 }
 
 func (a *App) handleKeys(gtx layout.Context) {
@@ -505,43 +454,43 @@ func (a *App) handleKeys(gtx layout.Context) {
 }
 
 func (a *App) handlePopupKeys(ke key.Event) {
-	switch ke.Name {
-	case key.NameUpArrow, "K":
+	switch actionForKey(ke.Name) {
+	case actionUp:
 		if a.subPopup.cursor > 0 {
 			a.subPopup.cursor--
 		}
-	case key.NameDownArrow, "J":
+	case actionDown:
 		if a.subPopup.state == SubtitlePopupReady && a.subPopup.cursor < len(a.subPopup.entries)-1 {
 			a.subPopup.cursor++
 		}
-	case key.NameReturn, key.NameEnter, key.NameRightArrow, "L":
+	case actionConfirm, actionRight:
 		a.subPopupSelect()
-	case key.NameEscape, key.NameLeftArrow, "H":
+	case actionDismiss, actionLeft:
 		a.closeSubtitlePopup()
 	}
 }
 
 func (a *App) handleBrowseKeys(ke key.Event) {
-	switch ke.Name {
-	case key.NameUpArrow, "K":
+	switch actionForKey(ke.Name) {
+	case actionUp:
 		a.navigateUp()
-	case key.NameDownArrow, "J":
+	case actionDown:
 		a.navigateDown()
-	case key.NameLeftArrow, "H":
+	case actionLeft:
 		a.navigateLeft()
-	case key.NameEscape:
+	case actionDismiss:
 		a.navigateEscape()
-	case key.NameRightArrow, "L":
+	case actionRight:
 		a.navigateRight()
-	case key.NameReturn, key.NameEnter:
+	case actionConfirm:
 		a.activateBrowseSelection()
-	case key.NameTab:
+	case actionToggleSection:
 		a.toggleSection()
-	case "R":
+	case actionRefresh:
 		a.startRefresh()
-	case "S":
+	case actionSubtitles:
 		a.openSubtitlePopup()
-	case "Q":
+	case actionQuit:
 		a.w.Perform(system.ActionClose)
 	}
 }
@@ -554,37 +503,37 @@ func (a *App) handleDetailKeys(ke key.Event) {
 	}
 
 	// Movie detail page.
-	switch ke.Name {
-	case key.NameReturn, key.NameEnter, key.NameRightArrow, "L":
-		a.launchMovie(&MediaItem{ID: d.movieID, Title: d.movieTitle, Type: "movie"})
-	case key.NameEscape, key.NameLeftArrow, "H":
+	switch actionForKey(ke.Name) {
+	case actionConfirm, actionRight:
+		a.launchMovie(&MediaItem{ID: d.movieID, Title: d.movieTitle, Type: mediaKindMovie})
+	case actionDismiss, actionLeft:
 		a.popDetail()
-	case key.NameUpArrow, "K":
+	case actionUp:
 		a.scrollDetail(-1)
-	case key.NameDownArrow, "J":
+	case actionDown:
 		a.scrollDetail(1)
-	case "S":
+	case actionSubtitles:
 		a.openSubtitlePopup()
-	case "Q":
+	case actionQuit:
 		a.w.Perform(system.ActionClose)
 	}
 }
 
 func (a *App) handleShowKeys(ke key.Event, s *showPage) {
-	switch ke.Name {
-	case key.NameUpArrow, "K":
+	switch actionForKey(ke.Name) {
+	case actionUp:
 		s.up()
-	case key.NameDownArrow, "J":
+	case actionDown:
 		s.down()
-	case key.NameLeftArrow, "H":
+	case actionLeft:
 		if s.focus == focusTabs {
 			s.left()
 		} else {
 			a.popDetail()
 		}
-	case key.NameRightArrow, "L":
+	case actionRight:
 		s.right()
-	case key.NameReturn, key.NameEnter:
+	case actionConfirm:
 		if s.focus == focusTabs {
 			s.focus = focusEpisodes
 			return
@@ -592,11 +541,11 @@ func (a *App) handleShowKeys(ke key.Event, s *showPage) {
 		if ep := s.currentEpisode(); ep != nil {
 			a.launchEpisode(ep)
 		}
-	case key.NameEscape:
+	case actionDismiss:
 		a.popDetail()
-	case "S":
+	case actionSubtitles:
 		a.openSubtitlePopup()
-	case "Q":
+	case actionQuit:
 		a.w.Perform(system.ActionClose)
 	}
 }
@@ -713,7 +662,7 @@ func (a *App) activateContentSelection() {
 		if media == nil {
 			return
 		}
-		if media.Type == "show" {
+		if media.Type == mediaKindShow {
 			a.pushShowDetail(media)
 			return
 		}
@@ -734,58 +683,6 @@ func (a *App) toggleSection() {
 }
 
 // ── Player ────────────────────────────────────────────────────────────────────
-
-func (a *App) launchMovie(media *MediaItem) {
-	mediaKey, sockPath, execArgs, mode, ok := a.buildMovieCommand(media)
-	if !ok {
-		a.playerStatus = PlayerStatusError
-		a.playerError = "failed to build movie command"
-		return
-	}
-	a.startPlayer(execArgs, mode)
-	a.playbackTracker = startIPC(sockPath, mediaKey)
-}
-
-func (a *App) launchEpisode(node *DynamicNode) {
-	mediaKey, sockPath, execArgs, mode, ok := a.buildEpisodeCommand(node)
-	if !ok {
-		a.playerStatus = PlayerStatusError
-		a.playerError = "failed to build episode command"
-		return
-	}
-	a.startPlayer(execArgs, mode)
-	a.playbackTracker = startIPC(sockPath, mediaKey)
-}
-
-func (a *App) startPlayer(execArgs []string, mode PlayerMode) {
-	if len(execArgs) == 0 {
-		return
-	}
-	a.playerStatus = PlayerStatusRunning
-	a.playerMode = mode
-	a.playerError = ""
-	a.playerDone = make(chan error, 1)
-
-	go func() {
-		cmd := exec.Command(execArgs[0], execArgs[1:]...) //nolint:gosec
-		a.playerDone <- cmd.Run()
-		a.w.Invalidate()
-	}()
-}
-
-func (a *App) startRefresh() {
-	if a.refreshing {
-		return
-	}
-	a.refreshing = true
-	a.refreshDone = make(chan LibrarySnapshot, 1)
-
-	go func() {
-		_ = a.client.fetchLibrary()
-		a.refreshDone <- a.client.getSnapshot()
-		a.w.Invalidate()
-	}()
-}
 
 // ── Root layout ───────────────────────────────────────────────────────────────
 
@@ -813,190 +710,4 @@ func (a *App) layout(gtx C) D {
 
 // ── Format helpers (ported from ui.go, no lipgloss) ──────────────────────────
 
-func formatQualityBadge(q polochon.Quality) string {
-	return string(q)
-}
-
-func formatContainer(c string) string {
-	return strings.ToUpper(c)
-}
-
-func formatCodecs(video, audio string) string {
-	switch {
-	case video == "" && audio == "":
-		return ""
-	case video == "":
-		return audio
-	case audio == "":
-		return video
-	default:
-		return video + " + " + audio
-	}
-}
-
-func formatDateAdded(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format("2006-01-02")
-}
-
-func formatGenres(genres []string) string {
-	return strings.Join(genres, ", ")
-}
-
-var languageNames = map[string]string{
-	"en": "English",
-	"fr": "French",
-}
-
-func formatLanguageName(lang polochon.Language) string {
-	short := lang.ShortForm()
-	if name, ok := languageNames[short]; ok {
-		return fmt.Sprintf("%s (%s)", name, short)
-	}
-	return fmt.Sprintf("%s (%s)", string(lang), string(lang))
-}
-
-func formatSubtitles(embeddedLangs []polochon.Language, externalSubs []*papi.Subtitle) string {
-	if len(embeddedLangs) == 0 && len(externalSubs) == 0 {
-		return "Subtitles: None"
-	}
-
-	var b strings.Builder
-	b.WriteString("Subtitles:\n")
-	for _, lang := range embeddedLangs {
-		fmt.Fprintf(&b, "  %s - embedded\n", formatLanguageName(lang))
-	}
-	for _, sub := range externalSubs {
-		sizeStr := ""
-		if sub.Size > 0 {
-			sizeStr = fmt.Sprintf(", %s", humanize.Bytes(uint64(sub.Size)))
-		}
-		fmt.Fprintf(&b, "  %s - external%s\n", formatLanguageName(sub.Lang), sizeStr)
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
 // ── MPV helpers (ported from ui.go) ──────────────────────────────────────────
-
-func detectPlayerMode() PlayerMode {
-	return detectPlayerModeFor(runtime.GOOS, os.Getenv)
-}
-
-func detectPlayerModeFor(goos string, getenv func(string) string) PlayerMode {
-	// DRM/KMS is Linux-specific; other platforms use mpv's native window.
-	if goos != "linux" {
-		return PlayerModeGUI
-	}
-	for _, name := range []string{"WAYLAND_DISPLAY", "DISPLAY"} {
-		if getenv(name) != "" {
-			return PlayerModeGUI
-		}
-	}
-	sessionType := strings.ToLower(strings.TrimSpace(getenv("XDG_SESSION_TYPE")))
-	if sessionType == "wayland" || sessionType == "x11" {
-		return PlayerModeGUI
-	}
-	return PlayerModeKMS
-}
-
-func buildMPVArgs(mpvPath, title, videoURL string, subtitleURLs []string, mode PlayerMode, startPos float64, sockPath string, fullscreen bool) []string {
-	if strings.TrimSpace(mpvPath) == "" {
-		mpvPath = "mpv"
-	}
-	args := []string{mpvPath}
-	args = append(args, "--http-header-fields=X-Auth-Token: $POLOCHON_TOKEN")
-	if startPos > 30 {
-		args = append(args, fmt.Sprintf("--start=%d", int(startPos)))
-	}
-	if mode == PlayerModeKMS {
-		args = append(args, "--vo=gpu", "--gpu-context=drm", "--opengl-es=yes", "--fs", "--no-border", "--ontop")
-	} else if fullscreen {
-		args = append(args, "--fs", "--no-border")
-	}
-	if title != "" {
-		args = append(args, "--title="+title)
-	}
-	for _, sub := range subtitleURLs {
-		if sub != "" {
-			args = append(args, "--sub-file="+sub)
-		}
-	}
-	args = append(args, "--input-ipc-server="+sockPath)
-	args = append(args, videoURL)
-	return args
-}
-
-func replaceMpvToken(args []string, token string) []string {
-	if token == "" {
-		return args
-	}
-	out := make([]string, len(args))
-	for i, a := range args {
-		out[i] = strings.ReplaceAll(a, "$POLOCHON_TOKEN", token)
-	}
-	return out
-}
-
-func (a *App) buildMovieCommand(media *MediaItem) (mediaKey, sockPath string, execArgs []string, mode PlayerMode, ok bool) {
-	movie, ok := a.client.getMovie(media.ID)
-	if !ok {
-		return "", "", nil, "", false
-	}
-	videoURL, err := a.client.getDownloadURL(movie)
-	if err != nil {
-		return "", "", nil, "", false
-	}
-
-	var subs []string
-	for _, sub := range movie.Subtitles {
-		if sub == nil || sub.Embedded {
-			continue
-		}
-		u, err := a.client.getDownloadURL(sub)
-		if err != nil {
-			continue
-		}
-		subs = append(subs, u)
-	}
-
-	mediaKey = "movie:" + movie.ImdbID
-	sockPath = fmt.Sprintf("/tmp/polochon-mpv-%d.sock", os.Getpid())
-	startPos := a.resumePos[mediaKey]
-	mode = detectPlayerMode()
-	execArgs = buildMPVArgs(a.mpvPath, media.Title, videoURL, subs, mode, startPos, sockPath, a.playerFullscreen)
-	execArgs = replaceMpvToken(execArgs, a.client.getToken())
-	return mediaKey, sockPath, execArgs, mode, true
-}
-
-func (a *App) buildEpisodeCommand(node *DynamicNode) (mediaKey, sockPath string, execArgs []string, mode PlayerMode, ok bool) {
-	if node == nil || node.Episode == nil {
-		return "", "", nil, "", false
-	}
-	ep := node.Episode
-	videoURL, err := a.client.getDownloadURL(ep)
-	if err != nil {
-		return "", "", nil, "", false
-	}
-
-	var subs []string
-	for _, sub := range ep.Subtitles {
-		if sub == nil || sub.Embedded {
-			continue
-		}
-		u, err := a.client.getDownloadURL(sub)
-		if err != nil {
-			continue
-		}
-		subs = append(subs, u)
-	}
-
-	mediaKey = fmt.Sprintf("episode:%s:%d:%d", node.ShowID, ep.Season, ep.Episode)
-	sockPath = fmt.Sprintf("/tmp/polochon-mpv-%d.sock", os.Getpid())
-	startPos := a.resumePos[mediaKey]
-	mode = detectPlayerMode()
-	execArgs = buildMPVArgs(a.mpvPath, node.Label, videoURL, subs, mode, startPos, sockPath, a.playerFullscreen)
-	execArgs = replaceMpvToken(execArgs, a.client.getToken())
-	return mediaKey, sockPath, execArgs, mode, true
-}

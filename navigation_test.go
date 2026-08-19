@@ -220,8 +220,8 @@ func TestNavigationState_getChildrenCount(t *testing.T) {
 }
 
 func TestNavigationStateNavigateToMediaDistinguishesDuplicateTitles(t *testing.T) {
-	first := &MediaItem{ID: "tt001", Type: "movie"}
-	second := &MediaItem{ID: "tt002", Type: "movie"}
+	first := &MediaItem{ID: "tt001", Type: mediaKindMovie}
+	second := &MediaItem{ID: "tt002", Type: mediaKindMovie}
 	root := &RadixNode{Children: []*RadixNode{
 		{Label: "Duplicate", FullString: "Duplicate", IsTerminal: true, Media: first, SubtreeCount: 1},
 		{Label: "Duplicate", FullString: "Duplicate", IsTerminal: true, Media: second, SubtreeCount: 1},

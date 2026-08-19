@@ -230,8 +230,8 @@ func (a *App) showEpisodeInfo(gtx C, s *showPage) D {
 		sections = append(sections, spacerFn(dp12))
 	}
 
-	epMediaKey := fmt.Sprintf("episode:%s:%d:%d", node.ShowID, ep.Season, ep.Episode)
-	if pos, ok := a.resumePos[epMediaKey]; ok && pos > 30 {
+	epMediaKey := episodeMediaKey(node.ShowID, ep.Season, ep.Episode)
+	if pos, ok := a.resumePos[epMediaKey]; ok && pos > minimumResumePosition {
 		p := pos
 		sections = append(sections, func(gtx C) D {
 			return a.renderKV(gtx, "Resume", formatResumePos(p))

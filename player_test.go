@@ -2,6 +2,36 @@ package main
 
 import "testing"
 
+func TestPlaybackMediaKeys(t *testing.T) {
+	if got := movieMediaKey("tt123"); got != "movie:tt123" {
+		t.Fatalf("movie media key = %q", got)
+	}
+	if got := episodeMediaKey("tt456", 2, 3); got != "episode:tt456:2:3" {
+		t.Fatalf("episode media key = %q", got)
+	}
+}
+
+func TestBuildMPVArgsUsesNamedResumeThreshold(t *testing.T) {
+	args := buildMPVArgs("mpv", "Movie", "https://video", []string{"https://subtitle"}, PlayerModeGUI, minimumResumePosition+1, "/tmp/mpv.sock", true)
+	want := map[string]bool{
+		"--start=31":                       false,
+		"--fs":                             false,
+		"--sub-file=https://subtitle":      false,
+		"--input-ipc-server=/tmp/mpv.sock": false,
+		"https://video":                    false,
+	}
+	for _, arg := range args {
+		if _, ok := want[arg]; ok {
+			want[arg] = true
+		}
+	}
+	for arg, found := range want {
+		if !found {
+			t.Errorf("MPV args missing %q: %#v", arg, args)
+		}
+	}
+}
+
 func TestPlaybackTrackerSnapshot(t *testing.T) {
 	tracker := newPlaybackTracker("movie:tt123")
 	tracker.updatePos(91.5)

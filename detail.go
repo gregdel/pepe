@@ -168,8 +168,8 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 		})
 	}
 
-	movieKey := "movie:" + movieID
-	if pos, ok := a.resumePos[movieKey]; ok && pos > 30 {
+	movieKey := movieMediaKey(movieID)
+	if pos, ok := a.resumePos[movieKey]; ok && pos > minimumResumePosition {
 		p := pos
 		sections = append(sections, func(gtx C) D {
 			return a.renderKV(gtx, "Resume", formatResumePos(p))

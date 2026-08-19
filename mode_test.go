@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -135,8 +136,8 @@ func TestLeftMovesFromSectionToHomeToModeRail(t *testing.T) {
 }
 
 func TestMediaForNodePrefersNodeIdentity(t *testing.T) {
-	correct := &MediaItem{ID: "correct", Type: "movie"}
-	wrong := &MediaItem{ID: "wrong", Type: "movie"}
+	correct := &MediaItem{ID: "correct", Type: mediaKindMovie}
+	wrong := &MediaItem{ID: "wrong", Type: mediaKindMovie}
 	a := &App{titleToMedia: map[string]*MediaItem{"Duplicate": wrong}}
 	node := &RadixNode{FullString: "Duplicate", Media: correct}
 
@@ -167,8 +168,8 @@ func TestRefreshCompletionRebuildsActiveModeAndRestoresMedia(t *testing.T) {
 	refreshedItems := []*listingItem{refreshedFirst, refreshedSecond}
 	defaultSnapshot := buildLibrarySnapshot(radixListingBuilder{}, refreshedItems, nil)
 	a.client.publishLibrary(nil, nil, refreshedItems, nil, defaultSnapshot)
-	a.refreshDone = make(chan LibrarySnapshot, 1)
-	a.refreshDone <- defaultSnapshot
+	a.refreshDone = make(chan refreshResult, 1)
+	a.refreshDone <- refreshResult{snapshot: defaultSnapshot}
 	a.refreshing = true
 	a.images = newAsyncCache[paint.ImageOp](1, 0)
 	a.nfos = newAsyncCache[*polochon.Movie](1, 0)
@@ -184,5 +185,30 @@ func TestRefreshCompletionRebuildsActiveModeAndRestoresMedia(t *testing.T) {
 	selected := a.nav.getSelectedChild()
 	if selected == nil || selected.Media == nil || selected.Media.ID != "tt002" || a.nav.cursor != 0 {
 		t.Errorf("restored selection = %#v at cursor %d, want tt002 at cursor 0", selected, a.nav.cursor)
+	}
+}
+
+func TestRefreshFailurePreservesCurrentUIState(t *testing.T) {
+	a := newModeTestApp(nil, nil)
+	detail := &detailScreen{kind: detailMovie}
+	refreshErr := errors.New("server unavailable")
+	a.detail = detail
+	a.refreshing = true
+	a.refreshDone = make(chan refreshResult, 1)
+	a.refreshDone <- refreshResult{err: refreshErr}
+
+	a.drainRefresh()
+
+	if a.refreshing || a.refreshDone != nil {
+		t.Fatal("failed refresh did not finish cleanly")
+	}
+	if !errors.Is(a.refreshError, refreshErr) {
+		t.Fatalf("refresh error = %v, want %v", a.refreshError, refreshErr)
+	}
+	if a.detail != detail {
+		t.Fatal("failed refresh unexpectedly dismissed the detail screen")
+	}
+	if a.nav.isAtRoot() == false {
+		t.Fatal("failed refresh unexpectedly changed navigation")
 	}
 }

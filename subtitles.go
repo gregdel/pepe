@@ -15,6 +15,8 @@ import (
 	polochon "github.com/odwrtw/polochon/lib"
 )
 
+const subtitleDoneDuration = 1500 * time.Millisecond
+
 // ── Subtitle popup ────────────────────────────────────────────────────────────
 
 // currentVideo returns the polochon.Video for the currently highlighted item, or nil.
@@ -41,7 +43,7 @@ func (a *App) currentVideo() polochon.Video {
 		return nil
 	}
 	media := a.mediaForNode(child)
-	if media == nil || media.Type != "movie" {
+	if media == nil || media.Type != mediaKindMovie {
 		return nil
 	}
 	movie, ok := a.client.getMovie(media.ID)
@@ -74,6 +76,43 @@ func (a *App) openSubtitlePopup() {
 
 func (a *App) closeSubtitlePopup() {
 	a.subPopup = nil
+}
+
+func (a *App) drainSubtitlePopup() {
+	if a.subPopup == nil {
+		return
+	}
+
+	select {
+	case result := <-a.subPopup.resultCh:
+		if result.err != nil {
+			a.subPopup.state = SubtitlePopupError
+			a.subPopup.errMsg = result.err.Error()
+		} else {
+			a.subPopup.state = SubtitlePopupReady
+			a.subPopup.entries = result.entries
+		}
+	default:
+	}
+
+	if a.subPopup.downloadDone != nil {
+		select {
+		case result := <-a.subPopup.downloadDone:
+			if result.err != nil {
+				a.subPopup.state = SubtitlePopupError
+				a.subPopup.errMsg = result.err.Error()
+			} else {
+				a.subPopup.state = SubtitlePopupDone
+				a.subPopup.doneAt = time.Now()
+			}
+			a.subPopup.downloadDone = nil
+		default:
+		}
+	}
+
+	if a.subPopup.state == SubtitlePopupDone && time.Since(a.subPopup.doneAt) > subtitleDoneDuration {
+		a.subPopup = nil
+	}
 }
 
 func (a *App) subPopupSelect() {

@@ -119,7 +119,7 @@ func (a *App) previewGroup(gtx C, node *RadixNode) D {
 // ── Terminal: movie/show teaser ───────────────────────────────────────────────
 
 func (a *App) previewTerminal(gtx C, media *MediaItem) D {
-	if media.Type == "show" {
+	if media.Type == mediaKindShow {
 		return a.previewShow(gtx, media)
 	}
 	return a.previewMovie(gtx, media)

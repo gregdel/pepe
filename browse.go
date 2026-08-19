@@ -184,6 +184,11 @@ func (a *App) layoutHeaderStatus(gtx C) D {
 			return a.label(gtx, spTiny, "Refreshing…", colorPrimary, font.Medium)
 		}))
 		parts = append(parts, layout.Rigid(layout.Spacer{Width: dp16}.Layout))
+	} else if a.refreshError != nil {
+		parts = append(parts, layout.Rigid(func(gtx C) D {
+			return a.label(gtx, spTiny, "Refresh failed", colorTerminal, font.Medium)
+		}))
+		parts = append(parts, layout.Rigid(layout.Spacer{Width: dp16}.Layout))
 	}
 	if a.playerStatus == PlayerStatusRunning {
 		parts = append(parts, layout.Rigid(func(gtx C) D {
@@ -355,7 +360,7 @@ func (a *App) terminalRow(gtx C, node *RadixNode, currentPath string, selected b
 // rowPoster renders the small poster thumbnail for a terminal nav row.
 func (a *App) rowPoster(gtx C, media *MediaItem) D {
 	const thumbW = unit.Dp(44)
-	if media.Type == "show" {
+	if media.Type == mediaKindShow {
 		id := media.ID
 		return a.posterImage(gtx, "poster:"+id, func() (image.Image, error) {
 			return a.client.fetchShowImage(id, func(s *papi.Show) *papi.File { return s.Poster })
@@ -369,7 +374,7 @@ func (a *App) rowPoster(gtx C, media *MediaItem) D {
 
 // rowQuality returns the right-aligned quality label for a movie row.
 func (a *App) rowQuality(media *MediaItem) string {
-	if media == nil || media.Type != "movie" {
+	if media == nil || media.Type != mediaKindMovie {
 		return ""
 	}
 	movie, ok := a.client.getMovie(media.ID)

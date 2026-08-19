@@ -133,7 +133,7 @@ func (n *NavigationState) getCurrentPath() string {
 
 // navigateToMedia walks the tree and reconstructs the path to a terminal with
 // the requested stable media identity.
-func (n *NavigationState) navigateToMedia(root *RadixNode, mediaType, mediaID string) bool {
+func (n *NavigationState) navigateToMedia(root *RadixNode, mediaType MediaKind, mediaID string) bool {
 	if root == nil {
 		return false
 	}

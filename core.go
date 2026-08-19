@@ -22,8 +22,16 @@ type MediaItem struct {
 	ID    string
 	Title string
 	Year  int
-	Type  string // "movie" or "show"
+	Type  MediaKind
 }
+
+// MediaKind identifies the catalog collection that owns a media item.
+type MediaKind string
+
+const (
+	mediaKindMovie MediaKind = "movie"
+	mediaKindShow  MediaKind = "show"
+)
 
 // APIClient wraps the papi client with caching
 type APIClient struct {
@@ -161,12 +169,8 @@ func (c *APIClient) getSnapshot() LibrarySnapshot {
 	}
 }
 
-func (c *APIClient) snapshotFor(builder listingBuilder) (LibrarySnapshot, error) {
-	// Create copies of the data under lock to ensure consistency.
-	// These copies are safe to use for building a snapshot because:
-	// 1. We're working with immutable slices (the original slices aren't modified)
-	// 2. The builder operations work with the copied slices
-	// 3. Any concurrent access to the original data structure remains protected by RLock
+func (c *APIClient) snapshotFor(builder listingBuilder) LibrarySnapshot {
+	// Copy the immutable catalog slices under lock, then build outside the lock.
 	c.mu.RLock()
 	movieItems := append([]*listingItem(nil), c.movieItems...)
 	showItems := append([]*listingItem(nil), c.showItems...)
@@ -174,12 +178,10 @@ func (c *APIClient) snapshotFor(builder listingBuilder) (LibrarySnapshot, error)
 	showCount := c.showCount
 	c.mu.RUnlock()
 
-	// The builder operations are safe since we're working with copies of the data,
-	// and any concurrent modification to the original slices would not affect our copy.
 	snapshot := buildLibrarySnapshot(builder, movieItems, showItems)
 	snapshot.movieCount = movieCount
 	snapshot.showCount = showCount
-	return snapshot, nil
+	return snapshot
 }
 
 func (c *APIClient) getDownloadURL(target papi.Downloadable) (string, error) {

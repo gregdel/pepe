@@ -20,7 +20,7 @@ func newMovieListingItem(movie *papi.Movie) *listingItem {
 			ID:    movie.ImdbID,
 			Title: movie.Title,
 			Year:  movie.Year,
-			Type:  "movie",
+			Type:  mediaKindMovie,
 		},
 		movie: movie,
 	}
@@ -32,7 +32,7 @@ func newShowListingItem(show *papi.Show) *listingItem {
 			ID:    show.ImdbID,
 			Title: show.Title,
 			Year:  show.Year,
-			Type:  "show",
+			Type:  mediaKindShow,
 		},
 		show: show,
 	}

@@ -161,10 +161,7 @@ func TestSnapshotForUsesCachedCatalog(t *testing.T) {
 		client.mu.Unlock()
 	}}
 
-	snapshot, err := client.snapshotFor(builder)
-	if err != nil {
-		t.Fatalf("snapshotFor failed: %v", err)
-	}
+	snapshot := client.snapshotFor(builder)
 
 	if len(builder.calls) != 2 {
 		t.Fatalf("builder calls = %d, want 2", len(builder.calls))
@@ -187,7 +184,7 @@ func TestSnapshotForUsesCachedCatalog(t *testing.T) {
 }
 
 func TestSnapshotForDoesNotReplaceDefaultSnapshot(t *testing.T) {
-	defaultMedia := &MediaItem{ID: "default", Type: "movie"}
+	defaultMedia := &MediaItem{ID: "default", Type: mediaKindMovie}
 	defaultMovies := NewRadixTree([]string{"default-movie"})
 	defaultShows := NewRadixTree([]string{"default-show"})
 	client := &APIClient{
@@ -201,10 +198,7 @@ func TestSnapshotForDoesNotReplaceDefaultSnapshot(t *testing.T) {
 	}
 	builder := &recordingListingBuilder{}
 
-	custom, err := client.snapshotFor(builder)
-	if err != nil {
-		t.Fatalf("snapshotFor failed: %v", err)
-	}
+	custom := client.snapshotFor(builder)
 	custom.titleToMedia["custom"] = &MediaItem{ID: "custom"}
 	defaultSnapshot := client.getSnapshot()
 
@@ -412,11 +406,7 @@ func TestSnapshotForConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			// Each goroutine calls snapshotFor with a different builder
 			builder := radixListingBuilder{}
-			snapshot, err := client.snapshotFor(builder)
-			if err != nil {
-				t.Errorf("snapshotFor failed in goroutine %d: %v", goroutineID, err)
-				return
-			}
+			snapshot := client.snapshotFor(builder)
 
 			// Verify the snapshot is valid
 			if snapshot.movieRadix == nil || snapshot.showRadix == nil {
@@ -454,11 +444,7 @@ func TestSnapshotForRaceConditionWithSSEEvents(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 5; i++ {
 			builder := radixListingBuilder{}
-			snapshot, err := client.snapshotFor(builder)
-			if err != nil {
-				t.Errorf("snapshotFor failed: %v", err)
-				return
-			}
+			snapshot := client.snapshotFor(builder)
 
 			// Verify snapshot content is reasonable
 			if snapshot.movieCount != len(movieItems) || snapshot.showCount != len(showItems) {
