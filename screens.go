@@ -153,6 +153,7 @@ func (a *App) pushShowDetail(media *MediaItem) {
 			showID:   show.ImdbID,
 			title:    media.Title,
 			seasons:  seasonNodes,
+			focus:    focusTabs,
 			tabsList: layout.List{Axis: layout.Horizontal},
 			epList:   layout.List{Axis: layout.Vertical},
 			infoList: layout.List{Axis: layout.Vertical},

@@ -87,14 +87,14 @@ func (a *App) layoutModeRail(gtx C) D {
 }
 
 func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
-	active := a.library.mode == mode
-	focused := a.browseFocus == browseFocusModeRail && active
+	active := a.browse.library.mode == mode
+	focused := a.browse.focus == browseFocusModeRail && active
 	icon := radixModeIcon
 	if mode == ListingModeDateAdded {
 		icon = dateAddedModeIcon
 	}
 
-	return a.navRowShell(gtx, focused, unit.Dp(64), func(gtx C) D {
+	return a.modeRowShell(gtx, active, focused, func(gtx C) D {
 		iconColor := colorSubtle
 		if active {
 			iconColor = colorPrimary
@@ -111,16 +111,43 @@ func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
 	})
 }
 
+func (a *App) modeRowShell(gtx C, active, focused bool, content layout.Widget) D {
+	return layout.Inset{Left: dp8, Right: dp8, Top: dp2, Bottom: dp2}.Layout(gtx, func(gtx C) D {
+		gtx.Constraints.Min.X = gtx.Constraints.Max.X
+		if h := gtx.Dp(unit.Dp(64)); gtx.Constraints.Min.Y < h {
+			gtx.Constraints.Min.Y = h
+		}
+		macro := op.Record(gtx.Ops)
+		dims := layout.Inset{Left: dp12, Right: dp12, Top: dp6, Bottom: dp6}.Layout(gtx, content)
+		call := macro.Stop()
+		if focused {
+			fillRounded(gtx, dims.Size, radiusRow, colorSelectBg)
+		} else if active {
+			fillRounded(gtx, dims.Size, radiusRow, colorSurface2)
+			strokeRounded(gtx, dims.Size, radiusRow, colorPrimary)
+		}
+		call.Add(gtx.Ops)
+		return dims
+	})
+}
+
 // ── Header ────────────────────────────────────────────────────────────────────
 
 func (a *App) layoutHeader(gtx C) D {
 	return layout.Inset{Left: dp24, Right: dp24, Top: dp12, Bottom: dp12}.Layout(gtx, func(gtx C) D {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-			// Wordmark
+			// Active listing mode.
 			layout.Rigid(func(gtx C) D {
-				return a.label(gtx, spHero, "Polochon", colorPrimary, font.Bold)
+				return a.label(gtx, spHero, listingModeLabel(a.browse.library.mode), colorPrimary, font.Bold)
 			}),
-			layout.Rigid(layout.Spacer{Width: dp24}.Layout),
+			layout.Rigid(layout.Spacer{Width: dp16}.Layout),
+			layout.Rigid(func(gtx C) D {
+				size := image.Pt(gtx.Dp(unit.Dp(1)), gtx.Dp(dp32))
+				defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
+				paint.Fill(gtx.Ops, colorOutline)
+				return D{Size: size}
+			}),
+			layout.Rigid(layout.Spacer{Width: dp16}.Layout),
 			// Breadcrumb / radix query
 			layout.Rigid(func(gtx C) D {
 				return a.layoutBreadcrumb(gtx)
@@ -137,15 +164,15 @@ func (a *App) layoutHeader(gtx C) D {
 // layoutBreadcrumb renders "Movies · int|" — the current radix prefix shown as
 // a search query, making the tree drill-down feel like typing.
 func (a *App) layoutBreadcrumb(gtx C) D {
-	if a.nav.isAtRoot() {
+	if a.browse.nav.isAtRoot() {
 		return a.label(gtx, spMeta, "Home", colorSubtle, 0)
 	}
 
 	section := "Movies"
-	if a.nav.section == SectionShows {
+	if a.browse.nav.section == SectionShows {
 		section = "Shows"
 	}
-	prefix := a.nav.getCurrentPath()
+	prefix := a.browse.nav.getCurrentPath()
 
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx C) D {
@@ -198,11 +225,18 @@ func (a *App) layoutHeaderStatus(gtx C) D {
 	}
 	parts = append(parts, layout.Rigid(func(gtx C) D {
 		return a.label(gtx, spTiny,
-			fmt.Sprintf("%d movies · %d shows", a.library.movieCount, a.library.showCount),
+			fmt.Sprintf("%d movies · %d shows", a.browse.library.movieCount, a.browse.library.showCount),
 			colorMuted, 0)
 	}))
 
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, parts...)
+}
+
+func listingModeLabel(mode ListingMode) string {
+	if mode == ListingModeDateAdded {
+		return "Last added"
+	}
+	return "Smart list"
 }
 
 // ── Nav panel ─────────────────────────────────────────────────────────────────
@@ -223,35 +257,35 @@ func (a *App) layoutNavPanel(gtx C) D {
 func (a *App) layoutNavList(gtx C) D {
 	// Keep cursor centered in the visible area (like scrolloff=999).
 	if pos := a.leftList.Position; pos.Count > 0 {
-		target := max(0, a.nav.cursor-pos.Count/2)
+		target := max(0, a.browse.nav.cursor-pos.Count/2)
 		if pos.First != target {
 			a.leftList.ScrollTo(target)
 		}
 	}
 
-	if a.nav.isAtRoot() {
+	if a.browse.nav.isAtRoot() {
 		items := []struct {
 			name  string
 			count int
 		}{
-			{"Movies", a.library.movieCount},
-			{"Shows", a.library.showCount},
+			{"Movies", a.browse.library.movieCount},
+			{"Shows", a.browse.library.showCount},
 		}
 		return a.leftList.Layout(gtx, len(items), func(gtx C, i int) D {
-			selected := a.browseFocus == browseFocusContent && i == a.nav.cursor
+			selected := a.browse.focus == browseFocusContent && i == a.browse.nav.cursor
 			return a.groupRow(gtx, "", items[i].name, items[i].count, selected)
 		})
 	}
 
-	current := a.nav.getCurrentNode()
+	current := a.browse.nav.getCurrentNode()
 	if current == nil {
 		return D{}
 	}
-	currentPath := a.nav.getCurrentPath()
+	currentPath := a.browse.nav.getCurrentPath()
 	children := current.Children
 	return a.leftList.Layout(gtx, len(children), func(gtx C, i int) D {
 		node := children[i]
-		selected := a.browseFocus == browseFocusContent && i == a.nav.cursor
+		selected := a.browse.focus == browseFocusContent && i == a.browse.nav.cursor
 
 		if node.IsTerminal && node.SubtreeCount == 1 {
 			return a.terminalRow(gtx, node, currentPath, selected)

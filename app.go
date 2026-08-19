@@ -8,7 +8,6 @@ import (
 	"gioui.org/app"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
-	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -73,11 +72,8 @@ type SubtitlePopup struct {
 type App struct {
 	client *APIClient
 
-	// library is the active snapshot and its presentation mode.
-	library libraryView
-
-	nav         *NavigationState
-	browseFocus browseFocus
+	// browse owns the active catalog view and all browse-screen navigation.
+	browse browseState
 
 	// pushed full-screen detail page (nil = browse screen)
 	detail *detailScreen
@@ -125,6 +121,12 @@ type libraryView struct {
 	mode ListingMode
 }
 
+type browseState struct {
+	library libraryView
+	nav     *NavigationState
+	focus   browseFocus
+}
+
 // savedSelection captures the identity of the currently selected media item so
 // navigation can be restored after a library refresh.
 type savedSelection struct {
@@ -141,7 +143,7 @@ func (a *App) captureSelection() *savedSelection {
 		return nil
 	}
 	return &savedSelection{
-		section:   a.nav.section,
+		section:   a.browse.nav.section,
 		mediaType: media.Type,
 		mediaID:   media.ID,
 	}
@@ -154,17 +156,17 @@ func (a *App) restoreSelection(sel *savedSelection) {
 		return
 	}
 
-	a.nav.section = sel.section
-	if !a.nav.navigateToMedia(a.sectionRoot(sel.section), sel.mediaType, sel.mediaID) {
-		a.nav = newNavigationState()
+	a.browse.nav.section = sel.section
+	if !a.browse.nav.navigateToMedia(a.sectionRoot(sel.section), sel.mediaType, sel.mediaID) {
+		a.browse.nav = newNavigationState()
 	}
 }
 
 func (a *App) sectionRoot(section Section) *RadixNode {
 	if section == SectionShows {
-		return a.library.showRadix.Root()
+		return a.browse.library.showRadix.Root()
 	}
-	return a.library.movieRadix.Root()
+	return a.browse.library.movieRadix.Root()
 }
 
 func (a *App) mediaForNode(node *RadixNode) *MediaItem {
@@ -174,14 +176,14 @@ func (a *App) mediaForNode(node *RadixNode) *MediaItem {
 	if node.Media != nil {
 		return node.Media
 	}
-	return a.library.titleToMedia[node.FullString]
+	return a.browse.library.titleToMedia[node.FullString]
 }
 
 func (a *App) selectedBrowseMedia() *MediaItem {
-	if a.nav.isAtRoot() {
+	if a.browse.nav.isAtRoot() {
 		return nil
 	}
-	child := a.nav.getSelectedChild()
+	child := a.browse.nav.getSelectedChild()
 	if child == nil || !child.IsTerminal {
 		return nil
 	}
@@ -189,7 +191,7 @@ func (a *App) selectedBrowseMedia() *MediaItem {
 }
 
 func (a *App) applyLibrarySnapshot(snapshot LibrarySnapshot) {
-	a.library.LibrarySnapshot = snapshot
+	a.browse.library.LibrarySnapshot = snapshot
 }
 
 func (a *App) snapshotForMode(mode ListingMode) LibrarySnapshot {
@@ -200,18 +202,18 @@ func (a *App) snapshotForMode(mode ListingMode) LibrarySnapshot {
 }
 
 func (a *App) applyListingMode(mode ListingMode) {
-	wasAtRoot := a.nav.isAtRoot()
-	section := a.nav.section
-	homeCursor := a.nav.cursor
+	wasAtRoot := a.browse.nav.isAtRoot()
+	section := a.browse.nav.section
+	homeCursor := a.browse.nav.cursor
 
 	snapshot := a.snapshotForMode(mode)
 	a.applyLibrarySnapshot(snapshot)
-	a.library.mode = mode
-	a.nav = newNavigationState()
+	a.browse.library.mode = mode
+	a.browse.nav = newNavigationState()
 	if wasAtRoot {
-		a.nav.cursor = homeCursor
+		a.browse.nav.cursor = homeCursor
 	} else {
-		a.nav.resetToSection(section, a.sectionRoot(section))
+		a.browse.nav.resetToSection(section, a.sectionRoot(section))
 	}
 	a.detail = nil
 }
@@ -232,9 +234,7 @@ func newApp(w *app.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 
 	app := &App{
 		client:           client,
-		library:          libraryView{LibrarySnapshot: snapshot, mode: ListingModeTitle},
-		nav:              newNavigationState(),
-		browseFocus:      browseFocusContent,
+		browse:           browseState{library: libraryView{LibrarySnapshot: snapshot, mode: ListingModeTitle}, nav: newNavigationState(), focus: browseFocusContent},
 		playerStatus:     PlayerStatusIdle,
 		mpvPath:          mpvPath,
 		playerFullscreen: playerFullscreen,
@@ -349,198 +349,6 @@ func (a *App) drainChannels() {
 	a.nfos.drain()
 }
 
-// ── Key handling ──────────────────────────────────────────────────────────────
-
-// keyFilters lists every key we want delivered — one Filter per key name.
-// Optional: ModShift so that e.g. Shift+K still fires (we ignore it in logic).
-var keyFilters = []event.Filter{
-	key.Filter{Focus: nil, Name: key.NameUpArrow},
-	key.Filter{Focus: nil, Name: key.NameDownArrow},
-	key.Filter{Focus: nil, Name: key.NameLeftArrow},
-	key.Filter{Focus: nil, Name: key.NameRightArrow},
-	key.Filter{Focus: nil, Name: key.NameReturn},
-	key.Filter{Focus: nil, Name: key.NameEnter},
-	key.Filter{Focus: nil, Name: key.NameEscape},
-	key.Filter{Focus: nil, Name: "H", Optional: key.ModShift},
-	key.Filter{Focus: nil, Name: "J", Optional: key.ModShift},
-	key.Filter{Focus: nil, Name: "K", Optional: key.ModShift},
-	key.Filter{Focus: nil, Name: "L", Optional: key.ModShift},
-	key.Filter{Focus: nil, Name: "Q", Optional: key.ModShift},
-	key.Filter{Focus: nil, Name: "R", Optional: key.ModShift},
-	key.Filter{Focus: nil, Name: "S", Optional: key.ModShift},
-	key.Filter{Focus: nil, Name: key.NameTab},
-}
-
-type appAction int
-
-const (
-	actionUnknown appAction = iota
-	actionUp
-	actionDown
-	actionLeft
-	actionRight
-	actionConfirm
-	actionDismiss
-	actionToggleSection
-	actionRefresh
-	actionSubtitles
-	actionQuit
-)
-
-func actionForKey(name key.Name) appAction {
-	switch name {
-	case key.NameUpArrow, "K":
-		return actionUp
-	case key.NameDownArrow, "J":
-		return actionDown
-	case key.NameLeftArrow, "H":
-		return actionLeft
-	case key.NameRightArrow, "L":
-		return actionRight
-	case key.NameReturn, key.NameEnter:
-		return actionConfirm
-	case key.NameEscape:
-		return actionDismiss
-	case key.NameTab:
-		return actionToggleSection
-	case "R":
-		return actionRefresh
-	case "S":
-		return actionSubtitles
-	case "Q":
-		return actionQuit
-	default:
-		return actionUnknown
-	}
-}
-
-func (a *App) handleKeys(gtx layout.Context) {
-	for {
-		e, ok := gtx.Event(keyFilters...)
-		if !ok {
-			break
-		}
-		ke, ok := e.(key.Event)
-		if !ok || ke.State != key.Press {
-			continue
-		}
-		// Ignore modified keys (Ctrl+X, Alt+X, etc.) except allow plain Shift
-		if ke.Modifiers & ^key.ModShift != 0 {
-			continue
-		}
-
-		// Subtitle popup intercepts all keys when active.
-		if a.subPopup != nil {
-			a.handlePopupKeys(ke)
-			continue
-		}
-
-		if a.detail != nil {
-			a.handleDetailKeys(ke)
-			continue
-		}
-
-		a.handleBrowseKeys(ke)
-	}
-}
-
-func (a *App) handlePopupKeys(ke key.Event) {
-	switch actionForKey(ke.Name) {
-	case actionUp:
-		if a.subPopup.cursor > 0 {
-			a.subPopup.cursor--
-		}
-	case actionDown:
-		if a.subPopup.state == SubtitlePopupReady && a.subPopup.cursor < len(a.subPopup.entries)-1 {
-			a.subPopup.cursor++
-		}
-	case actionConfirm, actionRight:
-		a.subPopupSelect()
-	case actionDismiss, actionLeft:
-		a.closeSubtitlePopup()
-	}
-}
-
-func (a *App) handleBrowseKeys(ke key.Event) {
-	switch actionForKey(ke.Name) {
-	case actionUp:
-		a.navigateUp()
-	case actionDown:
-		a.navigateDown()
-	case actionLeft:
-		a.navigateLeft()
-	case actionDismiss:
-		a.navigateEscape()
-	case actionRight:
-		a.navigateRight()
-	case actionConfirm:
-		a.activateBrowseSelection()
-	case actionToggleSection:
-		a.toggleSection()
-	case actionRefresh:
-		a.startRefresh()
-	case actionSubtitles:
-		a.openSubtitlePopup()
-	case actionQuit:
-		a.w.Perform(system.ActionClose)
-	}
-}
-
-func (a *App) handleDetailKeys(ke key.Event) {
-	d := a.detail
-	if d.kind == detailShow {
-		a.handleShowKeys(ke, d.show)
-		return
-	}
-
-	// Movie detail page.
-	switch actionForKey(ke.Name) {
-	case actionConfirm, actionRight:
-		a.launchMovie(&MediaItem{ID: d.movieID, Title: d.movieTitle, Type: mediaKindMovie})
-	case actionDismiss, actionLeft:
-		a.popDetail()
-	case actionUp:
-		a.scrollDetail(-1)
-	case actionDown:
-		a.scrollDetail(1)
-	case actionSubtitles:
-		a.openSubtitlePopup()
-	case actionQuit:
-		a.w.Perform(system.ActionClose)
-	}
-}
-
-func (a *App) handleShowKeys(ke key.Event, s *showPage) {
-	switch actionForKey(ke.Name) {
-	case actionUp:
-		s.up()
-	case actionDown:
-		s.down()
-	case actionLeft:
-		if s.focus == focusTabs {
-			s.left()
-		} else {
-			a.popDetail()
-		}
-	case actionRight:
-		s.right()
-	case actionConfirm:
-		if s.focus == focusTabs {
-			s.focus = focusEpisodes
-			return
-		}
-		if ep := s.currentEpisode(); ep != nil {
-			a.launchEpisode(ep)
-		}
-	case actionDismiss:
-		a.popDetail()
-	case actionSubtitles:
-		a.openSubtitlePopup()
-	case actionQuit:
-		a.w.Perform(system.ActionClose)
-	}
-}
-
 // scrollDetail scrolls the movie detail page content with the keyboard.
 func (a *App) scrollDetail(dir int) {
 	const step = 160 // px
@@ -549,129 +357,6 @@ func (a *App) scrollDetail(dir int) {
 		a.detailList.Position.Offset = 0
 	}
 }
-
-// ── Browse navigation ─────────────────────────────────────────────────────────
-
-func (a *App) navigateUp() {
-	if a.browseFocus == browseFocusModeRail {
-		if a.library.mode == ListingModeTitle {
-			a.applyListingMode(listingModeCount - 1)
-		} else {
-			a.applyListingMode(a.library.mode - 1)
-		}
-		return
-	}
-	if a.nav.isAtRoot() {
-		if a.nav.cursor == 0 {
-			a.nav.cursor = 1
-		} else {
-			a.nav.cursor = 0
-		}
-	} else {
-		a.nav.moveCursorUp(a.nav.getChildrenCount())
-	}
-}
-
-func (a *App) navigateDown() {
-	if a.browseFocus == browseFocusModeRail {
-		a.applyListingMode((a.library.mode + 1) % listingModeCount)
-		return
-	}
-	if a.nav.isAtRoot() {
-		if a.nav.cursor == 1 {
-			a.nav.cursor = 0
-		} else {
-			a.nav.cursor = 1
-		}
-	} else {
-		a.nav.moveCursorDown(a.nav.getChildrenCount())
-	}
-}
-
-func (a *App) navigateLeft() {
-	if a.browseFocus == browseFocusModeRail {
-		return
-	}
-	if a.nav.isAtRoot() {
-		a.browseFocus = browseFocusModeRail
-		return
-	}
-	if a.nav.isAtSectionRoot() {
-		a.nav.returnToHome()
-		return
-	}
-	a.nav.goBack()
-}
-
-func (a *App) navigateEscape() {
-	if a.browseFocus == browseFocusModeRail {
-		a.browseFocus = browseFocusContent
-		return
-	}
-	if a.nav.isAtSectionRoot() {
-		a.nav.returnToHome()
-		return
-	}
-	a.nav.goBack()
-}
-
-func (a *App) navigateRight() {
-	if a.browseFocus == browseFocusModeRail {
-		a.browseFocus = browseFocusContent
-		return
-	}
-	a.activateContentSelection()
-}
-
-func (a *App) activateBrowseSelection() {
-	if a.browseFocus == browseFocusModeRail {
-		a.navigateRight()
-		return
-	}
-	a.activateContentSelection()
-}
-
-func (a *App) activateContentSelection() {
-	if a.nav.isAtRoot() {
-		if a.nav.cursor == 0 {
-			a.nav.resetToSection(SectionMovies, a.sectionRoot(SectionMovies))
-		} else {
-			a.nav.resetToSection(SectionShows, a.sectionRoot(SectionShows))
-		}
-		return
-	}
-
-	child := a.nav.getSelectedChild()
-	if child == nil {
-		return
-	}
-
-	if child.IsTerminal {
-		media := a.mediaForNode(child)
-		if media == nil {
-			return
-		}
-		if media.Type == mediaKindShow {
-			a.pushShowDetail(media)
-			return
-		}
-		a.pushMovieDetail(media)
-		return
-	}
-
-	a.nav.goForward(child)
-}
-
-func (a *App) toggleSection() {
-	a.browseFocus = browseFocusContent
-	if a.nav.section == SectionMovies {
-		a.nav.resetToSection(SectionShows, a.sectionRoot(SectionShows))
-	} else {
-		a.nav.resetToSection(SectionMovies, a.sectionRoot(SectionMovies))
-	}
-}
-
-// ── Player ────────────────────────────────────────────────────────────────────
 
 // ── Root layout ───────────────────────────────────────────────────────────────
 

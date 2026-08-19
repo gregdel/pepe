@@ -20,30 +20,32 @@ func (a *App) currentHints() []hint {
 		switch d.kind {
 		case detailMovie:
 			return []hint{
+				{key: "↑↓", label: "scroll"},
 				{key: "enter", label: "play"},
 				{key: "s", label: "subtitles"},
-				{key: "esc", label: "back"},
+				{key: "←", label: "back"},
 			}
 		case detailShow:
 			return []hint{
-				{key: "↑↓←→", label: "navigate"},
+				{key: "←→", label: "seasons"},
+				{key: "↓", label: "episodes"},
 				{key: "enter", label: "play episode"},
 				{key: "s", label: "subtitles"},
-				{key: "esc", label: "back"},
+				{key: "←", label: "back"},
 			}
 		}
 	}
 
-	if a.browseFocus == browseFocusModeRail {
+	if a.browse.focus == browseFocusModeRail {
 		return []hint{
 			{key: "↑↓", label: "change mode"},
-			{key: "→/enter", label: "home"},
+			{key: "→/enter/esc", label: "home"},
 			{key: "r", label: "refresh"},
 			{key: "q", label: "quit"},
 		}
 	}
 
-	if a.nav.isAtRoot() {
+	if a.browse.nav.isAtRoot() {
 		return []hint{
 			{key: "↑↓", label: "navigate"},
 			{key: "enter", label: "browse"},
@@ -54,10 +56,15 @@ func (a *App) currentHints() []hint {
 	}
 
 	hints := []hint{
-		{key: "↑↓←→", label: "navigate"},
-		{key: "enter", label: "select"},
+		{key: "↑↓", label: "navigate"},
+		{key: "←", label: "back"},
 		{key: "esc", label: "back"},
 		{key: "tab", label: "section"},
+	}
+	if media := a.selectedBrowseMedia(); media != nil {
+		hints = append(hints, hint{key: "→", label: "details"})
+	} else {
+		hints = append(hints, hint{key: "→/enter", label: "browse"})
 	}
 	if a.currentVideo() != nil {
 		hints = append(hints, hint{key: "s", label: "subtitles"})

@@ -10,7 +10,7 @@ func TestActionForKeyAliases(t *testing.T) {
 	tests := []struct {
 		name string
 		key  key.Name
-		want appAction
+		want inputAction
 	}{
 		{"up arrow", key.NameUpArrow, actionUp},
 		{"vim up", "K", actionUp},
@@ -20,9 +20,9 @@ func TestActionForKeyAliases(t *testing.T) {
 		{"vim left", "H", actionLeft},
 		{"right arrow", key.NameRightArrow, actionRight},
 		{"vim right", "L", actionRight},
-		{"enter", key.NameEnter, actionConfirm},
-		{"return", key.NameReturn, actionConfirm},
-		{"escape", key.NameEscape, actionDismiss},
+		{"enter", key.NameEnter, actionActivate},
+		{"return", key.NameReturn, actionActivate},
+		{"escape", key.NameEscape, actionBack},
 		{"tab", key.NameTab, actionToggleSection},
 		{"refresh", "R", actionRefresh},
 		{"subtitles", "S", actionSubtitles},
@@ -36,5 +36,20 @@ func TestActionForKeyAliases(t *testing.T) {
 				t.Errorf("actionForKey(%q) = %v, want %v", test.key, got, test.want)
 			}
 		})
+	}
+}
+
+func TestKeyFiltersCoverEveryBinding(t *testing.T) {
+	if len(keyFilters) != len(keyBindings) {
+		t.Fatalf("key filter count = %d, want %d", len(keyFilters), len(keyBindings))
+	}
+}
+
+func TestListingModeLabel(t *testing.T) {
+	if got := listingModeLabel(ListingModeTitle); got != "Smart list" {
+		t.Fatalf("title mode label = %q", got)
+	}
+	if got := listingModeLabel(ListingModeDateAdded); got != "Last added" {
+		t.Fatalf("date-added mode label = %q", got)
 	}
 }

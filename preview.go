@@ -14,11 +14,11 @@ import (
 // ── Preview panel (right side of the browse screen) ───────────────────────────
 
 func (a *App) layoutPreview(gtx C) D {
-	if a.nav.isAtRoot() {
+	if a.browse.nav.isAtRoot() {
 		return a.previewRoot(gtx)
 	}
 
-	child := a.nav.getSelectedChild()
+	child := a.browse.nav.getSelectedChild()
 	if child == nil {
 		return a.previewMessage(gtx, "No item selected")
 	}
@@ -43,9 +43,9 @@ func (a *App) previewMessage(gtx C, msg string) D {
 // ── Root: section hero ────────────────────────────────────────────────────────
 
 func (a *App) previewRoot(gtx C) D {
-	name, count := "Movies", a.library.movieCount
-	if a.nav.cursor == 1 {
-		name, count = "Shows", a.library.showCount
+	name, count := "Movies", a.browse.library.movieCount
+	if a.browse.nav.cursor == 1 {
+		name, count = "Shows", a.browse.library.showCount
 	}
 
 	return layout.UniformInset(dp32).Layout(gtx, func(gtx C) D {
@@ -68,7 +68,7 @@ func (a *App) previewRoot(gtx C) D {
 // ── Prefix group ──────────────────────────────────────────────────────────────
 
 func (a *App) previewGroup(gtx C, node *RadixNode) D {
-	currentPath := a.nav.getCurrentPath()
+	currentPath := a.browse.nav.getCurrentPath()
 	group := node.Label
 	if currentPath != "" {
 		group = currentPath + node.Label
@@ -179,7 +179,7 @@ func (a *App) previewMovie(gtx C, media *MediaItem) D {
 					}),
 					layout.Rigid(layout.Spacer{Height: dp16}.Layout),
 					layout.Rigid(func(gtx C) D {
-						return a.hintItem(gtx, hint{key: "enter", label: "for details"})
+						return a.hintItem(gtx, hint{key: "→", label: "for details"})
 					}),
 				)
 			}),
@@ -226,7 +226,7 @@ func (a *App) previewShow(gtx C, media *MediaItem) D {
 					}),
 					layout.Rigid(layout.Spacer{Height: dp16}.Layout),
 					layout.Rigid(func(gtx C) D {
-						return a.hintItem(gtx, hint{key: "enter", label: "for details"})
+						return a.hintItem(gtx, hint{key: "→", label: "for details"})
 					}),
 				)
 			}),
