@@ -7,12 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
-	yaml "github.com/goccy/go-yaml"
 	polochon "github.com/odwrtw/polochon/lib"
 	"github.com/odwrtw/polochon/lib/nfo"
 	"github.com/odwrtw/polochon/lib/papi"
@@ -39,11 +36,9 @@ type APIClient struct {
 	client *papi.Client
 	token  string
 
-	mu     sync.RWMutex
-	movies map[string]*papi.Movie
-	shows  map[string]*papi.Show
-	// Listing items and their referenced media graphs are immutable after publication.
-	// Builders may read them but must not mutate them.
+	mu           sync.RWMutex
+	movies       map[string]*papi.Movie
+	shows        map[string]*papi.Show
 	movieItems   []*listingItem
 	showItems    []*listingItem
 	movieRadix   *RadixTree
@@ -308,80 +303,4 @@ func (c *APIClient) fetchMovieNFO(id string) (*polochon.Movie, error) {
 // Internally the papi client reconnects with exponential backoff.
 func (c *APIClient) Events(ctx context.Context) <-chan struct{} {
 	return c.client.Events(ctx)
-}
-
-// Config holds the application configuration
-type Config struct {
-	PolochonURL string
-	Token       string
-	MPVPath     string
-
-	Fullscreen       bool
-	PlayerFullscreen bool
-}
-
-type fileConfig struct {
-	PolochonURL      string `yaml:"polochon_url"`
-	Token            string `yaml:"polochon_token"`
-	MPVPath          string `yaml:"mpv_path"`
-	Fullscreen       bool   `yaml:"fullscreen"`
-	PlayerFullscreen bool   `yaml:"player_fullscreen"`
-}
-
-func defaultConfigPath() string {
-	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
-		return filepath.Join(dir, "polochon-gio", "config.yaml")
-	}
-	return filepath.Join(".", "polochon-gio.yaml")
-}
-
-func loadConfig(path string) (*Config, error) {
-	cfg := &Config{
-		MPVPath:          "mpv",
-		Fullscreen:       false,
-		PlayerFullscreen: false,
-	}
-
-	if path != "" {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				return nil, fmt.Errorf("read config file %s: %w", path, err)
-			}
-		} else {
-			var fc fileConfig
-			if err := yaml.Unmarshal(b, &fc); err != nil {
-				return nil, fmt.Errorf("parse config file %s: %w", path, err)
-			}
-			cfg.PolochonURL = strings.TrimSpace(fc.PolochonURL)
-			cfg.Token = strings.TrimSpace(fc.Token)
-			if strings.TrimSpace(fc.MPVPath) != "" {
-				cfg.MPVPath = strings.TrimSpace(fc.MPVPath)
-			}
-			cfg.Fullscreen = fc.Fullscreen
-			cfg.PlayerFullscreen = fc.PlayerFullscreen
-		}
-	}
-
-	url := os.Getenv("POLOCHON_URL")
-	if url != "" {
-		cfg.PolochonURL = strings.TrimSpace(url)
-	}
-	if cfg.PolochonURL == "" {
-		return nil, fmt.Errorf("POLOCHON_URL environment variable is required")
-	}
-
-	token := os.Getenv("POLOCHON_TOKEN")
-	if token != "" {
-		cfg.Token = strings.TrimSpace(token)
-	}
-	if cfg.Token == "" {
-		return nil, fmt.Errorf("POLOCHON_TOKEN environment variable is required")
-	}
-
-	if mpvPath := strings.TrimSpace(os.Getenv("POLOCHON_MPV")); mpvPath != "" {
-		cfg.MPVPath = mpvPath
-	}
-
-	return cfg, nil
 }
