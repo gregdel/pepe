@@ -8,7 +8,7 @@ INSTALL_DIR="${INSTALL_DIR:-/home/deck/Applications/polochon-gio}"
 mkdir -p "$DIST_DIR"
 
 cd "$ROOT_DIR"
-go build -o "$DIST_DIR/polochon-gio" .
+"$ROOT_DIR/build.sh" -o "$DIST_DIR/polochon-gio" .
 
 cp "$ROOT_DIR/packaging/steamdeck/run-polochon-gio.sh" "$DIST_DIR/run-polochon-gio.sh"
 cp "$ROOT_DIR/packaging/steamdeck/config.example.json" "$DIST_DIR/config.example.json"

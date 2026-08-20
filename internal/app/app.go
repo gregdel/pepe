@@ -232,7 +232,7 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		client = NewEmptyAPIClient(nil)
 	}
 	snapshot := client.getSnapshot()
-	th := material.NewTheme()
+	th := newAppTheme()
 
 	keyTag := new(bool)
 	searchEditor := widget.Editor{SingleLine: true, InputHint: key.HintText}

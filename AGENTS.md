@@ -29,7 +29,7 @@
 - Run the full test suite with `go test ./...`; run one focused test with `go test -run 'TestName' .`.
 - Run `go test -race ./...` after changing asynchronous refresh, cache, subtitle, or player behavior.
 - Run `golangci-lint run` for cleanup work. The explicit movie `VideoMetadata.DateAdded` fixture selectors are intentional and locally suppress `staticcheck`'s embedded-field simplification suggestion.
-- Build the application with `go build .`.
+- Run `./build.sh` on a fresh clone before building: it fetches the gitignored embedded `internal/app/embed/font.ttf` (verifying pinned SHA-256 hashes) required by `go:embed`. Then build the application with `go build .`.
 - Tests are local and do not require a running Polochon service; config tests use temporary YAML files and environment variables.
 - There is no repository CI, code-generation, or pre-commit configuration to run. Focused tests live beside their subsystem; do not restore the removed legacy integration-test catch-all.
 
