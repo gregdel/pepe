@@ -2,3 +2,4 @@ polochon-tui
 polochon-gio
 polochon-gio.log
 dist/
+.pi/tmp/
