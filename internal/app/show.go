@@ -27,7 +27,7 @@ func (a *App) layoutShowDetail(gtx C, s *showPage) D {
 	showID := show.ImdbID
 
 	return a.detailShell(gtx, "fanart:"+showID, func() (image.Image, error) {
-		return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Fanart })
+		return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.FanartFile })
 	}, func(gtx C) D {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
@@ -66,7 +66,7 @@ func (a *App) showHeader(gtx C, s *showPage, show *papi.Show) D {
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
 		layout.Rigid(func(gtx C) D {
 			return a.posterImage(gtx, "poster:"+showID, func() (image.Image, error) {
-				return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Poster })
+				return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.PosterFile })
 			}, unit.Dp(200), radiusPoster)
 		}),
 		layout.Rigid(layout.Spacer{Width: dp32}.Layout),

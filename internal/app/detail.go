@@ -182,12 +182,12 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 	})
 
 	return a.detailShell(gtx, "fanart:"+movieID, func() (image.Image, error) {
-		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Fanart })
+		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.FanartFile })
 	}, func(gtx C) D {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
 				return a.posterImage(gtx, "thumb:"+id, func() (image.Image, error) {
-					return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.Thumb })
+					return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.ThumbFile })
 				}, unit.Dp(280), radiusPoster)
 			}),
 			layout.Rigid(layout.Spacer{Width: dp32}.Layout),

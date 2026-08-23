@@ -155,12 +155,12 @@ func (a *App) previewMovie(gtx C, media *MediaItem) D {
 	id := media.ID
 
 	return a.previewShell(gtx, "fanart:"+movieID, func() (image.Image, error) {
-		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.Fanart })
+		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.FanartFile })
 	}, func(gtx C) D {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
 				return a.posterImage(gtx, "thumb:"+id, func() (image.Image, error) {
-					return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.Thumb })
+					return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.ThumbFile })
 				}, unit.Dp(140), radiusPoster)
 			}),
 			layout.Rigid(layout.Spacer{Width: dp24}.Layout),
@@ -201,12 +201,12 @@ func (a *App) previewShow(gtx C, media *MediaItem) D {
 	}
 
 	return a.previewShell(gtx, "fanart:"+showID, func() (image.Image, error) {
-		return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Fanart })
+		return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.FanartFile })
 	}, func(gtx C) D {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
 				return a.posterImage(gtx, "poster:"+showID, func() (image.Image, error) {
-					return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.Poster })
+					return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.PosterFile })
 				}, unit.Dp(140), radiusPoster)
 			}),
 			layout.Rigid(layout.Spacer{Width: dp24}.Layout),

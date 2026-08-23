@@ -298,11 +298,11 @@ func (c *APIClient) fetchMovieNFO(id string) (*polochon.Movie, error) {
 	if !ok {
 		return nil, fmt.Errorf("movie %s not found", id)
 	}
-	if movie.NFO == nil {
+	if movie.NFOFile == nil {
 		return nil, fmt.Errorf("movie %s: no NFO file", id)
 	}
 
-	body, err := c.downloadFile(movie.NFO)
+	body, err := c.downloadFile(movie.NFOFile)
 	if err != nil {
 		return nil, fmt.Errorf("movie %s: NFO fetch: %w", id, err)
 	}

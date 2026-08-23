@@ -403,12 +403,12 @@ func (a *App) rowPoster(gtx C, media *MediaItem) D {
 	if media.Type == mediaKindShow {
 		id := media.ID
 		return a.posterImage(gtx, "poster:"+id, func() (image.Image, error) {
-			return a.client.fetchShowImage(id, func(s *papi.Show) *papi.File { return s.Poster })
+			return a.client.fetchShowImage(id, func(s *papi.Show) *papi.File { return s.PosterFile })
 		}, thumbW, radiusThumb)
 	}
 	id := media.ID
 	return a.posterImage(gtx, "thumb:"+id, func() (image.Image, error) {
-		return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.Thumb })
+		return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.ThumbFile })
 	}, thumbW, radiusThumb)
 }
 
