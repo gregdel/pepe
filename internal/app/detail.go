@@ -13,7 +13,6 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget/material"
 	"github.com/dustin/go-humanize"
-	polochon "github.com/odwrtw/polochon/lib"
 	"github.com/odwrtw/polochon/lib/papi"
 )
 
@@ -81,33 +80,6 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 	movieID := movie.ImdbID
 	id := d.movieID
 
-	// Kick off async NFO fetch if not yet cached.
-	nfoKey := "nfo:" + movieID
-	a.nfos.fetch(nfoKey, func() (*polochon.Movie, error) {
-		return a.client.fetchMovieNFO(movieID)
-	})
-
-	// Merge NFO data with API data — NFO wins for text fields.
-	nfoData, _ := a.nfos.get(nfoKey)
-	plot := movie.Plot
-	tagline := movie.Tagline
-	runtime := movie.Runtime
-	genres := movie.Genres
-	if nfoData != nil {
-		if nfoData.Plot != "" {
-			plot = nfoData.Plot
-		}
-		if nfoData.Tagline != "" {
-			tagline = nfoData.Tagline
-		}
-		if nfoData.Runtime != 0 {
-			runtime = nfoData.Runtime
-		}
-		if len(nfoData.Genres) > 0 {
-			genres = nfoData.Genres
-		}
-	}
-
 	// Info column sections (right of the poster).
 	var sections []func(C) D
 
@@ -116,8 +88,8 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 	})
 	sections = append(sections, spacerFn(dp8))
 
-	if tagline != "" {
-		tl := tagline
+	if movie.Tagline != "" {
+		tl := movie.Tagline
 		sections = append(sections, func(gtx C) D {
 			lbl := material.Label(a.th, spBody, tl)
 			lbl.Color = colorSubtle
@@ -128,7 +100,7 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 		sections = append(sections, spacerFn(dp8))
 	}
 
-	if metaLine := buildMetaLine(movie.Year, runtime, genres); metaLine != "" {
+	if metaLine := buildMetaLine(movie.Year, movie.Runtime, movie.Genres); metaLine != "" {
 		sections = append(sections, func(gtx C) D {
 			return a.label(gtx, spMeta, metaLine, colorSubtle, 0)
 		})
@@ -142,8 +114,8 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 		sections = append(sections, spacerFn(dp20))
 	}
 
-	if plot != "" {
-		p := plot
+	if movie.Plot != "" {
+		p := movie.Plot
 		sections = append(sections, func(gtx C) D {
 			return a.body(gtx, spBody, p, colorFg, 0)
 		})

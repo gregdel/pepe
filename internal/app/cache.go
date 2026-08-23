@@ -19,7 +19,7 @@ type cacheRequest[T any] struct {
 }
 
 // asyncCache is a generic on-demand cache with async fetching.
-// Keys are caller-defined strings (e.g. "thumb:tt0133093", "nfo:tt0133093").
+// Keys are caller-defined strings (e.g. "thumb:tt0133093", "fanart:tt0133093").
 // A zero-value T in the cache with resolved[key]==true is a permanent-failure
 // sentinel — no retry.
 type asyncCache[T any] struct {

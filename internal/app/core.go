@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	polochon "github.com/odwrtw/polochon/lib"
-	"github.com/odwrtw/polochon/lib/nfo"
 	"github.com/odwrtw/polochon/lib/papi"
 )
 
@@ -289,31 +288,6 @@ func (c *APIClient) fetchAuthenticatedURL(rawURL string) (io.ReadCloser, error) 
 		return nil, fmt.Errorf("download returned %s", resp.Status)
 	}
 	return resp.Body, nil
-}
-
-// fetchMovieNFO downloads and parses the NFO file for the given movie ID.
-// It returns the polochon.Movie with fields populated from the NFO XML.
-func (c *APIClient) fetchMovieNFO(id string) (*polochon.Movie, error) {
-	movie, ok := c.getMovie(id)
-	if !ok {
-		return nil, fmt.Errorf("movie %s not found", id)
-	}
-	if movie.NFOFile == nil {
-		return nil, fmt.Errorf("movie %s: no NFO file", id)
-	}
-
-	body, err := c.downloadFile(movie.NFOFile)
-	if err != nil {
-		return nil, fmt.Errorf("movie %s: NFO fetch: %w", id, err)
-	}
-	defer func() { _ = body.Close() }()
-
-	m := &polochon.Movie{}
-	if err := nfo.Read(body, m); err != nil {
-		return nil, fmt.Errorf("movie %s: NFO parse: %w", id, err)
-	}
-
-	return m, nil
 }
 
 // Events returns a channel that emits a signal whenever the server reports a

@@ -22,6 +22,10 @@ func newHeadlessFixture(t *testing.T) *headlessFixture {
 	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	oldMovie.movie.VideoMetadata.DateAdded = time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC)
 	newMovie := newMovieListingItem(testMovie("movie-new", "New Movie", 2026))
+	newMovie.movie.Plot = "Metadata supplied by the catalog"
+	newMovie.movie.Tagline = "No extra request required"
+	newMovie.movie.Runtime = 125
+	newMovie.movie.Genres = []string{"Drama", "Sci-Fi"}
 	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	newMovie.movie.VideoMetadata.DateAdded = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 
@@ -134,6 +138,15 @@ func TestHeadlessLastAddedMovieDetailAndBack(t *testing.T) {
 	headlessKey(t, f, "RightArrow")
 	if f.app.detail == nil || f.app.detail.kind != detailMovie || f.app.detail.movieID != "movie-new" {
 		t.Fatalf("movie detail = %#v, want movie-new", f.app.detail)
+	}
+	for _, label := range []string{
+		"Metadata supplied by the catalog",
+		"No extra request required",
+		"2026  ·  2h 5m  ·  Drama, Sci-Fi",
+	} {
+		if !headlessHasLabel(f.driver.Tree(), label) {
+			t.Errorf("movie detail semantic tree does not contain %q", label)
+		}
 	}
 
 	headlessKey(t, f, "LeftArrow")

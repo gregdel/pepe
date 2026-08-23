@@ -59,7 +59,6 @@ func (a *App) applyRefreshResult(snapshot LibrarySnapshot) {
 	a.applyLibrarySnapshot(snapshot)
 	a.browse.nav = newNavigationState()
 	a.images.reset()
-	a.nfos.reset()
 	a.detail = nil
 	a.restoreSelection(sel)
 }

@@ -99,9 +99,6 @@ type App struct {
 	// image cache (thumbs, fanarts, posters — all media types)
 	images *asyncCache[paint.ImageOp]
 
-	// nfo cache — parsed NFO data per movie ID
-	nfos *asyncCache[*polochon.Movie]
-
 	// subtitle search popup (nil = closed)
 	subPopup *SubtitlePopup
 
@@ -264,12 +261,10 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		playerLinesList:  layout.List{Axis: layout.Vertical},
 		detailList:       layout.List{Axis: layout.Vertical},
 		images:           newAsyncCache[paint.ImageOp](3, 24),
-		nfos:             newAsyncCache[*polochon.Movie](1, 4),
 		sseCh:            sseCh,
 	}
 	if invalidate != nil {
 		app.images.onDone = invalidate
-		app.nfos.onDone = invalidate
 	}
 	return app
 }
@@ -350,9 +345,8 @@ func (a *App) drainChannels() {
 
 	a.drainSubtitlePopup()
 
-	// Drain all pending image/NFO fetch results.
+	// Drain all pending image fetch results.
 	a.images.drain()
-	a.nfos.drain()
 }
 
 // scrollDetail scrolls the movie detail page content with the keyboard.

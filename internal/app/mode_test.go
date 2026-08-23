@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"gioui.org/op/paint"
-	polochon "github.com/odwrtw/polochon/lib"
 	"github.com/odwrtw/polochon/lib/papi"
 )
 
@@ -213,7 +212,6 @@ func TestRefreshCompletionRebuildsActiveModeAndRestoresMedia(t *testing.T) {
 	a.refreshDone <- refreshResult{snapshot: defaultSnapshot}
 	a.refreshing = true
 	a.images = newAsyncCache[paint.ImageOp](1, 0)
-	a.nfos = newAsyncCache[*polochon.Movie](1, 0)
 
 	a.drainChannels()
 
