@@ -10,20 +10,36 @@ import (
 	"gioui.org/widget/material"
 )
 
-//go:embed embed/font.ttf
-var embeddedFont []byte
+//go:embed embed/roboto.ttf
+var embeddedRoboto []byte
 
-var embeddedFontFaces = parseEmbeddedFont(embeddedFont)
+//go:embed embed/roboto-italic.ttf
+var embeddedRobotoItalic []byte
 
-func parseEmbeddedFont(data []byte) []font.FontFace {
-	faces, err := opentype.ParseCollection(data)
-	if err != nil {
-		panic(fmt.Errorf("parse embedded font: %w", err))
+//go:embed embed/noto-sans-symbols.ttf
+var embeddedSymbols []byte
+
+//go:embed embed/noto-sans-symbols2.ttf
+var embeddedSymbols2 []byte
+
+var embeddedFontFaces = parseEmbeddedFonts(embeddedRoboto, embeddedRobotoItalic, embeddedSymbols, embeddedSymbols2)
+
+func parseEmbeddedFonts(collections ...[]byte) []font.FontFace {
+	var all []font.FontFace
+	for i, data := range collections {
+		faces, err := opentype.ParseCollection(data)
+		if err != nil {
+			panic(fmt.Errorf("parse embedded font %d: %w", i, err))
+		}
+		if len(faces) == 0 {
+			panic(fmt.Errorf("parse embedded font %d: no faces found", i))
+		}
+		all = append(all, faces...)
 	}
-	if len(faces) == 0 {
-		panic("parse embedded font: no faces found")
+	if len(all) == 0 {
+		panic("parse embedded fonts: no collections")
 	}
-	return faces
+	return all
 }
 
 func newAppTheme() *material.Theme {

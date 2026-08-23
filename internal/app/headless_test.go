@@ -26,10 +26,18 @@ func newHeadlessFixture(t *testing.T) *headlessFixture {
 	newMovie.movie.Tagline = "No extra request required"
 	newMovie.movie.Runtime = 125
 	newMovie.movie.Genres = []string{"Drama", "Sci-Fi"}
+	newMovie.movie.Size = 2_200_000_000
+	newMovie.movie.Quality = polochon.Quality("1080p")
+	newMovie.movie.VideoCodec = "H.264"
+	newMovie.movie.AudioCodec = "Dolby Digital"
+	newMovie.movie.Container = "mkv"
+	newMovie.movie.ReleaseGroup = "FIXTURE"
 	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
 	newMovie.movie.VideoMetadata.DateAdded = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 
 	show := newShowListingItem(testShow("show-one", "Fixture Show", 2024))
+	show.show.Plot = "A catalog show synopsis that remains concise and readable."
+	show.show.Rating = 8.4
 	show.show.Seasons = map[int]*papi.Season{
 		1: {Episodes: map[int]*papi.Episode{
 			1: headlessEpisode(1, 1, "Pilot"),
@@ -70,10 +78,23 @@ func newHeadlessFixture(t *testing.T) *headlessFixture {
 
 func headlessEpisode(season, episode int, title string) *papi.Episode {
 	return &papi.Episode{ShowEpisode: &polochon.ShowEpisode{
-		BaseVideo: polochon.BaseVideo{VideoMetadata: polochon.VideoMetadata{}},
-		Season:    season,
-		Episode:   episode,
-		Title:     title,
+		BaseVideo: polochon.BaseVideo{
+			File: polochon.File{Size: 1_100_000_000},
+			VideoMetadata: polochon.VideoMetadata{
+				Quality:      polochon.Quality("720p"),
+				VideoCodec:   "H.264",
+				AudioCodec:   "Dolby Digital",
+				Container:    "mkv",
+				ReleaseGroup: "FIXTURE",
+			},
+		},
+		Season:  season,
+		Episode: episode,
+		Title:   title,
+		Aired:   "2026-01-02",
+		Plot:    "Episode details for " + title,
+		Runtime: 45,
+		Rating:  8.1,
 	}}
 }
 
@@ -143,6 +164,8 @@ func TestHeadlessLastAddedMovieDetailAndBack(t *testing.T) {
 		"Metadata supplied by the catalog",
 		"No extra request required",
 		"2026  ·  2h 5m  ·  Drama, Sci-Fi",
+		"Play movie",
+		"1080p  ·  H.264 + Dolby Digital  ·  MKV  ·  2.2 GB  ·  FIXTURE",
 	} {
 		if !headlessHasLabel(f.driver.Tree(), label) {
 			t.Errorf("movie detail semantic tree does not contain %q", label)
@@ -171,6 +194,17 @@ func TestHeadlessShowSeasonAndEpisodeNavigation(t *testing.T) {
 	show := f.app.detail.show
 	if show.focus != focusTabs || show.seasonCursor != 0 || show.epCursor != 0 {
 		t.Fatalf("initial show focus = (focus=%v, season=%d, episode=%d)", show.focus, show.seasonCursor, show.epCursor)
+	}
+	for _, label := range []string{
+		"A catalog show synopsis that remains concise and readable.",
+		"Play episode",
+		"Aired Jan 2, 2026  ·  45 min  ·  8.1",
+		"Episode details for Pilot",
+		"720p  ·  H.264 + Dolby Digital  ·  MKV  ·  1.1 GB  ·  FIXTURE",
+	} {
+		if !headlessHasLabel(f.driver.Tree(), label) {
+			t.Errorf("show detail semantic tree does not contain %q", label)
+		}
 	}
 
 	headlessKey(t, f, "DownArrow")

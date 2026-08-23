@@ -27,6 +27,38 @@ func formatCodecs(video, audio string) string {
 	}
 }
 
+func formatTechnicalMetadata(size int64, quality polochon.Quality, video, audio, container, releaseGroup string) string {
+	var parts []string
+	if quality != "" {
+		parts = append(parts, formatQualityBadge(quality))
+	}
+	if codecs := formatCodecs(video, audio); codecs != "" {
+		parts = append(parts, codecs)
+	}
+	if container := formatContainer(container); container != "" {
+		parts = append(parts, container)
+	}
+	if size > 0 {
+		parts = append(parts, humanize.Bytes(uint64(size)))
+	}
+	if releaseGroup != "" {
+		parts = append(parts, releaseGroup)
+	}
+	return strings.Join(parts, "  ·  ")
+}
+
+func formatAiredDate(value string) string {
+	if value == "" {
+		return ""
+	}
+	for _, layout := range []string{"2006-01-02", time.RFC3339, "2006-01-02T15:04:05"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.Format("Jan 2, 2006")
+		}
+	}
+	return value
+}
+
 func formatDateAdded(date time.Time) string {
 	if date.IsZero() {
 		return ""

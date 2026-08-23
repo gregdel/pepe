@@ -8,6 +8,33 @@ import (
 	"github.com/odwrtw/polochon/lib/papi"
 )
 
+func TestFormatTechnicalMetadata(t *testing.T) {
+	got := formatTechnicalMetadata(1_100_000_000, polochon.Quality("720p"), "H.264", "Dolby Digital", "mkv", "KILLERS[ettv]")
+	want := "720p  ·  H.264 + Dolby Digital  ·  MKV  ·  1.1 GB  ·  KILLERS[ettv]"
+	if got != want {
+		t.Fatalf("formatTechnicalMetadata() = %q, want %q", got, want)
+	}
+	if got := formatTechnicalMetadata(0, "", "", "", "", ""); got != "" {
+		t.Fatalf("empty formatTechnicalMetadata() = %q", got)
+	}
+}
+
+func TestFormatAiredDate(t *testing.T) {
+	for _, test := range []struct {
+		input string
+		want  string
+	}{
+		{input: "2018-02-26", want: "Feb 26, 2018"},
+		{input: "2018-02-26T20:00:00Z", want: "Feb 26, 2018"},
+		{input: "unknown", want: "unknown"},
+		{input: "", want: ""},
+	} {
+		if got := formatAiredDate(test.input); got != test.want {
+			t.Errorf("formatAiredDate(%q) = %q, want %q", test.input, got, test.want)
+		}
+	}
+}
+
 func TestFormatSubtitles(t *testing.T) {
 	tests := []struct {
 		name     string

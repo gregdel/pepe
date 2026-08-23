@@ -66,18 +66,64 @@ func strokeRounded(gtx C, size image.Point, radius unit.Dp, col color.NRGBA) {
 	paint.Fill(gtx.Ops, col)
 }
 
-// scrim paints a vertical dark gradient over the whole constraints — fanart
-// bleeds through at the top, solid background at the bottom.
+// scrim paints the browse preview gradient. Full-screen details use the
+// stronger, independently tuned detailScrim.
 func scrim(gtx C) {
+	paintGradient(gtx,
+		f32.Pt(0, 0), f32.Pt(0, float32(gtx.Constraints.Max.Y)),
+		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x40},
+		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0xee},
+	)
+}
+
+// detailScrim preserves fanart as atmosphere while ensuring the areas around
+// detail content start from a consistently dark foundation.
+func detailScrim(gtx C) {
+	defer clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x70})
+	paintGradient(gtx,
+		f32.Pt(0, 0), f32.Pt(float32(gtx.Constraints.Max.X), 0),
+		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0xa8},
+		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x18},
+	)
+	paintGradient(gtx,
+		f32.Pt(0, 0), f32.Pt(0, float32(gtx.Constraints.Max.Y)),
+		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x28},
+		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0xd8},
+	)
+}
+
+func paintGradient(gtx C, from, to f32.Point, fromColor, toColor color.NRGBA) {
 	paint.LinearGradientOp{
-		Stop1:  f32.Pt(0, 0),
-		Stop2:  f32.Pt(0, float32(gtx.Constraints.Max.Y)),
-		Color1: color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x40},
-		Color2: color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0xee},
+		Stop1: from, Stop2: to,
+		Color1: fromColor, Color2: toColor,
 	}.Add(gtx.Ops)
 	stack := clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	stack.Pop()
+}
+
+// detailPanel gives arbitrary artwork-backed content a predictable reading
+// surface. The caller controls its outer size through the layout constraints.
+func detailPanel(gtx C, inset layout.Inset, content layout.Widget) D {
+	macro := op.Record(gtx.Ops)
+	dims := inset.Layout(gtx, content)
+	call := macro.Stop()
+	fillRounded(gtx, dims.Size, radiusCard, colorDetailPanel)
+	call.Add(gtx.Ops)
+	return dims
+}
+
+// tvSafeHorizontalInset returns five percent of the viewport in density-
+// independent units. scaleContext makes this approximately 96dp at 1080p.
+func tvSafeHorizontalInset(gtx C) unit.Dp {
+	return unit.Dp(float32(gtx.Constraints.Max.X) * 0.05 / gtx.Metric.PxPerDp)
+}
+
+func detailSafeInsets(gtx C) layout.Inset {
+	horizontal := tvSafeHorizontalInset(gtx)
+	vertical := unit.Dp(float32(gtx.Constraints.Max.Y) * 0.05 / gtx.Metric.PxPerDp)
+	return layout.Inset{Top: vertical, Bottom: vertical, Left: horizontal, Right: horizontal}
 }
 
 // hairline paints a 1dp horizontal separator.
@@ -107,6 +153,9 @@ func (a *App) body(gtx C, size unit.Sp, s string, col color.NRGBA, maxLines int)
 	lbl.Color = col
 	lbl.MaxLines = maxLines
 	lbl.Alignment = text.Start
+	if size <= spBody {
+		lbl.LineHeightScale = 1.4
+	}
 	return lbl.Layout(gtx)
 }
 
@@ -186,41 +235,6 @@ func (a *App) fanart(gtx C, cacheKey string, fetchFn func() (image.Image, error)
 	return D{Size: gtx.Constraints.Max}
 }
 
-// ── Badges ────────────────────────────────────────────────────────────────────
-
-type badge struct {
-	text string
-	bg   color.NRGBA
-}
-
-func (a *App) renderBadgeRow(gtx C, badges []badge) D {
-	children := make([]layout.FlexChild, 0, len(badges)*2)
-	for i, b := range badges {
-		if i > 0 {
-			children = append(children, layout.Rigid(layout.Spacer{Width: dp6}.Layout))
-		}
-		b := b // capture
-		children = append(children, layout.Rigid(func(gtx C) D {
-			return a.drawBadge(gtx, b)
-		}))
-	}
-	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
-}
-
-func (a *App) drawBadge(gtx C, b badge) D {
-	inset := layout.Inset{Left: dp8, Right: dp8, Top: dp4, Bottom: dp4}
-	// Measure text first
-	macro := op.Record(gtx.Ops)
-	dims := inset.Layout(gtx, func(gtx C) D {
-		return a.label(gtx, spSmall, b.text, colorBadgeFg, font.Medium)
-	})
-	call := macro.Stop()
-
-	fillRounded(gtx, dims.Size, dp6, b.bg)
-	call.Add(gtx.Ops)
-	return dims
-}
-
 // ── Count pill ────────────────────────────────────────────────────────────────
 
 // countPill renders a muted rounded pill with a subtree count.
@@ -243,6 +257,36 @@ func (a *App) countPill(gtx C, n int, selected bool) D {
 	fillRounded(gtx, dims.Size, dp12, bg)
 	call.Add(gtx.Ops)
 	return dims
+}
+
+// ── Detail actions ────────────────────────────────────────────────────────────
+
+// detailActionButton exposes pointer and semantic activation without adding a
+// D-pad focus zone; keyboard activation remains owned by the detail state.
+func (a *App) detailActionButton(gtx C, id, semanticLabel, text string, primary bool, action func()) D {
+	return a.clickableLayout(gtx, id, semanticLabel, func(gtx C) D {
+		inset := layout.Inset{Left: dp16, Right: dp16, Top: dp8, Bottom: dp8}
+		macro := op.Record(gtx.Ops)
+		dims := inset.Layout(gtx, func(gtx C) D {
+			col := colorFg
+			if primary {
+				col = colorSelectFg
+			}
+			return a.label(gtx, sp, text, col, font.Bold)
+		})
+		call := macro.Stop()
+
+		bg := colorSurface2
+		if primary {
+			bg = colorSelectBg
+		}
+		fillRounded(gtx, dims.Size, radiusRow, bg)
+		if !primary {
+			strokeRounded(gtx, dims.Size, radiusRow, colorOutline)
+		}
+		call.Add(gtx.Ops)
+		return dims
+	}, action)
 }
 
 // ── Keycap hints ──────────────────────────────────────────────────────────────

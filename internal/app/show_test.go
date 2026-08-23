@@ -4,8 +4,36 @@ import (
 	"testing"
 	"time"
 
+	polochon "github.com/odwrtw/polochon/lib"
 	"github.com/odwrtw/polochon/lib/papi"
 )
+
+func TestEpisodeDisplayParts(t *testing.T) {
+	node := &DynamicNode{
+		Label: "S01E03 - Signal Bloom",
+		Episode: &papi.Episode{ShowEpisode: &polochon.ShowEpisode{
+			Season:  1,
+			Episode: 3,
+			Title:   "Signal Bloom",
+		}},
+	}
+	code, title := episodeDisplayParts(node)
+	if code != "S01E03" || title != "Signal Bloom" {
+		t.Fatalf("episodeDisplayParts() = (%q, %q), want (S01E03, Signal Bloom)", code, title)
+	}
+}
+
+func TestBuildEpisodeMetaLine(t *testing.T) {
+	ep := &papi.Episode{ShowEpisode: &polochon.ShowEpisode{
+		Aired:     "2018-02-26",
+		Runtime:   45,
+		Rating:    8.3,
+		BaseVideo: polochon.BaseVideo{VideoMetadata: polochon.VideoMetadata{ReleaseGroup: "TECHNICAL"}},
+	}}
+	if got, want := buildEpisodeMetaLine(ep), "Aired Feb 26, 2018  ·  45 min  ·  8.3"; got != want {
+		t.Fatalf("buildEpisodeMetaLine() = %q, want %q", got, want)
+	}
+}
 
 func TestPushShowDetailStartsOnSeasonTabs(t *testing.T) {
 	show := testShow("tt001", "Show", 2001)

@@ -3,11 +3,20 @@ set -eu
 
 ROOT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 FONT_DIR="$ROOT_DIR/internal/app/embed"
-FONT_PATH="$FONT_DIR/font.ttf"
-FONT_MEMBER="FiraCodeNerdFont-Regular.ttf"
-FONT_URL="https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.0/FiraCode.tar.xz"
-ARCHIVE_SHA256="32226dc81bb30ea421cdc49ba2134b93c2b43096992c829504a3004d2537420d"
-FONT_SHA256="06b7d71853384f7fd15fbc8ca13c8a5c6af713954e946e27e3ee560a7b5f0337"
+FONT_REVISION="ec626514f79f831f1ab848a82114a0ce7e2d6372"
+FONT_BASE_URL="https://raw.githubusercontent.com/google/fonts/$FONT_REVISION/ofl/roboto"
+FONT_REGULAR_PATH="$FONT_DIR/roboto.ttf"
+FONT_REGULAR_URL="$FONT_BASE_URL/Roboto%5Bwdth%2Cwght%5D.ttf"
+FONT_REGULAR_SHA256="d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134"
+FONT_ITALIC_PATH="$FONT_DIR/roboto-italic.ttf"
+FONT_ITALIC_URL="$FONT_BASE_URL/Roboto-Italic%5Bwdth%2Cwght%5D.ttf"
+FONT_ITALIC_SHA256="9725a847af6b460ffca162ae66d20dad48b01876137947180b42d7dcd7887182"
+FONT_SYMBOLS_PATH="$FONT_DIR/noto-sans-symbols.ttf"
+FONT_SYMBOLS_URL="https://raw.githubusercontent.com/google/fonts/$FONT_REVISION/ofl/notosanssymbols/NotoSansSymbols%5Bwght%5D.ttf"
+FONT_SYMBOLS_SHA256="f7e7e04b4a24b6c78893d50cbfd2b2f6cae49617ab047bfef668d252adb128f7"
+FONT_SYMBOLS2_PATH="$FONT_DIR/noto-sans-symbols2.ttf"
+FONT_SYMBOLS2_URL="https://raw.githubusercontent.com/google/fonts/$FONT_REVISION/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf"
+FONT_SYMBOLS2_SHA256="7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21"
 
 require_command() {
 	if ! command -v "$1" >/dev/null 2>&1; then
@@ -24,36 +33,35 @@ sha256() {
 require_command sha256sum
 
 mkdir -p "$FONT_DIR"
+rm -f "$FONT_DIR/font.ttf" # Remove the legacy generated Fira Code asset.
 
-font_ready=false
-if [ -f "$FONT_PATH" ] && [ "$(sha256 "$FONT_PATH")" = "$FONT_SHA256" ]; then
-	font_ready=true
-fi
-
-archive_tmp="${TMPDIR:-/tmp}/polochon-gio-firacode.$$.tar.xz"
 font_tmp="${TMPDIR:-/tmp}/polochon-gio-font.$$.ttf"
-trap 'rm -f "$archive_tmp" "$font_tmp"' EXIT HUP INT TERM
+trap 'rm -f "$font_tmp"' EXIT HUP INT TERM
 
-if [ "$font_ready" = false ]; then
+fetch_font() {
+	path=$1
+	url=$2
+	want=$3
+	label=$4
+
+	if [ -f "$path" ] && [ "$(sha256 "$path")" = "$want" ]; then
+		return
+	fi
+
 	require_command curl
-	require_command tar
+	printf 'Downloading %s...\n' "$label" >&2
+	curl -fL --retry 3 --silent --show-error "$url" -o "$font_tmp"
+	if [ "$(sha256 "$font_tmp")" != "$want" ]; then
+		printf '%s checksum mismatch\n' "$label" >&2
+		exit 1
+	fi
+	mv "$font_tmp" "$path"
+}
 
-	printf 'Downloading FiraCode Nerd Font v3.5.0...\n' >&2
-	curl -fL --retry 3 --silent --show-error "$FONT_URL" -o "$archive_tmp"
-	if [ "$(sha256 "$archive_tmp")" != "$ARCHIVE_SHA256" ]; then
-		printf 'Font archive checksum mismatch\n' >&2
-		exit 1
-	fi
-	if ! tar -xJOf "$archive_tmp" "$FONT_MEMBER" > "$font_tmp"; then
-		printf 'Font member not found in archive: %s\n' "$FONT_MEMBER" >&2
-		exit 1
-	fi
-	if [ "$(sha256 "$font_tmp")" != "$FONT_SHA256" ]; then
-		printf 'Extracted font checksum mismatch\n' >&2
-		exit 1
-	fi
-	mv "$font_tmp" "$FONT_PATH"
-fi
+fetch_font "$FONT_REGULAR_PATH" "$FONT_REGULAR_URL" "$FONT_REGULAR_SHA256" "Roboto variable font"
+fetch_font "$FONT_ITALIC_PATH" "$FONT_ITALIC_URL" "$FONT_ITALIC_SHA256" "Roboto Italic variable font"
+fetch_font "$FONT_SYMBOLS_PATH" "$FONT_SYMBOLS_URL" "$FONT_SYMBOLS_SHA256" "Noto Sans Symbols fallback font"
+fetch_font "$FONT_SYMBOLS2_PATH" "$FONT_SYMBOLS2_URL" "$FONT_SYMBOLS2_SHA256" "Noto Sans Symbols 2 fallback font"
 
 cd "$ROOT_DIR"
 go build "$@"

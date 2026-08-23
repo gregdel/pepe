@@ -16,26 +16,22 @@ var (
 
 	colorFg     = color.NRGBA{R: 0xe8, G: 0xe8, B: 0xec, A: 0xff} // primary text
 	colorSubtle = color.NRGBA{R: 0xa0, G: 0xa0, B: 0xab, A: 0xff} // secondary text
-	colorMuted  = color.NRGBA{R: 0x6e, G: 0x6e, B: 0x78, A: 0xff} // hints, disabled
+	colorMuted  = color.NRGBA{R: 0x88, G: 0x88, B: 0x94, A: 0xff} // hints, disabled
+
+	// Detail surfaces remain readable over worst-case bright fanart.
+	colorDetailPanel = color.NRGBA{R: 0x10, G: 0x10, B: 0x14, A: 0xf2}
 
 	colorPrimary  = color.NRGBA{R: 0x87, G: 0x5f, B: 0xff, A: 0xff} // accent (prefix, wordmark)
 	colorSelectBg = color.NRGBA{R: 0x6a, G: 0x4f, B: 0xe0, A: 0xff} // selection pill (5.5:1 on white)
 	colorSelectFg = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
 	colorTerminal = color.NRGBA{R: 0xff, G: 0x69, B: 0xb4, A: 0xff} // playable items (kept pink)
-
-	// badge backgrounds
-	colorBadgeBg      = color.NRGBA{R: 0x44, G: 0x44, B: 0x4c, A: 0xff}
-	colorSizeBadgeBg  = color.NRGBA{R: 0xd7, G: 0x00, B: 0x87, A: 0xff} // pink
-	colorQualBadgeBg  = color.NRGBA{R: 0x87, G: 0x5f, B: 0xff, A: 0xff} // purple
-	colorCodecBadgeBg = color.NRGBA{R: 0xff, G: 0xaf, B: 0x00, A: 0xff} // orange
-	colorBadgeFg      = color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff}
 )
 
 // ── Type scale — calibrated for 10-foot / TV viewing distance at 1080p ──────
 
 const (
 	spTiny  = unit.Sp(18) // count pills, hint labels, row meta
-	spSmall = unit.Sp(20) // badges, keycaps
+	spSmall = unit.Sp(20) // keycaps
 	sp      = unit.Sp(24) // nav rows, KV rows
 	spBody  = unit.Sp(28) // plot, multi-line text
 	spMeta  = unit.Sp(24) // year · runtime · genres line

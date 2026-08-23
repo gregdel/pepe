@@ -12,7 +12,6 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget/material"
-	"github.com/dustin/go-humanize"
 	"github.com/odwrtw/polochon/lib/papi"
 )
 
@@ -61,11 +60,11 @@ func (a *App) detailShell(gtx C, fanartKey string, fanartFn func() (image.Image,
 			return a.fanart(gtx, fanartKey, fanartFn)
 		}),
 		layout.Expanded(func(gtx C) D {
-			scrim(gtx)
+			detailScrim(gtx)
 			return D{Size: gtx.Constraints.Max}
 		}),
 		layout.Stacked(func(gtx C) D {
-			return layout.Inset{Top: dp48, Bottom: dp24, Left: dp48, Right: dp48}.Layout(gtx, content)
+			return detailSafeInsets(gtx).Layout(gtx, content)
 		}),
 	)
 }
@@ -80,61 +79,69 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 	movieID := movie.ImdbID
 	id := d.movieID
 
-	// Info column sections (right of the poster).
 	var sections []func(C) D
-
 	sections = append(sections, func(gtx C) D {
-		return a.body(gtx, spTitle, d.movieTitle, colorFg, 0)
+		return a.body(gtx, spTitle, d.movieTitle, colorFg, 2)
 	})
-	sections = append(sections, spacerFn(dp8))
 
 	if movie.Tagline != "" {
 		tl := movie.Tagline
+		sections = append(sections, spacerFn(dp8))
 		sections = append(sections, func(gtx C) D {
 			lbl := material.Label(a.th, spBody, tl)
 			lbl.Color = colorSubtle
 			lbl.Font.Style = font.Italic
-			lbl.MaxLines = 0
+			lbl.MaxLines = 2
+			lbl.LineHeightScale = 1.4
 			return lbl.Layout(gtx)
 		})
-		sections = append(sections, spacerFn(dp8))
 	}
 
 	if metaLine := buildMetaLine(movie.Year, movie.Runtime, movie.Genres); metaLine != "" {
+		sections = append(sections, spacerFn(dp8))
 		sections = append(sections, func(gtx C) D {
-			return a.label(gtx, spMeta, metaLine, colorSubtle, 0)
+			return a.body(gtx, spMeta, metaLine, colorSubtle, 2)
 		})
-		sections = append(sections, spacerFn(dp12))
 	}
 
-	if badges := a.buildMovieBadges(movie); len(badges) > 0 {
-		sections = append(sections, func(gtx C) D {
-			return a.renderBadgeRow(gtx, badges)
-		})
-		sections = append(sections, spacerFn(dp20))
-	}
+	sections = append(sections, spacerFn(dp16))
+	sections = append(sections, func(gtx C) D {
+		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+			layout.Rigid(func(gtx C) D {
+				return a.detailActionButton(gtx, "detail:movie:play", "Play movie", "▶ Play", true, func() {
+					a.launchMovie(&MediaItem{ID: d.movieID, Title: d.movieTitle, Type: mediaKindMovie})
+				})
+			}),
+			layout.Rigid(layout.Spacer{Width: dp12}.Layout),
+			layout.Rigid(func(gtx C) D {
+				return a.detailActionButton(gtx, "detail:movie:subtitles", "Movie subtitles", "Subtitles", false, a.openSubtitlePopup)
+			}),
+		)
+	})
 
 	if movie.Plot != "" {
 		p := movie.Plot
+		sections = append(sections, spacerFn(dp20))
 		sections = append(sections, func(gtx C) D {
 			return a.body(gtx, spBody, p, colorFg, 0)
 		})
+	}
+
+	if technical := formatTechnicalMetadata(movie.Size, movie.Quality, movie.VideoCodec, movie.AudioCodec, movie.Container, movie.ReleaseGroup); technical != "" {
 		sections = append(sections, spacerFn(dp16))
+		sections = append(sections, func(gtx C) D {
+			return a.body(gtx, spMeta, technical, colorSubtle, 2)
+		})
 	}
 
 	subText := formatSubtitles(movie.EmbeddedSubtitles, movie.Subtitles)
+	sections = append(sections, spacerFn(dp20))
 	sections = append(sections, func(gtx C) D {
-		return a.body(gtx, spBody, subText, colorFg, 0)
+		return a.body(gtx, sp, subText, colorFg, 0)
 	})
-	sections = append(sections, spacerFn(dp12))
 
-	if movie.ReleaseGroup != "" {
-		rg := movie.ReleaseGroup
-		sections = append(sections, func(gtx C) D {
-			return a.renderKV(gtx, "Release", rg)
-		})
-	}
 	if dt := formatDateAdded(movie.DateAdded); dt != "" {
+		sections = append(sections, spacerFn(dp12))
 		sections = append(sections, func(gtx C) D {
 			return a.renderKV(gtx, "Added", dt)
 		})
@@ -143,12 +150,13 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 	movieKey := movieMediaKey(movieID)
 	if pos, ok := a.resumePos[movieKey]; ok && pos > minimumResumePosition {
 		p := pos
+		sections = append(sections, spacerFn(dp8))
 		sections = append(sections, func(gtx C) D {
 			return a.renderKV(gtx, "Resume", formatResumePos(p))
 		})
 	}
 
-	sections = append(sections, spacerFn(dp12))
+	sections = append(sections, spacerFn(dp16))
 	sections = append(sections, func(gtx C) D {
 		return a.renderPlayerStatus(gtx)
 	})
@@ -156,6 +164,10 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 	return a.detailShell(gtx, "fanart:"+movieID, func() (image.Image, error) {
 		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.FanartFile })
 	}, func(gtx C) D {
+		posterWidth := gtx.Dp(unit.Dp(280))
+		gap := gtx.Dp(dp32)
+		panelWidth := min(gtx.Dp(unit.Dp(900)), max(0, gtx.Constraints.Max.X-posterWidth-gap))
+
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
 				return a.posterImage(gtx, "thumb:"+id, func() (image.Image, error) {
@@ -163,11 +175,15 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 				}, unit.Dp(280), radiusPoster)
 			}),
 			layout.Rigid(layout.Spacer{Width: dp32}.Layout),
-			layout.Flexed(1, func(gtx C) D {
-				return a.detailList.Layout(gtx, len(sections), func(gtx C, i int) D {
-					return sections[i](gtx)
+			layout.Rigid(func(gtx C) D {
+				gtx.Constraints = layout.Exact(image.Pt(panelWidth, gtx.Constraints.Max.Y))
+				return detailPanel(gtx, layout.UniformInset(dp32), func(gtx C) D {
+					return a.detailList.Layout(gtx, len(sections), func(gtx C, i int) D {
+						return sections[i](gtx)
+					})
 				})
 			}),
+			layout.Flexed(1, func(gtx C) D { return D{Size: gtx.Constraints.Min} }),
 		)
 	})
 }
@@ -196,23 +212,6 @@ func buildMetaLine(year, runtime int, genres []string) string {
 		parts = append(parts, g)
 	}
 	return strings.Join(parts, "  ·  ")
-}
-
-func (a *App) buildMovieBadges(movie *papi.Movie) []badge {
-	var badges []badge
-	if movie.Size > 0 {
-		badges = append(badges, badge{text: humanize.Bytes(uint64(movie.Size)), bg: colorSizeBadgeBg})
-	}
-	if q := formatQualityBadge(movie.Quality); q != "" {
-		badges = append(badges, badge{text: q, bg: colorQualBadgeBg})
-	}
-	if c := formatCodecs(movie.VideoCodec, movie.AudioCodec); c != "" {
-		badges = append(badges, badge{text: c, bg: colorCodecBadgeBg})
-	}
-	if ct := formatContainer(movie.Container); ct != "" {
-		badges = append(badges, badge{text: ct, bg: colorBadgeBg})
-	}
-	return badges
 }
 
 // ── Player status ─────────────────────────────────────────────────────────────

@@ -2,5 +2,5 @@ polochon-tui
 polochon-gio
 polochon-gio.log
 dist/
-internal/app/embed/font.ttf
+internal/app/embed/*.ttf
 .pi/tmp/

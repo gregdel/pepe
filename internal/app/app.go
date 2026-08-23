@@ -285,20 +285,6 @@ func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 			ops.Reset()
 			gtx := gioapp.NewContext(&ops, e)
 
-			// Scale UI proportionally to window width.
-			// Reference: 1920dp (full HD TV). Smaller windows shrink, larger grow.
-			const refWidth = 1920.0
-			widthDp := float32(gtx.Constraints.Max.X) / gtx.Metric.PxPerDp
-			scale := widthDp / refWidth
-			if scale < 0.4 {
-				scale = 0.4
-			}
-			if scale > 2.0 {
-				scale = 2.0
-			}
-			gtx.Metric.PxPerDp *= scale
-			gtx.Metric.PxPerSp *= scale
-
 			// Paint background
 			paint.Fill(gtx.Ops, colorBg)
 
@@ -363,6 +349,7 @@ func (a *App) scrollDetail(dir int) {
 // Layout renders one frame and processes input routed by the supplied
 // layout context. It is intentionally independent of gioapp.Window.
 func (a *App) Layout(gtx C) D {
+	gtx = scaleContext(gtx)
 	a.drainChannels()
 	paint.Fill(gtx.Ops, colorBg)
 	area := clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops)
@@ -378,6 +365,24 @@ func (a *App) Layout(gtx C) D {
 	area.Pop()
 
 	return a.layout(gtx)
+}
+
+// scaleContext keeps the interface at the same proportional size in the
+// production window and the headless driver. The reference width is a full-HD
+// TV; the limits retain usability in unusually small and large windows.
+func scaleContext(gtx C) C {
+	const refWidth = 1920.0
+	widthDp := float32(gtx.Constraints.Max.X) / gtx.Metric.PxPerDp
+	scale := widthDp / refWidth
+	if scale < 0.4 {
+		scale = 0.4
+	}
+	if scale > 2.0 {
+		scale = 2.0
+	}
+	gtx.Metric.PxPerDp *= scale
+	gtx.Metric.PxPerSp *= scale
+	return gtx
 }
 
 func (a *App) layout(gtx C) D {
