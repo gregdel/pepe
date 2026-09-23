@@ -193,27 +193,50 @@ func TestHeadlessHomeSemanticTree(t *testing.T) {
 	}
 }
 
-func TestHeadlessPlayInputsAreIgnoredWhilePlayerRuns(t *testing.T) {
+func TestHeadlessPlayingBarAndSwitchInputs(t *testing.T) {
 	f := newHeadlessFixture(t)
+	f.app.playerStatus = PlayerStatusRunning
+	f.app.playerTitle = "Old Movie"
+	f.app.playerMode = PlayerModeKMS
+	stop := make(chan struct{})
+	f.app.playerStop = stop
+	completion := make(chan playerResult, 1)
+	f.app.playerDone = completion
+	if err := f.driver.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	if !headlessHasLabel(f.driver.Tree(), "Now playing") || !headlessHasLabel(f.driver.Tree(), "Old Movie") {
+		t.Fatal("playing indicator missing from browse")
+	}
+	headlessKey(t, f, "Enter")
+	if f.app.browse.nav.isAtRoot() || !headlessHasLabel(f.driver.Tree(), "Now playing") {
+		t.Fatal("browsing while playing lost the indicator")
+	}
 	f.app.pushMovieDetail(&MediaItem{ID: "movie-new", Title: "New Movie", Type: mediaKindMovie})
 	if err := f.driver.Frame(); err != nil {
 		t.Fatal(err)
 	}
-	completion := make(chan playerResult, 1)
-	f.app.playerStatus = PlayerStatusRunning
-	f.app.playerMode = PlayerModeKMS
-	f.app.playerError = "keep current state"
-	f.app.playerDone = completion
-
+	if !headlessHasLabel(f.driver.Tree(), "Now playing") {
+		t.Fatal("playing indicator missing from detail")
+	}
 	headlessKey(t, f, "Enter")
 	if err := f.driver.Click(driver.ClickTarget{Label: "Play movie", Occurrence: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if f.app.playerStatus != PlayerStatusRunning || f.app.playerMode != PlayerModeKMS || f.app.playerError != "keep current state" || f.app.playerDone != completion {
-		t.Fatal("keyboard or pointer Play modified active player state")
+	if f.app.playerStatus != PlayerStatusRunning || f.app.playerDone != completion || f.app.pendingPlayback == nil || f.app.pendingPlayback.title != "New Movie" {
+		t.Fatal("keyboard or pointer Play did not queue replacement")
 	}
-	if len(completion) != 0 {
-		t.Fatal("ignored Play produced a second completion")
+	select {
+	case <-stop:
+		// The stop request was sent.
+	default:
+		t.Fatal("current player was not asked to stop")
+	}
+	if err := f.driver.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	if !headlessHasLabel(f.driver.Tree(), "Stopping playback") || !headlessHasLabel(f.driver.Tree(), "Old Movie") {
+		t.Fatal("stopping indicator missing or changed the currently playing title")
 	}
 }
 

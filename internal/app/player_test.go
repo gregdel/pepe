@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gioui.org/op/paint"
 )
@@ -50,19 +51,17 @@ func TestPlayerRuntimeKeepsTokenOutOfArgumentsAndCleansUp(t *testing.T) {
 		t.Fatal("mpv arguments contain the authentication token")
 	}
 
-	a := &App{playerStatus: PlayerStatusIdle, resumePos: make(map[string]float64), images: newAsyncCache[paint.ImageOp](1, 0)}
+	invalidated := make(chan struct{}, 2)
+	a := &App{playerStatus: PlayerStatusIdle, resumePos: make(map[string]float64), images: newAsyncCache[paint.ImageOp](1, 0), invalidate: func() { invalidated <- struct{}{} }}
 	if !a.startPlayer(playerCommand{mediaKey: "movie:tt123", sockPath: sockPath, runtimeDir: runtimeDir, args: args, mode: PlayerModeGUI}) {
 		t.Fatalf("startPlayer failed: %s", a.playerError)
 	}
 	done := a.playerDone
+	if len(invalidated) != 1 {
+		t.Fatal("starting playback did not request a new frame")
+	}
 	if a.playerStatus != PlayerStatusRunning {
 		t.Fatalf("player status = %q, want Running", a.playerStatus)
-	}
-	// Repeated Play is ignored before command construction and cannot replace
-	// the active launch's completion channel or status.
-	a.launchPlayback(playbackSource{})
-	if a.playerDone != done || a.playerStatus != PlayerStatusRunning {
-		t.Fatal("repeated Play changed active player state")
 	}
 	waitForCache(t, func() bool { return len(done) == 1 })
 	argv, err := os.ReadFile(argvPath)
@@ -91,6 +90,105 @@ func TestPlayerRuntimeKeepsTokenOutOfArgumentsAndCleansUp(t *testing.T) {
 	case <-done:
 		t.Fatal("launch produced more than one completion")
 	default:
+	}
+}
+
+func TestSwitchPlaybackStopsBeforeStartingNextPlayer(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "launches")
+	playerPath := filepath.Join(dir, "fake-mpv")
+	script := `#!/bin/sh
+case " $* " in
+  *--title=Second*) printf 'second\n' >> "$PEPE_TEST_LOG"; exit 0 ;;
+esac
+printf 'first\n' >> "$PEPE_TEST_LOG"
+trap 'printf "stopped\n" >> "$PEPE_TEST_LOG"; exit 0' TERM
+while :; do sleep 0.1; done
+`
+	if err := os.WriteFile(playerPath, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PEPE_TEST_LOG", logPath)
+	client, err := NewAPIClient("http://localhost", "token", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := New(client, nil, &Config{MPVPath: playerPath}, nil, nil)
+	first := testMovie("first", "First", 2020)
+	second := testMovie("second", "Second", 2021)
+	a.launchPlayback(playbackSource{mediaKey: movieMediaKey("first"), title: "First", video: first})
+	if a.playerStatus != PlayerStatusRunning {
+		t.Fatalf("first launch: %s", a.playerError)
+	}
+	t.Cleanup(func() {
+		if a.playerStop != nil {
+			close(a.playerStop)
+		}
+	})
+	waitForCache(t, func() bool {
+		data, _ := os.ReadFile(logPath)
+		return strings.Contains(string(data), "first\n")
+	})
+	firstDone := a.playerDone
+	a.launchPlayback(playbackSource{mediaKey: movieMediaKey("second"), title: "Second", video: second})
+	if a.playerStatus != PlayerStatusRunning || a.playerDone != firstDone || a.pendingPlayback == nil {
+		t.Fatal("switch launched a second process before the first exited")
+	}
+	waitForCache(t, func() bool { return len(firstDone) == 1 })
+	data, err := os.ReadFile(logPath)
+	if err != nil || string(data) != "first\nstopped\n" {
+		t.Fatalf("player order before completion = %q, %v", data, err)
+	}
+	a.drainChannels()
+	if a.playerStatus != PlayerStatusRunning || a.playerTitle != "Second" || a.pendingPlayback != nil {
+		t.Fatalf("replacement state = (%q, %q, %v), error %s", a.playerStatus, a.playerTitle, a.pendingPlayback, a.playerError)
+	}
+	waitForCache(t, func() bool { return len(a.playerDone) == 1 })
+	a.drainChannels()
+	data, err = os.ReadFile(logPath)
+	if err != nil || string(data) != "first\nstopped\nsecond\n" || a.playerStatus != PlayerStatusIdle {
+		t.Fatalf("switch result = (%q, %q), %v", data, a.playerStatus, err)
+	}
+}
+
+func TestEpisodePlaybackTitleIncludesShow(t *testing.T) {
+	client := NewEmptyAPIClient(nil)
+	client.shows["show-one"] = testShow("show-one", "Fixture Show", 2024)
+	for _, tc := range []struct {
+		showID string
+		want   string
+	}{
+		{"show-one", "Fixture Show · S01E02 - Pilot"},
+		{"missing", "S01E02 - Pilot"},
+	} {
+		t.Run(tc.showID, func(t *testing.T) {
+			a := &App{client: client, playerStatus: PlayerStatusRunning}
+			ep := testEpisode(time.Time{})
+			ep.Season, ep.Episode = 1, 2
+			a.launchEpisode(&DynamicNode{ShowID: tc.showID, Episode: ep, Label: "S01E02 - Pilot"})
+			if a.pendingPlayback == nil || a.pendingPlayback.title != tc.want {
+				t.Fatalf("episode playback title = %+v, want %q", a.pendingPlayback, tc.want)
+			}
+		})
+	}
+}
+
+func TestSwitchPlaybackUsesLatestSelection(t *testing.T) {
+	stop := make(chan struct{})
+	invalidations := 0
+	a := &App{playerStatus: PlayerStatusRunning, playerStop: stop, invalidate: func() { invalidations++ }}
+	a.launchPlayback(playbackSource{title: "Second"})
+	a.launchPlayback(playbackSource{title: "Third"})
+	if invalidations != 2 {
+		t.Fatalf("switch requests produced %d invalidations, want 2", invalidations)
+	}
+	if a.pendingPlayback == nil || a.pendingPlayback.title != "Third" {
+		t.Fatalf("pending playback = %+v", a.pendingPlayback)
+	}
+	select {
+	case <-stop:
+	default:
+		t.Fatal("player stop not requested")
 	}
 }
 

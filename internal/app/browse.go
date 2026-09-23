@@ -170,12 +170,6 @@ func (a *App) layoutHeaderStatus(gtx C) D {
 		}))
 		parts = append(parts, layout.Rigid(layout.Spacer{Width: dp16}.Layout))
 	}
-	if a.playerStatus == PlayerStatusRunning {
-		parts = append(parts, layout.Rigid(func(gtx C) D {
-			return a.label(gtx, spTiny, "Now playing", colorTerminal, font.Medium)
-		}))
-		parts = append(parts, layout.Rigid(layout.Spacer{Width: dp16}.Layout))
-	}
 	parts = append(parts, layout.Rigid(func(gtx C) D {
 		return a.label(gtx, spTiny,
 			fmt.Sprintf("%d movies · %d shows", a.browse.library.movieCount, a.browse.library.showCount),

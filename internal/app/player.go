@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -21,6 +22,7 @@ const (
 	minimumResumePosition = 30.0
 	playbackTrackerWait   = 100 * time.Millisecond
 	mpvConnectAttempts    = 30
+	playerStopTimeout     = 2 * time.Second
 )
 
 type PlayerStatus string
@@ -40,6 +42,7 @@ const (
 
 type playerCommand struct {
 	mediaKey   string
+	title      string
 	sockPath   string
 	runtimeDir string
 	args       []string
@@ -67,9 +70,6 @@ func episodeMediaKey(showID string, season, episode int) string {
 }
 
 func (a *App) launchMovie(media *MediaItem) {
-	if a.playerStatus == PlayerStatusRunning {
-		return
-	}
 	if media == nil {
 		a.setPlayerError("movie is not available")
 		return
@@ -88,17 +88,18 @@ func (a *App) launchMovie(media *MediaItem) {
 }
 
 func (a *App) launchEpisode(node *DynamicNode) {
-	if a.playerStatus == PlayerStatusRunning {
-		return
-	}
 	if node == nil || node.Episode == nil {
 		a.setPlayerError("episode is not available")
 		return
 	}
 	ep := node.Episode
+	title := node.Label
+	if show, ok := a.client.getShow(node.ShowID); ok && show != nil && show.Title != "" {
+		title = show.Title + " · " + title
+	}
 	a.launchPlayback(playbackSource{
 		mediaKey:  episodeMediaKey(node.ShowID, ep.Season, ep.Episode),
-		title:     node.Label,
+		title:     title,
 		video:     ep,
 		subtitles: ep.Subtitles,
 	})
@@ -106,6 +107,14 @@ func (a *App) launchEpisode(node *DynamicNode) {
 
 func (a *App) launchPlayback(source playbackSource) {
 	if a.playerStatus == PlayerStatusRunning {
+		a.pendingPlayback = &source
+		if a.playerStop != nil {
+			close(a.playerStop)
+			a.playerStop = nil
+		}
+		if a.invalidate != nil {
+			a.invalidate()
+		}
 		return
 	}
 	command, err := a.buildPlayerCommand(source)
@@ -117,6 +126,9 @@ func (a *App) launchPlayback(source playbackSource) {
 }
 
 func (a *App) setPlayerError(message string) {
+	if a.playerStatus == PlayerStatusRunning {
+		return
+	}
 	a.playerStatus = PlayerStatusError
 	a.playerError = message
 }
@@ -137,6 +149,7 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 	}
 	command := playerCommand{
 		mediaKey:   source.mediaKey,
+		title:      source.title,
 		sockPath:   sockPath,
 		runtimeDir: runtimeDir,
 		mode:       detectPlayerMode(),
@@ -189,14 +202,33 @@ func (a *App) startPlayer(command playerCommand) bool {
 	}
 
 	done := make(chan playerResult, 1)
+	stop := make(chan struct{})
 	tracker := startIPC(command.sockPath, command.mediaKey)
 	a.playerDone = done
+	a.playerStop = stop
 	a.playerStatus = PlayerStatusRunning
+	a.playerTitle = command.title
 	a.playerMode = command.mode
 	a.playerError = ""
+	if a.invalidate != nil {
+		a.invalidate()
+	}
 
 	go func() {
-		err := cmd.Wait()
+		waited := make(chan error, 1)
+		go func() { waited <- cmd.Wait() }()
+		var err error
+		select {
+		case err = <-waited:
+		case <-stop:
+			_ = cmd.Process.Signal(syscall.SIGTERM)
+			select {
+			case err = <-waited:
+			case <-time.After(playerStopTimeout):
+				_ = cmd.Process.Kill()
+				err = <-waited
+			}
+		}
 		tracker.stopIPC()
 		_ = os.RemoveAll(command.runtimeDir)
 		done <- playerResult{err: err, tracker: tracker}

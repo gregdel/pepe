@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gregdel/pepe/internal/app"
 	"github.com/gregdel/pepe/internal/driver"
@@ -19,6 +21,25 @@ const (
 )
 
 func main() {
+	if os.Getenv("GIO_CONTROL_MOCK_MPV") == "1" && len(os.Args) > 1 && strings.HasPrefix(os.Args[1], "--include=") {
+		// The headless driver invokes its own executable in place of mpv.
+		stop := make(chan os.Signal, 1)
+		signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+		defer signal.Stop(stop)
+		parent := os.Getppid()
+		tick := time.NewTicker(200 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tick.C:
+				if os.Getppid() != parent {
+					return
+				}
+			}
+		}
+	}
 	log.SetOutput(os.Stderr)
 	root, err := os.Getwd()
 	if err != nil {
@@ -69,6 +90,17 @@ func writeReady(w interface{ Write([]byte) (int, error) }, width, height int) er
 
 func newUI() (*app.App, func(), error) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{}))
+	if os.Getenv("GIO_CONTROL_MOCK_MPV") == "1" {
+		path, err := os.Executable()
+		if err != nil {
+			return nil, nil, err
+		}
+		client, err := app.NewHeadlessPlaybackClient(logger)
+		if err != nil {
+			return nil, nil, err
+		}
+		return app.New(client, nil, &app.Config{MPVPath: path}, nil, nil), func() {}, nil
+	}
 	configPath := os.Getenv("GIO_CONTROL_CONFIG")
 	if configPath == "" {
 		configPath = app.DefaultConfigPath()

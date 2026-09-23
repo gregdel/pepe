@@ -7,6 +7,7 @@ import (
 	"time"
 
 	gioapp "gioui.org/app"
+	"gioui.org/font"
 	"gioui.org/io/event"
 	"gioui.org/io/system"
 	"gioui.org/layout"
@@ -91,7 +92,10 @@ type App struct {
 	// player
 	playerStatus     PlayerStatus
 	playerMode       PlayerMode
+	playerTitle      string
 	playerError      string
+	pendingPlayback  *playbackSource
+	playerStop       chan struct{}
 	mpvPath          string
 	playerFullscreen bool
 	playerDone       chan playerResult  // goroutine → event loop
@@ -353,14 +357,20 @@ func (a *App) drainChannels() {
 		select {
 		case result := <-a.playerDone:
 			a.applyPlaybackSnapshot(result.tracker)
-			if result.err != nil {
+			a.playerDone = nil
+			a.playerStop = nil
+			a.playerTitle = ""
+			if next := a.pendingPlayback; next != nil {
+				a.pendingPlayback = nil
+				a.playerStatus = PlayerStatusIdle
+				a.launchPlayback(*next)
+			} else if result.err != nil {
 				a.playerStatus = PlayerStatusError
 				a.playerError = result.err.Error()
 			} else {
 				a.playerStatus = PlayerStatusIdle
 				a.playerError = ""
 			}
-			a.playerDone = nil
 		default:
 		}
 	}
@@ -424,10 +434,45 @@ func scaleContext(gtx C) C {
 	return gtx
 }
 
+func (a *App) layoutPlayingBar(gtx C) D {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx C) D {
+			return layout.Stack{}.Layout(gtx,
+				layout.Expanded(func(gtx C) D {
+					size := gtx.Constraints.Min
+					defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
+					paint.Fill(gtx.Ops, colorSurface)
+					return D{Size: size}
+				}),
+				layout.Stacked(func(gtx C) D {
+					return layout.Inset{Left: tvSafeHorizontalInset(gtx), Right: tvSafeHorizontalInset(gtx), Top: dp8, Bottom: dp8}.Layout(gtx, func(gtx C) D {
+						status := "Now playing"
+						if a.pendingPlayback != nil {
+							status = "Stopping playback"
+						}
+						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+							layout.Rigid(func(gtx C) D { return a.label(gtx, spMeta, status, colorPrimary, font.Bold) }),
+							layout.Rigid(layout.Spacer{Width: dp12}.Layout),
+							layout.Flexed(1, func(gtx C) D { return a.label(gtx, spMeta, a.playerTitle, colorFg, font.Medium) }),
+						)
+					})
+				}),
+			)
+		}),
+		layout.Rigid(hairline),
+	)
+}
+
 func (a *App) layout(gtx C) D {
 	return layout.Stack{}.Layout(gtx,
 		layout.Expanded(func(gtx C) D {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx C) D {
+					if a.playerStatus != PlayerStatusRunning {
+						return D{}
+					}
+					return a.layoutPlayingBar(gtx)
+				}),
 				layout.Flexed(1, func(gtx C) D {
 					if a.detail != nil {
 						return a.layoutDetail(gtx)

@@ -45,6 +45,7 @@ type DriverStatus = {
   generation: number;
   ready?: ReadyEvent;
   stderrTail?: string;
+  mockMpv: boolean;
 };
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -150,6 +151,7 @@ class DriverManager {
   private pending = new Map<number, PendingRequest>();
   private stderrTail = "";
   private startPromise?: Promise<ReadyEvent>;
+  private mockMpv = false;
   private resolveReady?: (ready: ReadyEvent) => void;
   private rejectReady?: (error: Error) => void;
 
@@ -161,6 +163,7 @@ class DriverManager {
       generation: this.generation,
       ready: this.ready,
       stderrTail: this.stderrTail || undefined,
+      mockMpv: this.mockMpv,
     };
   }
 
@@ -173,11 +176,11 @@ class DriverManager {
     return this.start(cwd, signal);
   }
 
-  async start(cwd: string, signal?: AbortSignal): Promise<ReadyEvent> {
-    if (this.isRunning() && this.cwd === cwd && this.ready) return this.ready;
+  async start(cwd: string, signal?: AbortSignal, mockMpv = this.mockMpv): Promise<ReadyEvent> {
+    if (this.isRunning() && this.cwd === cwd && this.ready && this.mockMpv === mockMpv) return this.ready;
     if (this.startPromise) return this.startPromise;
 
-    this.startPromise = this.startImpl(cwd, signal);
+    this.startPromise = this.startImpl(cwd, signal, mockMpv);
     try {
       return await this.startPromise;
     } finally {
@@ -185,7 +188,7 @@ class DriverManager {
     }
   }
 
-  private async startImpl(cwd: string, signal?: AbortSignal): Promise<ReadyEvent> {
+  private async startImpl(cwd: string, signal?: AbortSignal, mockMpv = false): Promise<ReadyEvent> {
     await this.stop();
 
     const binPath = isAbsolute(DRIVER_BIN) ? DRIVER_BIN : resolve(cwd, DRIVER_BIN);
@@ -200,13 +203,14 @@ class DriverManager {
     if (signal?.aborted) throw new Error("cancelled");
 
     this.cwd = cwd;
+    this.mockMpv = mockMpv;
     this.ready = undefined;
     this.stderrTail = "";
 
     const child = spawn(binPath, [], {
       cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: { ...process.env, GIO_CONTROL_MOCK_MPV: mockMpv ? "1" : "0" },
     });
     this.child = child;
 
@@ -264,7 +268,7 @@ class DriverManager {
 
   async restart(cwd: string, signal?: AbortSignal): Promise<ReadyEvent> {
     await this.stop();
-    return this.start(cwd, signal);
+    return this.start(cwd, signal, this.mockMpv);
   }
 
   async stop(): Promise<void> {
@@ -410,9 +414,10 @@ export default function gioUiExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       width: Type.Optional(Type.Integer({ minimum: 1 })),
       height: Type.Optional(Type.Integer({ minimum: 1 })),
+      mockMpv: Type.Optional(Type.Boolean({ description: "Use an offline two-movie catalog and mock mpv process instead of server configuration; never play actual media." })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
-      const ready = await driver.start(ctx.cwd, signal);
+      const ready = await driver.start(ctx.cwd, signal, params.mockMpv ?? false);
       if (params.width !== undefined || params.height !== undefined) {
         if (params.width === undefined || params.height === undefined) {
           throw new Error("width and height must be supplied together");
