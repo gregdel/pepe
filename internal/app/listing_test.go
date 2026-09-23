@@ -149,8 +149,7 @@ func TestSnapshotForUsesCachedCatalog(t *testing.T) {
 	client := &APIClient{
 		movieItems: movieItems,
 		showItems:  showItems,
-		movieCount: len(movieItems),
-		showCount:  len(showItems),
+		snapshot:   LibrarySnapshot{movieCount: len(movieItems), showCount: len(showItems)},
 	}
 	builderRanOutsideLock := true
 	builder := &recordingListingBuilder{onBuild: func() {
@@ -183,18 +182,31 @@ func TestSnapshotForUsesCachedCatalog(t *testing.T) {
 	}
 }
 
+func TestGetSnapshotDoesNotShareTitleMap(t *testing.T) {
+	media := &MediaItem{ID: "original", Type: mediaKindMovie}
+	client := &APIClient{snapshot: LibrarySnapshot{
+		titleToMedia: map[string]*MediaItem{"title": media},
+	}}
+
+	snapshot := client.getSnapshot()
+	snapshot.titleToMedia["title"] = &MediaItem{ID: "changed"}
+	if got := client.getSnapshot().titleToMedia["title"]; got != media {
+		t.Errorf("default snapshot media = %p, want %p", got, media)
+	}
+}
+
 func TestSnapshotForDoesNotReplaceDefaultSnapshot(t *testing.T) {
 	defaultMedia := &MediaItem{ID: "default", Type: mediaKindMovie}
 	defaultMovies := NewRadixTree([]string{"default-movie"})
 	defaultShows := NewRadixTree([]string{"default-show"})
 	client := &APIClient{
-		movieItems:   []*listingItem{newMovieListingItem(testMovie("tt001", "Movie", 2001))},
-		showItems:    []*listingItem{newShowListingItem(testShow("tt002", "Show", 2002))},
-		movieRadix:   defaultMovies,
-		showRadix:    defaultShows,
-		titleToMedia: map[string]*MediaItem{"default": defaultMedia},
-		movieCount:   1,
-		showCount:    1,
+		movieItems: []*listingItem{newMovieListingItem(testMovie("tt001", "Movie", 2001))},
+		showItems:  []*listingItem{newShowListingItem(testShow("tt002", "Show", 2002))},
+		snapshot: LibrarySnapshot{
+			movieRadix: defaultMovies, showRadix: defaultShows,
+			titleToMedia: map[string]*MediaItem{"default": defaultMedia},
+			movieCount:   1, showCount: 1,
+		},
 	}
 	builder := &recordingListingBuilder{}
 
@@ -220,15 +232,16 @@ func TestFetchPublicationIncludesListingCatalog(t *testing.T) {
 	oldMovie := newMovieListingItem(testMovie("tt-old", "Old Movie", 2000))
 	oldShow := newShowListingItem(testShow("tt-old-show", "Old Show", 2000))
 	client := &APIClient{
-		movies:       map[string]*papi.Movie{oldMovie.media.ID: oldMovie.movie},
-		shows:        map[string]*papi.Show{oldShow.media.ID: oldShow.show},
-		movieItems:   []*listingItem{oldMovie},
-		showItems:    []*listingItem{oldShow},
-		movieRadix:   NewRadixTree([]string{"old-movie"}),
-		showRadix:    NewRadixTree([]string{"old-show"}),
-		titleToMedia: map[string]*MediaItem{"old": oldMovie.media},
-		movieCount:   1,
-		showCount:    1,
+		movies:     map[string]*papi.Movie{oldMovie.media.ID: oldMovie.movie},
+		shows:      map[string]*papi.Show{oldShow.media.ID: oldShow.show},
+		movieItems: []*listingItem{oldMovie},
+		showItems:  []*listingItem{oldShow},
+		snapshot: LibrarySnapshot{
+			movieRadix:   NewRadixTree([]string{"old-movie"}),
+			showRadix:    NewRadixTree([]string{"old-show"}),
+			titleToMedia: map[string]*MediaItem{"old": oldMovie.media},
+			movieCount:   1, showCount: 1,
+		},
 	}
 	newMovie := newMovieListingItem(testMovie("tt-new", "New Movie", 2001))
 	newShow := newShowListingItem(testShow("tt-new-show", "New Show", 2001))
@@ -248,11 +261,8 @@ func TestFetchPublicationIncludesListingCatalog(t *testing.T) {
 	if !reflect.DeepEqual(client.movieItems, movieItems) || !reflect.DeepEqual(client.showItems, showItems) {
 		t.Error("publication did not replace listing catalogs")
 	}
-	if client.movieRadix != snapshot.movieRadix || client.showRadix != snapshot.showRadix || !reflect.DeepEqual(client.titleToMedia, snapshot.titleToMedia) {
+	if !reflect.DeepEqual(client.snapshot, snapshot) {
 		t.Error("publication did not replace the default snapshot")
-	}
-	if client.movieCount != snapshot.movieCount || client.showCount != snapshot.showCount {
-		t.Error("publication did not replace section counts")
 	}
 }
 
@@ -399,8 +409,7 @@ func TestSnapshotForConcurrentAccess(t *testing.T) {
 	client := &APIClient{
 		movieItems: movieItems,
 		showItems:  showItems,
-		movieCount: len(movieItems),
-		showCount:  len(showItems),
+		snapshot:   LibrarySnapshot{movieCount: len(movieItems), showCount: len(showItems)},
 	}
 
 	// Create multiple goroutines that call snapshotFor concurrently
@@ -438,8 +447,7 @@ func TestSnapshotForRaceConditionWithSSEEvents(t *testing.T) {
 	client := &APIClient{
 		movieItems: movieItems,
 		showItems:  showItems,
-		movieCount: len(movieItems),
-		showCount:  len(showItems),
+		snapshot:   LibrarySnapshot{movieCount: len(movieItems), showCount: len(showItems)},
 	}
 
 	// Test that data consistency is maintained across concurrent accesses

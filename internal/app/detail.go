@@ -12,7 +12,6 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget/material"
-	"github.com/odwrtw/polochon/lib/papi"
 )
 
 // ── Detail screen dispatch ────────────────────────────────────────────────────
@@ -54,11 +53,9 @@ func (a *App) layoutDetail(gtx C) D {
 }
 
 // detailShell draws fanart + scrim behind the page content.
-func (a *App) detailShell(gtx C, fanartKey string, fanartFn func() (image.Image, error), content layout.Widget) D {
+func (a *App) detailShell(gtx C, fanart layout.Widget, content layout.Widget) D {
 	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(func(gtx C) D {
-			return a.fanart(gtx, fanartKey, fanartFn)
-		}),
+		layout.Expanded(fanart),
 		layout.Expanded(func(gtx C) D {
 			detailScrim(gtx)
 			return D{Size: gtx.Constraints.Max}
@@ -161,8 +158,8 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 		return a.renderPlayerStatus(gtx)
 	})
 
-	return a.detailShell(gtx, "fanart:"+movieID, func() (image.Image, error) {
-		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.FanartFile })
+	return a.detailShell(gtx, func(gtx C) D {
+		return a.movieFanart(gtx, movieID)
 	}, func(gtx C) D {
 		posterWidth := gtx.Dp(unit.Dp(280))
 		gap := gtx.Dp(dp32)
@@ -170,9 +167,7 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
-				return a.posterImage(gtx, "thumb:"+id, func() (image.Image, error) {
-					return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.ThumbFile })
-				}, unit.Dp(280), radiusPoster)
+				return a.movieThumb(gtx, id, unit.Dp(280), radiusPoster)
 			}),
 			layout.Rigid(layout.Spacer{Width: dp32}.Layout),
 			layout.Rigid(func(gtx C) D {

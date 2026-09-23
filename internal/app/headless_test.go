@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -52,16 +53,12 @@ func newHeadlessFixture(t *testing.T) *headlessFixture {
 	shows := []*listingItem{show}
 	snapshot := buildLibrarySnapshot(radixListingBuilder{}, movies, shows)
 	client := &APIClient{
-		movies:       map[string]*papi.Movie{oldMovie.media.ID: oldMovie.movie, newMovie.media.ID: newMovie.movie},
-		shows:        map[string]*papi.Show{show.media.ID: show.show},
-		movieItems:   movies,
-		showItems:    shows,
-		movieRadix:   snapshot.movieRadix,
-		showRadix:    snapshot.showRadix,
-		titleToMedia: snapshot.titleToMedia,
-		movieCount:   snapshot.movieCount,
-		showCount:    snapshot.showCount,
-		log:          slog.Default(),
+		movies:     map[string]*papi.Movie{oldMovie.media.ID: oldMovie.movie, newMovie.media.ID: newMovie.movie},
+		shows:      map[string]*papi.Show{show.media.ID: show.show},
+		movieItems: movies,
+		showItems:  shows,
+		snapshot:   snapshot,
+		log:        slog.Default(),
 	}
 
 	a := New(client, nil, &Config{MPVPath: "mpv"}, nil, nil)
@@ -123,6 +120,60 @@ func headlessHasClass(nodes []driver.Node, class string) bool {
 	return false
 }
 
+func TestHeadlessEmptyCatalogNavigationAndRefresh(t *testing.T) {
+	a := New(NewEmptyAPIClient(nil), nil, nil, nil, nil)
+	d, err := driver.New(driver.Config{Width: 800, Height: 600, PxPerDp: 1, PxPerSp: 1}, a.Layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	if a.sectionRoot(SectionMovies) == nil || a.sectionRoot(SectionShows) == nil {
+		t.Fatal("empty catalog did not initialize both radix roots")
+	}
+	if err := d.Key("Enter", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !a.browse.nav.isAtSectionRoot() || a.browse.nav.section != SectionMovies {
+		t.Fatalf("empty Movies navigation = %#v", a.browse.nav)
+	}
+	if err := d.Key("LeftArrow", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Key("DownArrow", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Key("Enter", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !a.browse.nav.isAtSectionRoot() || a.browse.nav.section != SectionShows {
+		t.Fatalf("empty Shows navigation = %#v", a.browse.nav)
+	}
+	if err := d.Key("LeftArrow", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Key("LeftArrow", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Key("DownArrow", nil); err != nil {
+		t.Fatal(err)
+	}
+	if a.browse.library.mode != ListingModeDateAdded {
+		t.Fatalf("listing mode = %v, want DateAdded", a.browse.library.mode)
+	}
+	if err := d.Key("RightArrow", nil); err != nil {
+		t.Fatal(err)
+	}
+	a.startRefresh()
+	if a.refreshing || a.refreshDone != nil || a.refreshError != nil {
+		t.Fatal("offline Refresh attempted a network operation or changed refresh state")
+	}
+	if err := d.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	a.Close()
+}
+
 func TestHeadlessHomeSemanticTree(t *testing.T) {
 	f := newHeadlessFixture(t)
 	tree := f.driver.Tree()
@@ -139,6 +190,52 @@ func TestHeadlessHomeSemanticTree(t *testing.T) {
 	}
 	if f.app.browse.focus != browseFocusContent || !f.app.browse.nav.isAtRoot() || f.app.browse.nav.cursor != int(SectionMovies) {
 		t.Fatalf("initial browse state = (focus=%v, root=%t, cursor=%d)", f.app.browse.focus, f.app.browse.nav.isAtRoot(), f.app.browse.nav.cursor)
+	}
+}
+
+func TestHeadlessPlayInputsAreIgnoredWhilePlayerRuns(t *testing.T) {
+	f := newHeadlessFixture(t)
+	f.app.pushMovieDetail(&MediaItem{ID: "movie-new", Title: "New Movie", Type: mediaKindMovie})
+	if err := f.driver.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	completion := make(chan playerResult, 1)
+	f.app.playerStatus = PlayerStatusRunning
+	f.app.playerMode = PlayerModeKMS
+	f.app.playerError = "keep current state"
+	f.app.playerDone = completion
+
+	headlessKey(t, f, "Enter")
+	if err := f.driver.Click(driver.ClickTarget{Label: "Play movie", Occurrence: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if f.app.playerStatus != PlayerStatusRunning || f.app.playerMode != PlayerModeKMS || f.app.playerError != "keep current state" || f.app.playerDone != completion {
+		t.Fatal("keyboard or pointer Play modified active player state")
+	}
+	if len(completion) != 0 {
+		t.Fatal("ignored Play produced a second completion")
+	}
+}
+
+func TestHeadlessLastAddedPreviews(t *testing.T) {
+	f := newHeadlessFixture(t)
+	headlessKey(t, f, "LeftArrow")
+	headlessKey(t, f, "UpArrow")
+	headlessKey(t, f, "RightArrow")
+	headlessKey(t, f, "RightArrow")
+	for _, label := range []string{"New Movie", "2026  ·  2h 5m  ·  Drama, Sci-Fi"} {
+		if !headlessHasLabel(f.driver.Tree(), label) {
+			t.Errorf("movie preview semantic tree does not contain %q", label)
+		}
+	}
+
+	headlessKey(t, f, "LeftArrow")
+	headlessKey(t, f, "DownArrow")
+	headlessKey(t, f, "RightArrow")
+	for _, label := range []string{"Fixture Show", "2024  ·  8.4  ·  2 seasons · 3 episodes"} {
+		if !headlessHasLabel(f.driver.Tree(), label) {
+			t.Errorf("show preview semantic tree does not contain %q", label)
+		}
 	}
 }
 
@@ -224,6 +321,59 @@ func TestHeadlessShowSeasonAndEpisodeNavigation(t *testing.T) {
 	headlessKey(t, f, "LeftArrow")
 	if f.app.detail != nil {
 		t.Fatal("left from show episode focus did not close detail")
+	}
+}
+
+func TestHeadlessPrefixRowsHaveIndependentPointerTargets(t *testing.T) {
+	f := newHeadlessFixture(t)
+	movies := []*listingItem{
+		newMovieListingItem(testMovie("a1", "Amber", 2001)),
+		newMovieListingItem(testMovie("a2", "Azure", 2002)),
+		newMovieListingItem(testMovie("b1", "Bore", 2003)),
+		newMovieListingItem(testMovie("b2", "Brie", 2004)),
+	}
+	items := make(map[string]*papi.Movie, len(movies))
+	for _, movie := range movies {
+		items[movie.media.ID] = movie.movie
+	}
+	snapshot := buildLibrarySnapshot(radixListingBuilder{}, movies, nil)
+	f.app.client.publishLibrary(items, nil, movies, nil, snapshot)
+	f.app.applyLibrarySnapshot(snapshot)
+	headlessKey(t, f, "RightArrow")
+	children := f.app.browse.nav.getCurrentNode().Children
+	if len(children) != 2 || children[0].FullString != "" || children[1].FullString != "" {
+		t.Fatalf("expected two prefix groups, got %#v", children)
+	}
+	first := f.app.clickables[fmt.Sprintf("nav:%p", children[0])]
+	second := f.app.clickables[fmt.Sprintf("nav:%p", children[1])]
+	if first == nil || second == nil || first == second {
+		t.Fatal("prefix rows did not get distinct clickables")
+	}
+
+	var buttonID func([]driver.Node, string) (uint64, bool)
+	buttonID = func(nodes []driver.Node, label string) (uint64, bool) {
+		for _, node := range nodes {
+			if node.Class == "button" && node.Label == label {
+				return node.ID, true
+			}
+			if id, ok := buttonID(node.Children, label); ok {
+				return id, true
+			}
+		}
+		return 0, false
+	}
+	for _, label := range []string{"A", "B"} {
+		id, ok := buttonID(f.driver.Tree(), label)
+		if !ok {
+			t.Fatalf("no button for prefix %q", label)
+		}
+		if err := f.driver.Click(driver.ClickTarget{ID: &id}); err != nil {
+			t.Fatal(err)
+		}
+		if node := f.app.browse.nav.getCurrentNode(); node.Label != label {
+			t.Fatalf("clicking %q entered %q", label, node.Label)
+		}
+		headlessKey(t, f, "LeftArrow")
 	}
 }
 

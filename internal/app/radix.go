@@ -23,15 +23,13 @@ type RadixTree struct {
 
 // buildNode is internal helper for building the uncompressed trie
 type buildNode struct {
-	children   map[byte]*buildNode
+	children   map[rune]*buildNode
 	terminal   bool
 	fullString string
 }
 
 func newBuildNode() *buildNode {
-	return &buildNode{
-		children: make(map[byte]*buildNode),
-	}
+	return &buildNode{}
 }
 
 // NewRadixTree constructs a compressed radix tree from a set of strings
@@ -76,8 +74,8 @@ func NewRadixTree(strings []string) *RadixTree {
 
 // deduplicateStrings removes duplicates and empty strings
 func deduplicateStrings(strings []string) []string {
-	seen := make(map[string]bool)
-	result := []string{}
+	seen := make(map[string]bool, len(strings))
+	result := make([]string, 0, len(strings))
 
 	for _, s := range strings {
 		if s != "" && !seen[s] {
@@ -95,8 +93,10 @@ func buildUncompressedTrie(strings []string) *buildNode {
 
 	for _, s := range strings {
 		node := root
-		for i := 0; i < len(s); i++ {
-			char := s[i]
+		for _, char := range s {
+			if node.children == nil {
+				node.children = make(map[rune]*buildNode)
+			}
 			if node.children[char] == nil {
 				node.children[char] = newBuildNode()
 			}
@@ -125,7 +125,7 @@ func compressNode(node *buildNode, label string) *RadixNode {
 	// If this node has exactly one child and is not terminal, compress
 	for len(node.children) == 1 && !node.terminal {
 		// Get the single child
-		var childChar byte
+		var childChar rune
 		var childNode *buildNode
 		for c, n := range node.children {
 			childChar = c
@@ -176,18 +176,6 @@ func computeSubtreeCounts(node *RadixNode) int {
 		log.Printf("WARNING: Non-terminal node with SubtreeCount=1 detected (Label: %q). This indicates incomplete compression.", node.Label)
 	}
 
-	// Early uniqueness collapse (Option B): if subtree has exactly 1 leaf, collapse it
-	// But don't collapse the root node
-	if node.Label != "" && node.SubtreeCount == 1 && !node.IsTerminal && len(node.Children) == 1 {
-		// Collapse: merge child into this node
-		child := node.Children[0]
-		node.Label = node.Label + child.Label
-		node.IsTerminal = child.IsTerminal
-		node.FullString = child.FullString
-		node.Children = child.Children
-		// Note: SubtreeCount is already correct (1)
-	}
-
 	return count
 }
 
@@ -227,19 +215,6 @@ func (t *RadixTree) Lookup(s string) *RadixNode {
 }
 
 func lookupHelper(node *RadixNode, remaining string) *RadixNode {
-	// If we're at root (empty label), search children
-	if node.Label == "" {
-		for _, child := range node.Children {
-			if strings.HasPrefix(remaining, child.Label) {
-				result := lookupHelper(child, remaining)
-				if result != nil {
-					return result
-				}
-			}
-		}
-		return nil
-	}
-
 	// Check if label matches prefix of remaining string
 	if !strings.HasPrefix(remaining, node.Label) {
 		return nil

@@ -7,10 +7,12 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/odwrtw/polochon/lib/papi"
 )
@@ -37,10 +39,16 @@ const (
 )
 
 type playerCommand struct {
-	mediaKey string
-	sockPath string
-	args     []string
-	mode     PlayerMode
+	mediaKey   string
+	sockPath   string
+	runtimeDir string
+	args       []string
+	mode       PlayerMode
+}
+
+type playerResult struct {
+	err     error
+	tracker *playbackTracker
 }
 
 type playbackSource struct {
@@ -58,11 +66,10 @@ func episodeMediaKey(showID string, season, episode int) string {
 	return fmt.Sprintf("episode:%s:%d:%d", showID, season, episode)
 }
 
-func mpvSocketPath() string {
-	return fmt.Sprintf("/tmp/polochon-mpv-%d.sock", os.Getpid())
-}
-
 func (a *App) launchMovie(media *MediaItem) {
+	if a.playerStatus == PlayerStatusRunning {
+		return
+	}
 	if media == nil {
 		a.setPlayerError("movie is not available")
 		return
@@ -81,6 +88,9 @@ func (a *App) launchMovie(media *MediaItem) {
 }
 
 func (a *App) launchEpisode(node *DynamicNode) {
+	if a.playerStatus == PlayerStatusRunning {
+		return
+	}
 	if node == nil || node.Episode == nil {
 		a.setPlayerError("episode is not available")
 		return
@@ -95,13 +105,15 @@ func (a *App) launchEpisode(node *DynamicNode) {
 }
 
 func (a *App) launchPlayback(source playbackSource) {
+	if a.playerStatus == PlayerStatusRunning {
+		return
+	}
 	command, err := a.buildPlayerCommand(source)
 	if err != nil {
 		a.setPlayerError(err.Error())
 		return
 	}
 	a.startPlayer(command)
-	a.playbackTracker = startIPC(command.sockPath, command.mediaKey)
 }
 
 func (a *App) setPlayerError(message string) {
@@ -119,10 +131,15 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 		return playerCommand{}, fmt.Errorf("video URL: %w", err)
 	}
 
+	runtimeDir, configPath, sockPath, err := createPlayerRuntime(a.client.getToken())
+	if err != nil {
+		return playerCommand{}, err
+	}
 	command := playerCommand{
-		mediaKey: source.mediaKey,
-		sockPath: mpvSocketPath(),
-		mode:     detectPlayerMode(),
+		mediaKey:   source.mediaKey,
+		sockPath:   sockPath,
+		runtimeDir: runtimeDir,
+		mode:       detectPlayerMode(),
 	}
 	command.args = buildMPVArgs(
 		a.mpvPath,
@@ -133,8 +150,8 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 		a.resumePos[source.mediaKey],
 		command.sockPath,
 		a.playerFullscreen,
+		configPath,
 	)
-	command.args = replaceMpvToken(command.args, a.client.getToken())
 	return command, nil
 }
 
@@ -152,22 +169,42 @@ func (a *App) externalSubtitleURLs(subtitles []*papi.Subtitle) []string {
 	return urls
 }
 
-func (a *App) startPlayer(command playerCommand) {
-	if len(command.args) == 0 {
-		return
+func (a *App) startPlayer(command playerCommand) bool {
+	if a.playerStatus == PlayerStatusRunning {
+		_ = os.RemoveAll(command.runtimeDir)
+		return false
 	}
+	if len(command.args) == 0 {
+		_ = os.RemoveAll(command.runtimeDir)
+		a.setPlayerError("player command is empty")
+		return false
+	}
+
+	cmd := exec.Command(command.args[0], command.args[1:]...) //nolint:gosec
+	cmd.Env = mpvEnvironment(os.Environ())
+	if err := cmd.Start(); err != nil {
+		_ = os.RemoveAll(command.runtimeDir)
+		a.setPlayerError(err.Error())
+		return false
+	}
+
+	done := make(chan playerResult, 1)
+	tracker := startIPC(command.sockPath, command.mediaKey)
+	a.playerDone = done
 	a.playerStatus = PlayerStatusRunning
 	a.playerMode = command.mode
 	a.playerError = ""
-	a.playerDone = make(chan error, 1)
 
 	go func() {
-		cmd := exec.Command(command.args[0], command.args[1:]...) //nolint:gosec
-		a.playerDone <- cmd.Run()
+		err := cmd.Wait()
+		tracker.stopIPC()
+		_ = os.RemoveAll(command.runtimeDir)
+		done <- playerResult{err: err, tracker: tracker}
 		if a.invalidate != nil {
 			a.invalidate()
 		}
 	}()
+	return true
 }
 
 func (a *App) applyPlaybackSnapshot(tracker *playbackTracker) {
@@ -208,11 +245,63 @@ func detectPlayerModeFor(goos string, getenv func(string) string) PlayerMode {
 	return PlayerModeKMS
 }
 
-func buildMPVArgs(mpvPath, title, videoURL string, subtitleURLs []string, mode PlayerMode, startPos float64, sockPath string, fullscreen bool) []string {
+func createPlayerRuntime(token string) (runtimeDir, configPath, sockPath string, err error) {
+	if !utf8.ValidString(token) || strings.ContainsAny(token, "\r\n") {
+		return "", "", "", fmt.Errorf("authentication token is invalid for mpv configuration")
+	}
+	for _, char := range token {
+		if char < 0x20 || char == 0x7f {
+			return "", "", "", fmt.Errorf("authentication token contains a control character")
+		}
+	}
+
+	runtimeDir, err = os.MkdirTemp("", "pepe-mpv-")
+	if err != nil {
+		return "", "", "", fmt.Errorf("create private mpv runtime directory: %w", err)
+	}
+	if err := os.Chmod(runtimeDir, 0o700); err != nil {
+		_ = os.RemoveAll(runtimeDir)
+		return "", "", "", fmt.Errorf("secure private mpv runtime directory: %w", err)
+	}
+	configPath = filepath.Join(runtimeDir, "auth.conf")
+	file, err := os.OpenFile(configPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		_ = os.RemoveAll(runtimeDir)
+		return "", "", "", fmt.Errorf("create private mpv configuration: %w", err)
+	}
+	content := "http-header-fields=" + mpvConfigQuote("X-Auth-Token: "+token) + "\n"
+	_, writeErr := file.WriteString(content)
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		_ = os.RemoveAll(runtimeDir)
+		if writeErr != nil {
+			return "", "", "", fmt.Errorf("write private mpv configuration: %w", writeErr)
+		}
+		return "", "", "", fmt.Errorf("close private mpv configuration: %w", closeErr)
+	}
+	return runtimeDir, configPath, filepath.Join(runtimeDir, "mpv.sock"), nil
+}
+
+func mpvEnvironment(environment []string) []string {
+	filtered := make([]string, 0, len(environment))
+	for _, variable := range environment {
+		if !strings.HasPrefix(variable, "POLOCHON_TOKEN=") {
+			filtered = append(filtered, variable)
+		}
+	}
+	return filtered
+}
+
+func mpvConfigQuote(value string) string {
+	value = strings.NewReplacer(`\`, `\\`, `"`, `\"`, `,`, `\,`).Replace(value)
+	return `"` + value + `"`
+}
+
+func buildMPVArgs(mpvPath, title, videoURL string, subtitleURLs []string, mode PlayerMode, startPos float64, sockPath string, fullscreen bool, configPath string) []string {
 	if strings.TrimSpace(mpvPath) == "" {
 		mpvPath = "mpv"
 	}
-	args := []string{mpvPath, "--http-header-fields=X-Auth-Token: $POLOCHON_TOKEN"}
+	args := []string{mpvPath, "--include=" + configPath}
 	if startPos > minimumResumePosition {
 		args = append(args, fmt.Sprintf("--start=%d", int(startPos)))
 	}
@@ -233,17 +322,6 @@ func buildMPVArgs(mpvPath, title, videoURL string, subtitleURLs []string, mode P
 	return args
 }
 
-func replaceMpvToken(args []string, token string) []string {
-	if token == "" {
-		return args
-	}
-	out := make([]string, len(args))
-	for i, arg := range args {
-		out[i] = strings.ReplaceAll(arg, "$POLOCHON_TOKEN", token)
-	}
-	return out
-}
-
 // playbackTracker is updated by the mpv IPC goroutine without waking the UI.
 type playbackTracker struct {
 	mu       sync.RWMutex
@@ -251,13 +329,20 @@ type playbackTracker struct {
 	pos      float64
 	eof      bool
 	done     chan struct{}
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 func newPlaybackTracker(mediaKey string) *playbackTracker {
 	return &playbackTracker{
 		mediaKey: mediaKey,
 		done:     make(chan struct{}),
+		stop:     make(chan struct{}),
 	}
+}
+
+func (t *playbackTracker) stopIPC() {
+	t.stopOnce.Do(func() { close(t.stop) })
 }
 
 func (t *playbackTracker) updatePos(pos float64) {
@@ -307,17 +392,39 @@ func ipcLoop(sockPath string, tracker *playbackTracker) {
 
 	var conn net.Conn
 	for range mpvConnectAttempts {
+		select {
+		case <-tracker.stop:
+			return
+		default:
+		}
 		c, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: sockPath, Net: "unix"})
 		if err == nil {
 			conn = c
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-tracker.stop:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		case <-timer.C:
+		}
 	}
 	if conn == nil {
 		return
 	}
 	defer func() { _ = conn.Close() }()
+	stopped := make(chan struct{})
+	defer close(stopped)
+	go func() {
+		select {
+		case <-tracker.stop:
+			_ = conn.Close()
+		case <-stopped:
+		}
+	}()
 
 	// Send observe_property commands.
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 1, \"time-pos\"]}\n")

@@ -2,9 +2,12 @@ package app
 
 import (
 	"errors"
+	"image"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"gioui.org/op/paint"
 )
 
 func waitForCache(t *testing.T, condition func() bool) {
@@ -177,6 +180,108 @@ func TestAsyncCacheResetIgnoresStaleResults(t *testing.T) {
 	c.drain()
 	if value, ok := c.get("key"); !ok || value != 2 {
 		t.Fatalf("cached value = (%d, %v), want (2, true)", value, ok)
+	}
+}
+
+func TestWeightedCacheEvictsLeastRecentlyUsedAndRefetches(t *testing.T) {
+	c := newWeightedAsyncCache[int](1, 0, 5, func(value int) int64 { return int64(value) })
+	fetchValue := func(key string, value int) {
+		c.fetch(key, func() (int, error) { return value, nil })
+		waitForCache(t, func() bool { return len(c.done) == 1 })
+		c.drain()
+	}
+
+	fetchValue("a", 3)
+	if _, ok := c.get("a"); !ok {
+		t.Fatal("first successful value was not cached")
+	}
+	fetchValue("b", 3)
+	if _, ok := c.get("a"); ok {
+		t.Fatal("least-recently-used value was not evicted")
+	}
+	if value, ok := c.get("b"); !ok || value != 3 {
+		t.Fatalf("remaining value = (%d, %v), want (3, true)", value, ok)
+	}
+	if c.cacheWeight != 3 {
+		t.Fatalf("cache weight = %d, want 3", c.cacheWeight)
+	}
+
+	fetchValue("a", 4)
+	if _, ok := c.get("b"); ok {
+		t.Fatal("re-fetched value did not evict the remaining least-recently-used entry")
+	}
+	if value, ok := c.get("a"); !ok || value != 4 {
+		t.Fatalf("re-fetched value = (%d, %v), want (4, true)", value, ok)
+	}
+}
+
+func TestPosterImagesStayCachedAcrossListFrames(t *testing.T) {
+	// Three decoded posters exceed this budget; three display-sized posters fit.
+	c := newWeightedAsyncCache[paint.ImageOp](1, 0, 16<<20, imageOpWeight)
+	var fetches atomic.Int32
+	for frame := range 2 {
+		for _, key := range []string{"first", "second", "third"} {
+			if _, ok := c.get(key); ok {
+				continue
+			}
+			c.fetch(key, func() (paint.ImageOp, error) {
+				fetches.Add(1)
+				return fetchImageOp(func() (image.Image, error) {
+					return image.NewRGBA(image.Rect(0, 0, 1600, 2400)), nil
+				}, posterMaxWidth, posterMaxHeight)
+			})
+			waitForCache(t, func() bool { return len(c.done) == 1 })
+			c.drain()
+		}
+		if fetches.Load() != 3 {
+			t.Fatalf("frame %d: fetched %d posters, want 3", frame, fetches.Load())
+		}
+	}
+	for _, key := range []string{"first", "second", "third"} {
+		img, ok := c.get(key)
+		if !ok || img.Size() != image.Pt(posterMaxWidth, posterMaxHeight) {
+			t.Errorf("%s: cached image size = %v, cached = %v", key, img.Size(), ok)
+		}
+	}
+}
+
+func TestArtworkSizingPreservesAspectRatio(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		src, want  image.Point
+		maxW, maxH int
+	}{
+		{"portrait", image.Pt(1600, 2400), image.Pt(800, 1200), posterMaxWidth, posterMaxHeight},
+		{"landscape", image.Pt(3840, 2160), image.Pt(2560, 1440), fanartMaxWidth, fanartMaxHeight},
+		{"already small", image.Pt(200, 300), image.Pt(200, 300), posterMaxWidth, posterMaxHeight},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			img, err := fetchImageOp(func() (image.Image, error) {
+				return image.NewRGBA(image.Rectangle{Max: tc.src}), nil
+			}, tc.maxW, tc.maxH)
+			if err != nil || img.Size() != tc.want {
+				t.Fatalf("image size = %v, err = %v; want %v", img.Size(), err, tc.want)
+			}
+		})
+	}
+}
+
+func TestWeightedCacheResetIgnoresStaleInFlightResult(t *testing.T) {
+	c := newWeightedAsyncCache[int](1, 1, 10, func(value int) int64 { return int64(value) })
+	started := make(chan struct{})
+	release := make(chan struct{})
+	c.fetch("poster", func() (int, error) {
+		close(started)
+		<-release
+		return 5, nil
+	})
+	<-started
+	c.reset()
+	close(release)
+	waitForCache(t, func() bool { return len(c.done) == 1 })
+	c.drain()
+	if _, ok := c.get("poster"); ok || c.cacheWeight != 0 {
+		t.Fatal("stale in-flight image survived cache reset")
 	}
 }
 

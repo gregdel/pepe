@@ -3,7 +3,34 @@ package app
 import (
 	"sort"
 	"testing"
+	"unicode/utf8"
 )
+
+func TestRadixTreeUnicodeLabelsAreValidUTF8(t *testing.T) {
+	input := []string{"Éclair", "École", "🎞️ Film", "🎞️ Festival", "🎥 Show"}
+	tree := NewRadixTree(input)
+	var visit func(*RadixNode)
+	visit = func(node *RadixNode) {
+		if !utf8.ValidString(node.Label) {
+			t.Errorf("invalid UTF-8 radix edge label %q", node.Label)
+		}
+		if node.IsTerminal {
+			if !utf8.ValidString(node.FullString) {
+				t.Errorf("invalid UTF-8 terminal title %q", node.FullString)
+			}
+			if got := tree.Lookup(node.FullString); got == nil || got.FullString != node.FullString {
+				t.Errorf("lookup failed for %q: %#v", node.FullString, got)
+			}
+		}
+		for _, child := range node.Children {
+			visit(child)
+		}
+	}
+	visit(tree.Root())
+	if got := len(tree.AllStrings()); got != len(input) {
+		t.Fatalf("tree has %d strings, want %d", got, len(input))
+	}
+}
 
 func TestRadixTreeEmpty(t *testing.T) {
 	tree := NewRadixTree([]string{})

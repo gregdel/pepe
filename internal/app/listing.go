@@ -106,39 +106,44 @@ func (radixListingBuilder) build(items []*listingItem) mediaListing {
 type dateAddedListingBuilder struct{}
 
 func (dateAddedListingBuilder) build(items []*listingItem) mediaListing {
-	sortedItems := append([]*listingItem(nil), items...)
+	type datedItem struct {
+		item  *listingItem
+		title string
+		date  time.Time
+	}
+	sortedItems := make([]datedItem, 0, len(items))
+	for _, item := range items {
+		sortedItems = append(sortedItems, datedItem{
+			item: item, title: formatTitle(item.media.Title, item.media.Year), date: item.dateAdded(),
+		})
+	}
 	sort.SliceStable(sortedItems, func(i, j int) bool {
 		left, right := sortedItems[i], sortedItems[j]
-		leftDate, rightDate := left.dateAdded(), right.dateAdded()
-		if leftDate.IsZero() != rightDate.IsZero() {
-			return !leftDate.IsZero()
+		if left.date.IsZero() != right.date.IsZero() {
+			return !left.date.IsZero()
 		}
-		if !leftDate.Equal(rightDate) {
-			return leftDate.After(rightDate)
+		if !left.date.Equal(right.date) {
+			return left.date.After(right.date)
 		}
-
-		leftTitle := formatTitle(left.media.Title, left.media.Year)
-		rightTitle := formatTitle(right.media.Title, right.media.Year)
-		if leftTitle != rightTitle {
-			return leftTitle < rightTitle
+		if left.title != right.title {
+			return left.title < right.title
 		}
-		if left.media.Type != right.media.Type {
-			return left.media.Type < right.media.Type
+		if left.item.media.Type != right.item.media.Type {
+			return left.item.media.Type < right.item.media.Type
 		}
-		return left.media.ID < right.media.ID
+		return left.item.media.ID < right.item.media.ID
 	})
 
 	root := &RadixNode{
 		Children:     make([]*RadixNode, 0, len(sortedItems)),
 		SubtreeCount: len(sortedItems),
 	}
-	for _, item := range sortedItems {
-		title := formatTitle(item.media.Title, item.media.Year)
+	for _, entry := range sortedItems {
 		root.Children = append(root.Children, &RadixNode{
-			Label:        title,
+			Label:        entry.title,
 			IsTerminal:   true,
-			FullString:   title,
-			Media:        item.media,
+			FullString:   entry.title,
+			Media:        entry.item.media,
 			SubtreeCount: 1,
 		})
 	}

@@ -22,10 +22,10 @@ import (
 
 func init() {
 	if os.Getenv("EGL_PLATFORM") == "" {
-		os.Setenv("EGL_PLATFORM", "surfaceless")
+		_ = os.Setenv("EGL_PLATFORM", "surfaceless")
 	}
 	if os.Getenv("LIBGL_ALWAYS_SOFTWARE") == "" {
-		os.Setenv("LIBGL_ALWAYS_SOFTWARE", "1")
+		_ = os.Setenv("LIBGL_ALWAYS_SOFTWARE", "1")
 	}
 }
 

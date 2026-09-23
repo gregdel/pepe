@@ -16,6 +16,8 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"github.com/odwrtw/polochon/lib/papi"
+	"golang.org/x/image/draw"
 )
 
 // ── Shared rendering primitives ───────────────────────────────────────────────
@@ -174,13 +176,37 @@ func (a *App) twoTone(gtx C, size unit.Sp, prefix, rest string, restCol color.NR
 
 // ── Poster / fanart images ────────────────────────────────────────────────────
 
-func fetchImageOp(fetchFn func() (image.Image, error)) (paint.ImageOp, error) {
+// Cache display-sized artwork; full-size posters can otherwise evict each
+// other while still visible, triggering continuous refetch and redraw.
+const (
+	posterMaxWidth  = 800
+	posterMaxHeight = 1200
+	fanartMaxWidth  = 2560
+	fanartMaxHeight = 1440
+)
+
+func fetchImageOp(fetchFn func() (image.Image, error), maxWidth, maxHeight int) (paint.ImageOp, error) {
 	img, err := fetchFn()
 	if err != nil {
 		return paint.ImageOp{}, err
 	}
 	if img == nil {
 		return paint.ImageOp{}, nil
+	}
+	bounds := img.Bounds()
+	width, height := bounds.Dx(), bounds.Dy()
+	if width > maxWidth {
+		height = max(1, height*maxWidth/width)
+		width = maxWidth
+	}
+	if height > maxHeight {
+		width = max(1, width*maxHeight/height)
+		height = maxHeight
+	}
+	if width != bounds.Dx() || height != bounds.Dy() {
+		resized := image.NewRGBA(image.Rect(0, 0, width, height))
+		draw.ApproxBiLinear.Scale(resized, resized.Bounds(), img, bounds, draw.Src, nil)
+		img = resized
 	}
 	return paint.NewImageOp(img), nil
 }
@@ -194,27 +220,21 @@ func (a *App) posterImage(gtx C, cacheKey string, fetchFn func() (image.Image, e
 	gtx2 := gtx
 	gtx2.Constraints = layout.Exact(size)
 
-	if img, ok := a.images.get(cacheKey); ok {
-		defer clip.RRect{
-			Rect: image.Rectangle{Max: size},
-			NE:   gtx.Dp(radius), NW: gtx.Dp(radius), SE: gtx.Dp(radius), SW: gtx.Dp(radius),
-		}.Push(gtx.Ops).Pop()
-		if img.Size().X == 0 || img.Size().Y == 0 {
-			paint.Fill(gtx.Ops, colorSurface2)
-			return D{Size: size}
-		}
+	img, ok := a.images.get(cacheKey)
+	if !ok {
+		a.images.fetch(cacheKey, func() (paint.ImageOp, error) { return fetchImageOp(fetchFn, posterMaxWidth, posterMaxHeight) })
+	}
+	defer clip.RRect{
+		Rect: image.Rectangle{Max: size},
+		NE:   gtx.Dp(radius), NW: gtx.Dp(radius), SE: gtx.Dp(radius), SW: gtx.Dp(radius),
+	}.Push(gtx.Ops).Pop()
+	if ok && img.Size().X != 0 && img.Size().Y != 0 {
 		return widget.Image{
 			Src:      img,
 			Fit:      widget.Cover,
 			Position: layout.Center,
 		}.Layout(gtx2)
 	}
-
-	a.images.fetch(cacheKey, func() (paint.ImageOp, error) { return fetchImageOp(fetchFn) })
-	defer clip.RRect{
-		Rect: image.Rectangle{Max: size},
-		NE:   gtx.Dp(radius), NW: gtx.Dp(radius), SE: gtx.Dp(radius), SW: gtx.Dp(radius),
-	}.Push(gtx.Ops).Pop()
 	paint.Fill(gtx.Ops, colorSurface2)
 	return D{Size: size}
 }
@@ -231,8 +251,33 @@ func (a *App) fanart(gtx C, cacheKey string, fetchFn func() (image.Image, error)
 		}
 		return D{Size: gtx.Constraints.Max}
 	}
-	a.images.fetch(cacheKey, func() (paint.ImageOp, error) { return fetchImageOp(fetchFn) })
+	a.images.fetch(cacheKey, func() (paint.ImageOp, error) { return fetchImageOp(fetchFn, fanartMaxWidth, fanartMaxHeight) })
 	return D{Size: gtx.Constraints.Max}
+}
+
+// Catalog artwork uses the same cache keys across browse, preview and detail.
+func (a *App) movieThumb(gtx C, id string, width, radius unit.Dp) D {
+	return a.posterImage(gtx, "thumb:"+id, func() (image.Image, error) {
+		return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.ThumbFile })
+	}, width, radius)
+}
+
+func (a *App) showPoster(gtx C, id string, width, radius unit.Dp) D {
+	return a.posterImage(gtx, "poster:"+id, func() (image.Image, error) {
+		return a.client.fetchShowImage(id, func(s *papi.Show) *papi.File { return s.PosterFile })
+	}, width, radius)
+}
+
+func (a *App) movieFanart(gtx C, id string) D {
+	return a.fanart(gtx, "fanart:"+id, func() (image.Image, error) {
+		return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.FanartFile })
+	})
+}
+
+func (a *App) showFanart(gtx C, id string) D {
+	return a.fanart(gtx, "fanart:"+id, func() (image.Image, error) {
+		return a.client.fetchShowImage(id, func(s *papi.Show) *papi.File { return s.FanartFile })
+	})
 }
 
 // ── Count pill ────────────────────────────────────────────────────────────────
@@ -337,20 +382,9 @@ type labelLine struct {
 func (a *App) renderLines(gtx C, list *layout.List, lines []labelLine) D {
 	return list.Layout(gtx, len(lines), func(gtx C, i int) D {
 		l := lines[i]
-		if l.text == "" {
-			return layout.Spacer{Height: dp4}.Layout(gtx)
-		}
-		sz := l.size
-		if sz == 0 {
-			sz = sp
-		}
-		col := l.color
-		if col == (color.NRGBA{}) {
-			col = colorFg
-		}
 		return layout.Inset{Bottom: dp2}.Layout(gtx, func(gtx C) D {
-			lbl := material.Label(a.th, sz, l.text)
-			lbl.Color = col
+			lbl := material.Label(a.th, l.size, l.text)
+			lbl.Color = l.color
 			if l.weight != 0 {
 				lbl.Font.Weight = l.weight
 			}

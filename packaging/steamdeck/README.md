@@ -19,9 +19,10 @@ This bundle is for a personal Steam Deck install from Desktop Mode.
    ```sh
    mkdir -p "$HOME/.config/pepe"
    cp config.example.yaml "$HOME/.config/pepe/config.yaml"
+   chmod 600 "$HOME/.config/pepe/config.yaml"
    ```
 
-   Edit `polochon_url` and `polochon_token`.
+   Edit `polochon_url` and `polochon_token`. The config contains the server token, so keep it private; mpv receives it through a private temporary config file rather than its process arguments.
 
 4. Ensure `mpv` is available on the Deck, or set `mpv_path` in the config to a bundled/wrapper executable.
 

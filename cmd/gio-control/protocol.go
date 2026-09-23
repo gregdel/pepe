@@ -51,7 +51,6 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, drv *driver.Driver, re
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	out := bufio.NewWriter(w)
-	defer out.Flush()
 	shotNumber := uint64(0)
 
 	write := func(resp response) error {
@@ -67,8 +66,8 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, drv *driver.Driver, re
 		}
 		var req request
 		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
-			if write(response{Error: fmt.Sprintf("invalid JSON request: %v", err)}) != nil {
-				return err
+			if writeErr := write(response{Error: fmt.Sprintf("invalid JSON request: %v", err)}); writeErr != nil {
+				return writeErr
 			}
 			continue
 		}

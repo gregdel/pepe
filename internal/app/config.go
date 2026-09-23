@@ -11,15 +11,6 @@ import (
 
 // Config holds the application configuration.
 type Config struct {
-	PolochonURL string
-	Token       string
-	MPVPath     string
-
-	Fullscreen       bool
-	PlayerFullscreen bool
-}
-
-type fileConfig struct {
 	PolochonURL      string `yaml:"polochon_url"`
 	Token            string `yaml:"polochon_token"`
 	MPVPath          string `yaml:"mpv_path"`
@@ -42,19 +33,14 @@ func LoadConfig(path string) (*Config, error) {
 			if !os.IsNotExist(err) {
 				return nil, fmt.Errorf("read config file %s: %w", path, err)
 			}
-		} else {
-			var file fileConfig
-			if err := yaml.Unmarshal(bytes, &file); err != nil {
-				return nil, fmt.Errorf("parse config file %s: %w", path, err)
-			}
-			cfg.PolochonURL = strings.TrimSpace(file.PolochonURL)
-			cfg.Token = strings.TrimSpace(file.Token)
-			if value := strings.TrimSpace(file.MPVPath); value != "" {
-				cfg.MPVPath = value
-			}
-			cfg.Fullscreen = file.Fullscreen
-			cfg.PlayerFullscreen = file.PlayerFullscreen
+		} else if err := yaml.Unmarshal(bytes, cfg); err != nil {
+			return nil, fmt.Errorf("parse config file %s: %w", path, err)
 		}
+	}
+	cfg.PolochonURL = strings.TrimSpace(cfg.PolochonURL)
+	cfg.Token = strings.TrimSpace(cfg.Token)
+	if cfg.MPVPath = strings.TrimSpace(cfg.MPVPath); cfg.MPVPath == "" {
+		cfg.MPVPath = "mpv"
 	}
 	if value := os.Getenv("POLOCHON_URL"); value != "" {
 		cfg.PolochonURL = strings.TrimSpace(value)

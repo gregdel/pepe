@@ -242,7 +242,7 @@ func (a *App) layoutSubtitlePopupBody(gtx C, p *SubtitlePopup) D {
 func (a *App) drawSubtitleEntry(gtx C, entry *polochon.SubtitleEntry, selected bool) D {
 	const sourceColDp = unit.Dp(180)
 
-	return a.navRowShell(gtx, selected, 0, func(gtx C) D {
+	return a.rowShell(gtx, selected, false, 0, func(gtx C) D {
 		fg := colorFg
 		fgSecondary := colorSubtle
 		if selected {

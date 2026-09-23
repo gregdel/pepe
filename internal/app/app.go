@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"image"
 	"strings"
 	"time"
@@ -69,12 +70,20 @@ type SubtitlePopup struct {
 
 // ── App ──────────────────────────────────────────────────────────────────────
 
+const imageCacheBudget int64 = 128 << 20
+
+func imageOpWeight(imageOp paint.ImageOp) int64 {
+	size := imageOp.Size()
+	return int64(size.X) * int64(size.Y) * 4
+}
+
 // App holds all application state across frames.
 type App struct {
 	client *APIClient
 
 	// browse owns the active catalog view and all browse-screen navigation.
-	browse browseState
+	browse            browseState
+	dateAddedSnapshot *LibrarySnapshot // reused between mode switches until refresh
 
 	// pushed full-screen detail page (nil = browse screen)
 	detail *detailScreen
@@ -85,15 +94,19 @@ type App struct {
 	playerError      string
 	mpvPath          string
 	playerFullscreen bool
-	playerDone       chan error         // goroutine → event loop
+	playerDone       chan playerResult  // goroutine → event loop
 	resumePos        map[string]float64 // mediaKey -> last position (seconds)
-	playbackTracker  *playbackTracker
 
 	// library refresh
-	refreshing   bool
-	refreshError error
-	refreshDone  chan refreshResult // goroutine → event loop
-	sseCh        <-chan struct{}    // SSE events from server
+	refreshing       bool
+	refreshPending   bool
+	refreshError     error
+	refreshDone      chan refreshResult // goroutine → event loop
+	refreshLibraryFn func() error       // optional fetch override for tests
+	sseCh            <-chan struct{}    // SSE events from server
+	sseSignal        chan struct{}      // bounded wakeup for the event loop
+	sseCancel        context.CancelFunc
+	sseDone          <-chan struct{}
 
 	// image cache (thumbs, fanarts, posters — all media types)
 	images *asyncCache[paint.ImageOp]
@@ -192,11 +205,16 @@ func (a *App) selectedBrowseMedia() *MediaItem {
 
 func (a *App) applyLibrarySnapshot(snapshot LibrarySnapshot) {
 	a.browse.library.LibrarySnapshot = snapshot
+	a.clickables = make(map[string]*widget.Clickable)
 }
 
 func (a *App) snapshotForMode(mode ListingMode) LibrarySnapshot {
 	if mode == ListingModeDateAdded {
-		return a.client.snapshotFor(dateAddedListingBuilder{})
+		if a.dateAddedSnapshot == nil {
+			snapshot := a.client.snapshotFor(dateAddedListingBuilder{})
+			a.dateAddedSnapshot = &snapshot
+		}
+		return *a.dateAddedSnapshot
 	}
 	return a.client.getSnapshot()
 }
@@ -253,13 +271,55 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		rightList:        layout.List{Axis: layout.Vertical},
 		playerLinesList:  layout.List{Axis: layout.Vertical},
 		detailList:       layout.List{Axis: layout.Vertical},
-		images:           newAsyncCache[paint.ImageOp](3, 24),
+		images:           newWeightedAsyncCache[paint.ImageOp](3, 24, imageCacheBudget, imageOpWeight),
 		sseCh:            sseCh,
+	}
+	if sseCh != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		app.sseCancel = cancel
+		app.sseSignal = make(chan struct{}, 1)
+		done := make(chan struct{})
+		app.sseDone = done
+		go app.forwardSSE(ctx, done)
 	}
 	if invalidate != nil {
 		app.images.onDone = invalidate
 	}
 	return app
+}
+
+// forwardSSE wakes the Gio event loop without touching application state. The
+// signal channel is bounded so bursts are coalesced until the next frame.
+func (a *App) forwardSSE(ctx context.Context, done chan<- struct{}) {
+	defer close(done)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-a.sseCh:
+			if !ok || ctx.Err() != nil {
+				return
+			}
+			select {
+			case a.sseSignal <- struct{}{}:
+			default:
+			}
+			if a.invalidate != nil {
+				a.invalidate()
+			}
+		}
+	}
+}
+
+// Close stops background event forwarding. Run calls it when the window exits;
+// headless users should call it when their driver/app lifetime ends.
+func (a *App) Close() {
+	if a.sseCancel != nil {
+		a.sseCancel()
+	}
+	if a.sseDone != nil {
+		<-a.sseDone
+	}
 }
 
 // ── Main event loop ───────────────────────────────────────────────────────────
@@ -269,6 +329,7 @@ func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 	a := New(client, sseCh, config, w.Invalidate, func() { w.Perform(system.ActionClose) })
 	var ops op.Ops
 
+	defer a.Close()
 	for {
 		switch e := w.Event().(type) {
 		case gioapp.DestroyEvent:
@@ -277,9 +338,6 @@ func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 		case gioapp.FrameEvent:
 			ops.Reset()
 			gtx := gioapp.NewContext(&ops, e)
-
-			// Paint background
-			paint.Fill(gtx.Ops, colorBg)
 
 			// Draw the shared UI and process its input.
 			a.Layout(gtx)
@@ -293,34 +351,29 @@ func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 func (a *App) drainChannels() {
 	if a.playerDone != nil {
 		select {
-		case err := <-a.playerDone:
-			a.applyPlaybackSnapshot(a.playbackTracker)
-			if err != nil {
+		case result := <-a.playerDone:
+			a.applyPlaybackSnapshot(result.tracker)
+			if result.err != nil {
 				a.playerStatus = PlayerStatusError
-				a.playerError = err.Error()
+				a.playerError = result.err.Error()
 			} else {
 				a.playerStatus = PlayerStatusIdle
 				a.playerError = ""
 			}
 			a.playerDone = nil
-			a.playbackTracker = nil
+		default:
+		}
+	}
+
+	if a.sseSignal != nil {
+		select {
+		case <-a.sseSignal:
+			a.libraryChanged()
 		default:
 		}
 	}
 
 	a.drainRefresh()
-
-	// Drain SSE events: each signal means the server library changed.
-	if a.sseCh != nil {
-		select {
-		case _, ok := <-a.sseCh:
-			if ok {
-				a.client.log.Info("SSE: library changed, triggering refresh")
-				a.startRefresh()
-			}
-		default:
-		}
-	}
 
 	a.drainSubtitlePopup()
 

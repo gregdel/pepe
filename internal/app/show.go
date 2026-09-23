@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"image"
 	"strings"
 
 	"gioui.org/font"
@@ -24,8 +23,8 @@ func (a *App) layoutShowDetail(gtx C, s *showPage) D {
 	}
 	showID := show.ImdbID
 
-	return a.detailShell(gtx, "fanart:"+showID, func() (image.Image, error) {
-		return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.FanartFile })
+	return a.detailShell(gtx, func(gtx C) D {
+		return a.showFanart(gtx, showID)
 	}, func(gtx C) D {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
@@ -55,14 +54,6 @@ func (a *App) layoutShowDetail(gtx C, s *showPage) D {
 // leaves an artwork-only region on wide screens and keeps prose lines short.
 func (a *App) showHeader(gtx C, s *showPage, show *papi.Show) D {
 	showID := show.ImdbID
-	seasonCount := len(show.Seasons)
-	episodeCount := 0
-	for _, season := range show.Seasons {
-		if season != nil {
-			episodeCount += len(season.Episodes)
-		}
-	}
-
 	headerWidth := min(gtx.Dp(unit.Dp(1300)), gtx.Constraints.Max.X)
 	gtx.Constraints.Min.X = headerWidth
 	gtx.Constraints.Max.X = headerWidth
@@ -70,9 +61,7 @@ func (a *App) showHeader(gtx C, s *showPage, show *papi.Show) D {
 	return detailPanel(gtx, layout.UniformInset(dp24), func(gtx C) D {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
-				return a.posterImage(gtx, "poster:"+showID, func() (image.Image, error) {
-					return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.PosterFile })
-				}, unit.Dp(180), radiusPoster)
+				return a.showPoster(gtx, showID, unit.Dp(180), radiusPoster)
 			}),
 			layout.Rigid(layout.Spacer{Width: dp32}.Layout),
 			layout.Flexed(1, func(gtx C) D {
@@ -82,12 +71,7 @@ func (a *App) showHeader(gtx C, s *showPage, show *papi.Show) D {
 					}),
 					layout.Rigid(layout.Spacer{Height: dp8}.Layout),
 					layout.Rigid(func(gtx C) D {
-						meta := buildShowMetaLine(show.Year, float64(show.Rating))
-						if meta != "" {
-							meta += "  ·  "
-						}
-						meta += fmt.Sprintf("%d seasons · %d episodes", seasonCount, episodeCount)
-						return a.body(gtx, spMeta, meta, colorSubtle, 2)
+						return a.body(gtx, spMeta, buildShowSummary(show), colorSubtle, 2)
 					}),
 					layout.Rigid(func(gtx C) D {
 						if show.Plot == "" {
@@ -101,6 +85,16 @@ func (a *App) showHeader(gtx C, s *showPage, show *papi.Show) D {
 			}),
 		)
 	})
+}
+
+func showCounts(show *papi.Show) (seasons, episodes int) {
+	seasons = len(show.Seasons)
+	for _, season := range show.Seasons {
+		if season != nil {
+			episodes += len(season.Episodes)
+		}
+	}
+	return seasons, episodes
 }
 
 // showTabs renders the horizontal season selector.
@@ -174,7 +168,7 @@ func (a *App) showEpisodeList(gtx C, s *showPage) D {
 			selected := i == s.epCursor && s.focus == focusEpisodes
 			isCursor := i == s.epCursor
 
-			return a.navRowShell(gtx, selected, 0, func(gtx C) D {
+			return a.rowShell(gtx, selected, false, 0, func(gtx C) D {
 				titleCol := colorFg
 				subCol := colorSubtle
 				if selected {
@@ -310,6 +304,15 @@ func buildEpisodeMetaLine(ep *papi.Episode) string {
 		parts = append(parts, fmt.Sprintf("%.1f", ep.Rating))
 	}
 	return strings.Join(parts, "  ·  ")
+}
+
+func buildShowSummary(show *papi.Show) string {
+	seasons, episodes := showCounts(show)
+	meta := buildShowMetaLine(show.Year, float64(show.Rating))
+	if meta != "" {
+		meta += "  ·  "
+	}
+	return meta + fmt.Sprintf("%d seasons · %d episodes", seasons, episodes)
 }
 
 func buildShowMetaLine(year int, rating float64) string {

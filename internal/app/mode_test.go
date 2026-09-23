@@ -12,13 +12,9 @@ import (
 func newModeTestApp(movieItems, showItems []*listingItem) *App {
 	snapshot := buildLibrarySnapshot(radixListingBuilder{}, movieItems, showItems)
 	client := &APIClient{
-		movieItems:   movieItems,
-		showItems:    showItems,
-		movieRadix:   snapshot.movieRadix,
-		showRadix:    snapshot.showRadix,
-		titleToMedia: snapshot.titleToMedia,
-		movieCount:   len(movieItems),
-		showCount:    len(showItems),
+		movieItems: movieItems,
+		showItems:  showItems,
+		snapshot:   snapshot,
 	}
 	return &App{
 		client: client,
@@ -224,6 +220,29 @@ func TestRefreshCompletionRebuildsActiveModeAndRestoresMedia(t *testing.T) {
 	selected := a.browse.nav.getSelectedChild()
 	if selected == nil || selected.Media == nil || selected.Media.ID != "tt002" || a.browse.nav.cursor != 0 {
 		t.Errorf("restored selection = %#v at cursor %d, want tt002 at cursor 0", selected, a.browse.nav.cursor)
+	}
+}
+
+func TestDateAddedSnapshotIsReusedUntilSuccessfulRefresh(t *testing.T) {
+	old := newMovieListingItem(testMovie("old", "Old", 2001))
+	a := newModeTestApp([]*listingItem{old}, nil)
+	a.images = newAsyncCache[paint.ImageOp](1, 0)
+	a.applyListingMode(ListingModeDateAdded)
+	first := a.browse.library.movieRadix
+
+	a.applyListingMode(ListingModeTitle)
+	a.applyListingMode(ListingModeDateAdded)
+	if a.browse.library.movieRadix != first {
+		t.Fatal("switching back rebuilt the unchanged date listing")
+	}
+
+	newItem := newMovieListingItem(testMovie("new", "New", 2002))
+	items := []*listingItem{newItem}
+	updated := buildLibrarySnapshot(radixListingBuilder{}, items, nil)
+	a.client.publishLibrary(nil, nil, items, nil, updated)
+	a.applyRefreshResult(updated)
+	if a.browse.library.movieRadix == first || a.browse.library.movieRadix.Root().Children[0].Media.ID != "new" {
+		t.Fatal("successful refresh did not rebuild the cached date listing")
 	}
 }
 

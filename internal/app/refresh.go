@@ -8,7 +8,7 @@ type refreshResult struct {
 }
 
 func (a *App) startRefresh() {
-	if a.refreshing {
+	if a.refreshing || a.client == nil || (a.client.client == nil && a.refreshLibraryFn == nil) {
 		return
 	}
 
@@ -17,7 +17,11 @@ func (a *App) startRefresh() {
 	a.refreshDone = make(chan refreshResult, 1)
 
 	go func() {
-		result := refreshResult{err: a.client.FetchLibrary()}
+		fetch := a.client.FetchLibrary
+		if a.refreshLibraryFn != nil {
+			fetch = a.refreshLibraryFn
+		}
+		result := refreshResult{err: fetch()}
 		if result.err == nil {
 			result.snapshot = a.client.getSnapshot()
 		}
@@ -42,17 +46,34 @@ func (a *App) drainRefresh() {
 			if a.client != nil && a.client.log != nil {
 				a.client.log.Error("failed to refresh library", "error", result.err)
 			}
-			return
+		} else {
+			a.refreshError = nil
+			a.applyRefreshResult(result.snapshot)
 		}
 
-		a.refreshError = nil
-		a.applyRefreshResult(result.snapshot)
+		pending := a.refreshPending
+		a.refreshPending = false
+		if pending {
+			a.startRefresh()
+		}
 	default:
 	}
 }
 
+func (a *App) libraryChanged() {
+	if a.client != nil && a.client.log != nil {
+		a.client.log.Info("SSE: library changed, triggering refresh")
+	}
+	if a.refreshing {
+		a.refreshPending = true
+		return
+	}
+	a.startRefresh()
+}
+
 func (a *App) applyRefreshResult(snapshot LibrarySnapshot) {
 	sel := a.captureSelection()
+	a.dateAddedSnapshot = nil
 	if a.browse.library.mode == ListingModeDateAdded {
 		snapshot = a.snapshotForMode(a.browse.library.mode)
 	}

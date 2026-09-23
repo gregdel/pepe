@@ -1,6 +1,7 @@
 package app
 
 import (
+	"container/list"
 	_ "image/jpeg"
 	_ "image/png"
 )
@@ -20,19 +21,27 @@ type cacheRequest[T any] struct {
 
 // asyncCache is a generic on-demand cache with async fetching.
 // Keys are caller-defined strings (e.g. "thumb:tt0133093", "fanart:tt0133093").
-// A zero-value T in the cache with resolved[key]==true is a permanent-failure
-// sentinel — no retry.
+// A zero-value T stored in the cache is a permanent-failure sentinel — no retry.
+type cacheWeightEntry struct {
+	key    string
+	weight int64
+}
+
 type asyncCache[T any] struct {
-	cache      map[string]T
-	resolved   map[string]bool
-	loading    map[string]uint64
-	pending    []cacheRequest[T]
-	active     int
-	maxActive  int
-	maxPending int
-	generation uint64
-	done       chan cacheResult[T]
-	onDone     func()
+	cache       map[string]T
+	loading     map[string]uint64
+	pending     []cacheRequest[T]
+	active      int
+	maxActive   int
+	maxPending  int
+	generation  uint64
+	done        chan cacheResult[T]
+	onDone      func()
+	weight      func(T) int64
+	maxWeight   int64
+	cacheWeight int64
+	lru         *list.List
+	lruEntries  map[string]*list.Element
 }
 
 func newAsyncCache[T any](maxActive, maxPending int) *asyncCache[T] {
@@ -44,7 +53,6 @@ func newAsyncCache[T any](maxActive, maxPending int) *asyncCache[T] {
 	}
 	return &asyncCache[T]{
 		cache:      make(map[string]T),
-		resolved:   make(map[string]bool),
 		loading:    make(map[string]uint64),
 		maxActive:  maxActive,
 		maxPending: maxPending,
@@ -52,33 +60,46 @@ func newAsyncCache[T any](maxActive, maxPending int) *asyncCache[T] {
 	}
 }
 
+func newWeightedAsyncCache[T any](maxActive, maxPending int, maxWeight int64, weight func(T) int64) *asyncCache[T] {
+	cache := newAsyncCache[T](maxActive, maxPending)
+	cache.weight = weight
+	cache.maxWeight = maxWeight
+	cache.lru = list.New()
+	cache.lruEntries = make(map[string]*list.Element)
+	return cache
+}
+
 // reset discards cached and queued entries. In-flight requests are allowed to
 // finish, but their results are ignored by the new generation.
 func (c *asyncCache[T]) reset() {
 	c.generation++
 	c.cache = make(map[string]T)
-	c.resolved = make(map[string]bool)
 	c.loading = make(map[string]uint64)
 	c.pending = nil
+	c.cacheWeight = 0
+	if c.lru != nil {
+		c.lru.Init()
+		c.lruEntries = make(map[string]*list.Element)
+	}
 }
 
 // get returns (val, true) if key has been resolved.
 // val may be zero/nil if the fetch failed permanently.
 func (c *asyncCache[T]) get(key string) (T, bool) {
-	val, ok := c.resolved[key]
-	if !ok {
-		var zero T
-		return zero, false
+	val, ok := c.cache[key]
+	if ok && c.lru != nil {
+		if entry := c.lruEntries[key]; entry != nil {
+			c.lru.MoveToFront(entry)
+		}
 	}
-	_ = val
-	return c.cache[key], true
+	return val, ok
 }
 
 // fetch triggers an async load for key if it is not already cached or queued.
 // Fetches run in goroutines and are limited by maxActive. Recent requests are
 // preferred when the pending queue is full.
 func (c *asyncCache[T]) fetch(key string, fetchFn func() (T, error)) {
-	if c.resolved[key] {
+	if _, ok := c.cache[key]; ok {
 		return // already resolved (success or permanent failure)
 	}
 	if _, ok := c.loading[key]; ok {
@@ -134,6 +155,40 @@ func (c *asyncCache[T]) startPending() {
 	}
 }
 
+func (c *asyncCache[T]) store(key string, value T) {
+	c.cache[key] = value
+	if c.weight == nil || c.maxWeight <= 0 {
+		return
+	}
+	weight := c.weight(value)
+	if weight <= 0 {
+		return
+	}
+	if weight > c.maxWeight {
+		delete(c.cache, key)
+		return
+	}
+	if old := c.lruEntries[key]; old != nil {
+		entry := old.Value.(cacheWeightEntry)
+		c.cacheWeight -= entry.weight
+		c.lru.Remove(old)
+	}
+	entry := c.lru.PushFront(cacheWeightEntry{key: key, weight: weight})
+	c.lruEntries[key] = entry
+	c.cacheWeight += weight
+	for c.cacheWeight > c.maxWeight {
+		oldest := c.lru.Back()
+		if oldest == nil {
+			break
+		}
+		old := oldest.Value.(cacheWeightEntry)
+		delete(c.cache, old.key)
+		delete(c.lruEntries, old.key)
+		c.cacheWeight -= old.weight
+		c.lru.Remove(oldest)
+	}
+}
+
 // drain reads all pending results from done without blocking. It also starts
 // queued work as active slots become available.
 func (c *asyncCache[T]) drain() {
@@ -143,8 +198,7 @@ func (c *asyncCache[T]) drain() {
 			c.active--
 			if res.generation == c.generation && c.loading[res.key] == res.generation {
 				delete(c.loading, res.key)
-				c.cache[res.key] = res.val
-				c.resolved[res.key] = true
+				c.store(res.key, res.val)
 			}
 			c.startPending()
 		default:

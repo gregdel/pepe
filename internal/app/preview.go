@@ -8,7 +8,6 @@ import (
 	"gioui.org/font"
 	"gioui.org/layout"
 	"gioui.org/unit"
-	"github.com/odwrtw/polochon/lib/papi"
 )
 
 // ── Preview panel (right side of the browse screen) ───────────────────────────
@@ -126,11 +125,9 @@ func (a *App) previewTerminal(gtx C, media *MediaItem) D {
 }
 
 // previewShell draws fanart + scrim behind bottom-left anchored content.
-func (a *App) previewShell(gtx C, fanartKey string, fanartFn func() (image.Image, error), content layout.Widget) D {
+func (a *App) previewShell(gtx C, fanart layout.Widget, content layout.Widget) D {
 	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(func(gtx C) D {
-			return a.fanart(gtx, fanartKey, fanartFn)
-		}),
+		layout.Expanded(fanart),
 		layout.Expanded(func(gtx C) D {
 			scrim(gtx)
 			return D{Size: gtx.Constraints.Max}
@@ -154,36 +151,12 @@ func (a *App) previewMovie(gtx C, media *MediaItem) D {
 	movieID := movie.ImdbID
 	id := media.ID
 
-	return a.previewShell(gtx, "fanart:"+movieID, func() (image.Image, error) {
-		return a.client.fetchMovieImage(movieID, func(m *papi.Movie) *papi.File { return m.FanartFile })
+	return a.previewShell(gtx, func(gtx C) D {
+		return a.movieFanart(gtx, movieID)
 	}, func(gtx C) D {
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(gtx,
-			layout.Rigid(func(gtx C) D {
-				return a.posterImage(gtx, "thumb:"+id, func() (image.Image, error) {
-					return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.ThumbFile })
-				}, unit.Dp(140), radiusPoster)
-			}),
-			layout.Rigid(layout.Spacer{Width: dp24}.Layout),
-			layout.Flexed(1, func(gtx C) D {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(func(gtx C) D {
-						return a.body(gtx, spTitle, media.Title, colorFg, 2)
-					}),
-					layout.Rigid(layout.Spacer{Height: dp8}.Layout),
-					layout.Rigid(func(gtx C) D {
-						meta := buildMetaLine(movie.Year, movie.Runtime, movie.Genres)
-						if meta == "" {
-							return D{}
-						}
-						return a.label(gtx, spMeta, meta, colorSubtle, 0)
-					}),
-					layout.Rigid(layout.Spacer{Height: dp16}.Layout),
-					layout.Rigid(func(gtx C) D {
-						return a.hintItem(gtx, hint{key: "→", label: "for details"})
-					}),
-				)
-			}),
-		)
+		return a.previewMediaContent(gtx, media, buildMetaLine(movie.Year, movie.Runtime, movie.Genres), func(gtx C) D {
+			return a.movieThumb(gtx, id, unit.Dp(140), radiusPoster)
+		})
 	})
 }
 
@@ -194,42 +167,37 @@ func (a *App) previewShow(gtx C, media *MediaItem) D {
 	}
 	showID := show.ImdbID
 
-	seasonCount := len(show.Seasons)
-	episodeCount := 0
-	for _, s := range show.Seasons {
-		episodeCount += len(s.Episodes)
-	}
-
-	return a.previewShell(gtx, "fanart:"+showID, func() (image.Image, error) {
-		return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.FanartFile })
+	return a.previewShell(gtx, func(gtx C) D {
+		return a.showFanart(gtx, showID)
 	}, func(gtx C) D {
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(gtx,
-			layout.Rigid(func(gtx C) D {
-				return a.posterImage(gtx, "poster:"+showID, func() (image.Image, error) {
-					return a.client.fetchShowImage(showID, func(s *papi.Show) *papi.File { return s.PosterFile })
-				}, unit.Dp(140), radiusPoster)
-			}),
-			layout.Rigid(layout.Spacer{Width: dp24}.Layout),
-			layout.Flexed(1, func(gtx C) D {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(func(gtx C) D {
-						return a.body(gtx, spTitle, media.Title, colorFg, 2)
-					}),
-					layout.Rigid(layout.Spacer{Height: dp8}.Layout),
-					layout.Rigid(func(gtx C) D {
-						meta := buildShowMetaLine(show.Year, float64(show.Rating))
-						if meta != "" {
-							meta += "  ·  "
-						}
-						meta += fmt.Sprintf("%d seasons · %d episodes", seasonCount, episodeCount)
-						return a.label(gtx, spMeta, meta, colorSubtle, 0)
-					}),
-					layout.Rigid(layout.Spacer{Height: dp16}.Layout),
-					layout.Rigid(func(gtx C) D {
-						return a.hintItem(gtx, hint{key: "→", label: "for details"})
-					}),
-				)
-			}),
-		)
+		return a.previewMediaContent(gtx, media, buildShowSummary(show), func(gtx C) D {
+			return a.showPoster(gtx, showID, unit.Dp(140), radiusPoster)
+		})
 	})
+}
+
+// previewMediaContent lays out the shared poster, title, metadata, and hint.
+func (a *App) previewMediaContent(gtx C, media *MediaItem, meta string, poster layout.Widget) D {
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(gtx,
+		layout.Rigid(poster),
+		layout.Rigid(layout.Spacer{Width: dp24}.Layout),
+		layout.Flexed(1, func(gtx C) D {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx C) D {
+					return a.body(gtx, spTitle, media.Title, colorFg, 2)
+				}),
+				layout.Rigid(layout.Spacer{Height: dp8}.Layout),
+				layout.Rigid(func(gtx C) D {
+					if meta == "" {
+						return D{}
+					}
+					return a.label(gtx, spMeta, meta, colorSubtle, 0)
+				}),
+				layout.Rigid(layout.Spacer{Height: dp16}.Layout),
+				layout.Rigid(func(gtx C) D {
+					return a.hintItem(gtx, hint{key: "→", label: "for details"})
+				}),
+			)
+		}),
+	)
 }

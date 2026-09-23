@@ -29,7 +29,7 @@ fullscreen: false
 player_fullscreen: true
 ```
 
-`POLOCHON_URL` and `POLOCHON_TOKEN` override values in the file. `POLOCHON_MPV` overrides `mpv_path`. For example:
+`POLOCHON_URL` and `POLOCHON_TOKEN` override values in the file. `POLOCHON_MPV` overrides `mpv_path`. Keep the token-bearing config readable only by your user (for example, `chmod 600 ~/.config/pepe/config.yaml`); playback passes the token to mpv through a private temporary config file, not its process arguments. For example:
 
 ```sh
 POLOCHON_URL=https://polochon.example \

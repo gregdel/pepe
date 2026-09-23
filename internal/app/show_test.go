@@ -23,6 +23,20 @@ func TestEpisodeDisplayParts(t *testing.T) {
 	}
 }
 
+func TestBuildShowSummary(t *testing.T) {
+	show := testShow("tt001", "Show", 2001)
+	show.Rating = 8.3
+	show.Seasons = map[int]*papi.Season{1: {Episodes: map[int]*papi.Episode{1: testEpisode(time.Time{})}}}
+	if got, want := buildShowSummary(show), "2001  ·  8.3  ·  1 seasons · 1 episodes"; got != want {
+		t.Fatalf("buildShowSummary() = %q, want %q", got, want)
+	}
+
+	show.Year, show.Rating, show.Seasons = 0, 0, nil
+	if got, want := buildShowSummary(show), "0 seasons · 0 episodes"; got != want {
+		t.Fatalf("buildShowSummary() without metadata = %q, want %q", got, want)
+	}
+}
+
 func TestBuildEpisodeMetaLine(t *testing.T) {
 	ep := &papi.Episode{ShowEpisode: &polochon.ShowEpisode{
 		Aired:     "2018-02-26",

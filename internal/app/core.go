@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"image"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	polochon "github.com/odwrtw/polochon/lib"
 	"github.com/odwrtw/polochon/lib/papi"
@@ -32,22 +34,27 @@ const (
 
 // APIClient wraps the papi client with caching
 type APIClient struct {
-	client *papi.Client
-	token  string
+	client        *papi.Client
+	token         string
+	artworkClient *http.Client
 
-	mu           sync.RWMutex
-	movies       map[string]*papi.Movie
-	shows        map[string]*papi.Show
-	movieItems   []*listingItem
-	showItems    []*listingItem
-	movieRadix   *RadixTree
-	showRadix    *RadixTree
-	titleToMedia map[string]*MediaItem
-	movieCount   int
-	showCount    int
+	mu         sync.RWMutex
+	movies     map[string]*papi.Movie
+	shows      map[string]*papi.Show
+	movieItems []*listingItem
+	showItems  []*listingItem
+	snapshot   LibrarySnapshot
 
 	log *slog.Logger
 }
+
+const (
+	apiRequestTimeout     = 15 * time.Second
+	artworkRequestTimeout = 15 * time.Second
+	artworkPayloadLimit   = 16 << 20
+	artworkMaxDimension   = 8192
+	artworkMaxPixelCount  = 16_777_216
+)
 
 type LibrarySnapshot struct {
 	movieRadix   *RadixTree
@@ -64,20 +71,30 @@ func NewAPIClient(endpoint, token string, log *slog.Logger) (*APIClient, error) 
 	}
 
 	papiClient.SetToken(token)
+	papiClient.SetTimeout(apiRequestTimeout)
 
 	if log == nil {
 		log = slog.Default()
 	}
 	c := &APIClient{
-		client:       papiClient,
-		token:        token,
-		movies:       make(map[string]*papi.Movie),
-		shows:        make(map[string]*papi.Show),
-		titleToMedia: make(map[string]*MediaItem),
-		log:          log,
+		client:        papiClient,
+		token:         token,
+		artworkClient: &http.Client{Timeout: artworkRequestTimeout},
+		movies:        make(map[string]*papi.Movie),
+		shows:         make(map[string]*papi.Show),
+		snapshot:      emptyLibrarySnapshot(),
+		log:           log,
 	}
 
 	return c, nil
+}
+
+func emptyLibrarySnapshot() LibrarySnapshot {
+	return LibrarySnapshot{
+		movieRadix:   NewRadixTree(nil),
+		showRadix:    NewRadixTree(nil),
+		titleToMedia: make(map[string]*MediaItem),
+	}
 }
 
 // NewEmptyAPIClient creates an empty, non-networked client for headless UI
@@ -88,10 +105,11 @@ func NewEmptyAPIClient(log *slog.Logger) *APIClient {
 		log = slog.Default()
 	}
 	return &APIClient{
-		movies:       make(map[string]*papi.Movie),
-		shows:        make(map[string]*papi.Show),
-		titleToMedia: make(map[string]*MediaItem),
-		log:          log,
+		artworkClient: &http.Client{Timeout: artworkRequestTimeout},
+		movies:        make(map[string]*papi.Movie),
+		shows:         make(map[string]*papi.Show),
+		snapshot:      emptyLibrarySnapshot(),
+		log:           log,
 	}
 }
 
@@ -110,6 +128,9 @@ func stripThePrefix(title string) (string, bool) {
 }
 
 func (c *APIClient) FetchLibrary() error {
+	if c.client == nil {
+		return fmt.Errorf("library API client is not configured")
+	}
 	c.log.Info("fetching library from API")
 
 	movieCollection, err := c.client.GetMovies()
@@ -155,29 +176,19 @@ func (c *APIClient) publishLibrary(movies map[string]*papi.Movie, shows map[stri
 	c.shows = shows
 	c.movieItems = movieItems
 	c.showItems = showItems
-	c.movieRadix = snapshot.movieRadix
-	c.showRadix = snapshot.showRadix
-	c.titleToMedia = snapshot.titleToMedia
-	c.movieCount = snapshot.movieCount
-	c.showCount = snapshot.showCount
+	c.snapshot = snapshot
 }
 
 func (c *APIClient) getSnapshot() LibrarySnapshot {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	titleToMedia := make(map[string]*MediaItem, len(c.titleToMedia))
-	for key, value := range c.titleToMedia {
-		titleToMedia[key] = value
+	snapshot := c.snapshot
+	snapshot.titleToMedia = make(map[string]*MediaItem, len(c.snapshot.titleToMedia))
+	for key, value := range c.snapshot.titleToMedia {
+		snapshot.titleToMedia[key] = value
 	}
-
-	return LibrarySnapshot{
-		movieRadix:   c.movieRadix,
-		showRadix:    c.showRadix,
-		titleToMedia: titleToMedia,
-		movieCount:   c.movieCount,
-		showCount:    c.showCount,
-	}
+	return snapshot
 }
 
 func (c *APIClient) snapshotFor(builder listingBuilder) LibrarySnapshot {
@@ -185,14 +196,9 @@ func (c *APIClient) snapshotFor(builder listingBuilder) LibrarySnapshot {
 	c.mu.RLock()
 	movieItems := append([]*listingItem(nil), c.movieItems...)
 	showItems := append([]*listingItem(nil), c.showItems...)
-	movieCount := c.movieCount
-	showCount := c.showCount
 	c.mu.RUnlock()
 
-	snapshot := buildLibrarySnapshot(builder, movieItems, showItems)
-	snapshot.movieCount = movieCount
-	snapshot.showCount = showCount
-	return snapshot
+	return buildLibrarySnapshot(builder, movieItems, showItems)
 }
 
 func (c *APIClient) getDownloadURL(target papi.Downloadable) (string, error) {
@@ -258,7 +264,25 @@ func (c *APIClient) fetchImageFile(f papi.Downloadable) (image.Image, error) {
 		return nil, fmt.Errorf("image fetch: %w", err)
 	}
 	defer func() { _ = body.Close() }()
-	img, _, err := image.Decode(body)
+	return decodeArtwork(body)
+}
+
+func decodeArtwork(body io.Reader) (image.Image, error) {
+	payload, err := io.ReadAll(io.LimitReader(body, artworkPayloadLimit+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(payload) > artworkPayloadLimit {
+		return nil, fmt.Errorf("artwork payload exceeds %d bytes", artworkPayloadLimit)
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	if config.Width < 1 || config.Height < 1 || config.Width > artworkMaxDimension || config.Height > artworkMaxDimension || int64(config.Width)*int64(config.Height) > artworkMaxPixelCount {
+		return nil, fmt.Errorf("artwork dimensions %dx%d exceed the limit", config.Width, config.Height)
+	}
+	img, _, err := image.Decode(bytes.NewReader(payload))
 	return img, err
 }
 
@@ -279,7 +303,11 @@ func (c *APIClient) fetchAuthenticatedURL(rawURL string) (io.ReadCloser, error) 
 	}
 	req.Header.Set("X-Auth-Token", c.getToken())
 
-	resp, err := http.DefaultClient.Do(req)
+	client := c.artworkClient
+	if client == nil {
+		client = &http.Client{Timeout: artworkRequestTimeout}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -12,7 +12,6 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
-	"github.com/odwrtw/polochon/lib/papi"
 	"golang.org/x/exp/shiny/materialdesign/icons"
 )
 
@@ -95,7 +94,7 @@ func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
 	}
 
 	return a.clickableLayout(gtx, "mode:"+listingModeLabel(mode), listingModeLabel(mode), func(gtx C) D {
-		return a.modeRowShell(gtx, active, focused, func(gtx C) D {
+		return a.rowShell(gtx, focused, active, unit.Dp(64), func(gtx C) D {
 			iconColor := colorSubtle
 			if active {
 				iconColor = colorPrimary
@@ -113,26 +112,6 @@ func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
 	}, func() {
 		a.browse.focus = browseFocusModeRail
 		a.applyListingMode(mode)
-	})
-}
-
-func (a *App) modeRowShell(gtx C, active, focused bool, content layout.Widget) D {
-	return layout.Inset{Left: dp8, Right: dp8, Top: dp2, Bottom: dp2}.Layout(gtx, func(gtx C) D {
-		gtx.Constraints.Min.X = gtx.Constraints.Max.X
-		if h := gtx.Dp(unit.Dp(64)); gtx.Constraints.Min.Y < h {
-			gtx.Constraints.Min.Y = h
-		}
-		macro := op.Record(gtx.Ops)
-		dims := layout.Inset{Left: dp12, Right: dp12, Top: dp6, Bottom: dp6}.Layout(gtx, content)
-		call := macro.Stop()
-		if focused {
-			fillRounded(gtx, dims.Size, radiusRow, colorSelectBg)
-		} else if active {
-			fillRounded(gtx, dims.Size, radiusRow, colorSurface2)
-			strokeRounded(gtx, dims.Size, radiusRow, colorPrimary)
-		}
-		call.Add(gtx.Ops)
-		return dims
 	})
 }
 
@@ -275,7 +254,7 @@ func (a *App) layoutNavList(gtx C) D {
 		if currentPath != "" {
 			label = currentPath + node.Label
 		}
-		return a.clickableLayout(gtx, "nav:"+node.FullString, label, func(gtx C) D {
+		return a.clickableLayout(gtx, fmt.Sprintf("nav:%p", node), label, func(gtx C) D {
 			if node.IsTerminal && node.SubtreeCount == 1 {
 				return a.terminalRow(gtx, node, currentPath, selected)
 			}
@@ -288,8 +267,8 @@ func (a *App) layoutNavList(gtx C) D {
 	})
 }
 
-// navRowShell draws the selection pill behind a row's content.
-func (a *App) navRowShell(gtx C, selected bool, minHeight unit.Dp, content layout.Widget) D {
+// rowShell lays out a selectable row and its optional active-mode outline.
+func (a *App) rowShell(gtx C, selected, active bool, minHeight unit.Dp, content layout.Widget) D {
 	return layout.Inset{Left: dp8, Right: dp8, Top: dp2, Bottom: dp2}.Layout(gtx, func(gtx C) D {
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		if h := gtx.Dp(minHeight); gtx.Constraints.Min.Y < h {
@@ -300,6 +279,9 @@ func (a *App) navRowShell(gtx C, selected bool, minHeight unit.Dp, content layou
 		call := macro.Stop()
 		if selected {
 			fillRounded(gtx, dims.Size, radiusRow, colorSelectBg)
+		} else if active {
+			fillRounded(gtx, dims.Size, radiusRow, colorSurface2)
+			strokeRounded(gtx, dims.Size, radiusRow, colorPrimary)
 		}
 		call.Add(gtx.Ops)
 		return dims
@@ -308,7 +290,7 @@ func (a *App) navRowShell(gtx C, selected bool, minHeight unit.Dp, content layou
 
 // groupRow renders a radix prefix group: two-tone label + count pill.
 func (a *App) groupRow(gtx C, prefix, label string, count int, selected bool) D {
-	return a.navRowShell(gtx, selected, 0, func(gtx C) D {
+	return a.rowShell(gtx, selected, false, 0, func(gtx C) D {
 		fg := colorFg
 		prefixCol := colorPrimary
 		if selected {
@@ -337,7 +319,7 @@ func (a *App) terminalRow(gtx C, node *RadixNode, currentPath string, selected b
 	const thumbW = unit.Dp(44)
 	fullString := node.FullString
 
-	return a.navRowShell(gtx, selected, thumbW*3/2, func(gtx C) D {
+	return a.rowShell(gtx, selected, false, thumbW*3/2, func(gtx C) D {
 		titleCol := colorTerminal
 		subCol := colorMuted
 		if selected {
@@ -384,15 +366,9 @@ func (a *App) terminalRow(gtx C, node *RadixNode, currentPath string, selected b
 func (a *App) rowPoster(gtx C, media *MediaItem) D {
 	const thumbW = unit.Dp(44)
 	if media.Type == mediaKindShow {
-		id := media.ID
-		return a.posterImage(gtx, "poster:"+id, func() (image.Image, error) {
-			return a.client.fetchShowImage(id, func(s *papi.Show) *papi.File { return s.PosterFile })
-		}, thumbW, radiusThumb)
+		return a.showPoster(gtx, media.ID, thumbW, radiusThumb)
 	}
-	id := media.ID
-	return a.posterImage(gtx, "thumb:"+id, func() (image.Image, error) {
-		return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.ThumbFile })
-	}, thumbW, radiusThumb)
+	return a.movieThumb(gtx, media.ID, thumbW, radiusThumb)
 }
 
 // rowQuality returns the right-aligned quality label for a movie row.
