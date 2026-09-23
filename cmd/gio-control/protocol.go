@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/gregdel/pepe/internal/driver"
@@ -144,7 +145,14 @@ func dispatch(req request, drv *driver.Driver, repoRoot string, shotNumber *uint
 		return map[string]any{"width": p.Width, "height": p.Height, "frame": drv.FrameNumber()}, false, nil
 	case "screenshot":
 		(*shotNumber)++
-		path := filepath.Join(repoRoot, ".pi", "tmp", "screenshots", fmt.Sprintf("frame-%06d.png", *shotNumber))
+		screenshotDir := os.Getenv("GIO_CONTROL_SCREENSHOT_DIR")
+		if screenshotDir == "" {
+			screenshotDir = filepath.Join(".pi", "tmp", "screenshots")
+		}
+		if !filepath.IsAbs(screenshotDir) {
+			screenshotDir = filepath.Join(repoRoot, screenshotDir)
+		}
+		path := filepath.Join(screenshotDir, fmt.Sprintf("frame-%06d.png", *shotNumber))
 		if err := drv.Screenshot(path); err != nil {
 			return nil, false, err
 		}

@@ -44,3 +44,7 @@ Useful flags:
 - `-fullscreen` — start the app and player fullscreen
 - `-windowed` — start the app windowed
 - `-mpv PATH` — mpv executable
+
+## Pi UI review
+
+The project-local `.pi/extensions/ui-review.ts` delegates headless Gio UI checks to a separate, read-only Pi agent. After `/reload` in an existing Pi session, use `/ui-review-model` to select an authenticated image-capable model (or `/ui-review-model provider/model-id`); the choice persists in the current session and does **not** change the main agent's model. Then ask the main agent to run `ui_review` after its changes, specifying screens, interactions, and expected behavior. The reviewer has only Gio UI tools and reports screenshots under `.pi/tmp/screenshots/ui-review-*/`; aborting the tool stops the reviewer. Configure `GIO_CONTROL_CONFIG` or `POLOCHON_URL`/`POLOCHON_TOKEN` for catalog-dependent checks. Without them, only the empty-catalog UI can be verified.
