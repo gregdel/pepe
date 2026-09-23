@@ -8,7 +8,7 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/gregdel/polochon-gio/internal/driver"
+	"github.com/gregdel/pepe/internal/driver"
 )
 
 type request struct {

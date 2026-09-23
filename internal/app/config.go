@@ -29,9 +29,9 @@ type fileConfig struct {
 
 func DefaultConfigPath() string {
 	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
-		return filepath.Join(dir, "polochon-gio", "config.yaml")
+		return filepath.Join(dir, "pepe", "config.yaml")
 	}
-	return filepath.Join(".", "polochon-gio.yaml")
+	return filepath.Join(".", "pepe.yaml")
 }
 
 func LoadConfig(path string) (*Config, error) {

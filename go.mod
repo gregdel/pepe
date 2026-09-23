@@ -1,4 +1,4 @@
-module github.com/gregdel/polochon-gio
+module github.com/gregdel/pepe
 
 go 1.26.1
 

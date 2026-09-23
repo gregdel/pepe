@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gregdel/polochon-gio/internal/driver"
+	"github.com/gregdel/pepe/internal/driver"
 	polochon "github.com/odwrtw/polochon/lib"
 	"github.com/odwrtw/polochon/lib/papi"
 )

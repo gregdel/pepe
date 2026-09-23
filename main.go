@@ -10,7 +10,7 @@ import (
 
 	gioapp "gioui.org/app"
 	"gioui.org/unit"
-	"github.com/gregdel/polochon-gio/internal/app"
+	"github.com/gregdel/pepe/internal/app"
 )
 
 func main() {
@@ -49,7 +49,7 @@ func main() {
 		defer func() { _ = logFile.Close() }()
 	}
 
-	log := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{})).With("app", "polochon-gio")
+	log := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{})).With("app", "pepe")
 	apiClient, err := app.NewAPIClient(config.PolochonURL, config.Token, log)
 	if err != nil {
 		log.Error("failed to create API client", "error", err)
@@ -66,7 +66,7 @@ func main() {
 
 	go func() {
 		w := new(gioapp.Window)
-		w.Option(gioapp.Title("Polochon"), gioapp.Size(unit.Dp(1200), unit.Dp(700)))
+		w.Option(gioapp.Title("Pépé"), gioapp.Size(unit.Dp(1200), unit.Dp(700)))
 		if config.Fullscreen {
 			w.Option(gioapp.Decorated(false), gioapp.Fullscreen.Option())
 		}
@@ -83,13 +83,13 @@ func defaultLogFilePath() string {
 	if base == "" {
 		home, err := os.UserHomeDir()
 		if err != nil || home == "" {
-			return "polochon-gio.log"
+			return "pepe.log"
 		}
 		base = filepath.Join(home, ".local", "state")
 	}
-	dir := filepath.Join(base, "polochon-gio")
+	dir := filepath.Join(base, "pepe")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "polochon-gio.log"
+		return "pepe.log"
 	}
-	return filepath.Join(dir, "polochon-gio.log")
+	return filepath.Join(dir, "pepe.log")
 }

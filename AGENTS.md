@@ -77,10 +77,10 @@
 
 ## Runtime Configuration
 
-- The default config is `$XDG_CONFIG_HOME/polochon-gio/config.yaml`, or the platform equivalent from `os.UserConfigDir()`.
+- The default config is `$XDG_CONFIG_HOME/pepe/config.yaml`, or the platform equivalent from `os.UserConfigDir()`.
 - YAML requires `polochon_url` and `polochon_token`; `POLOCHON_URL` and `POLOCHON_TOKEN` override file values.
 - `mpv_path`, `fullscreen`, and `player_fullscreen` are supported; `POLOCHON_MPV` and the `-mpv` flag override the mpv executable.
-- Useful flags are `-config`, `-logFile`, `-fullscreen`, and `-windowed`. The default log is under `$XDG_STATE_HOME/polochon-gio/` when available.
+- Useful flags are `-config`, `-logFile`, `-fullscreen`, and `-windowed`. The default log is under `$XDG_STATE_HOME/pepe/` when available.
 
 ## Headless Gio/Pi UI Navigation Patterns
 
@@ -124,4 +124,4 @@ gio_screenshot         # capture the detail screen
 ## Steam Deck Packaging
 
 - `scripts/build-steamdeck-dist.sh` builds the binary into ignored `dist/` and assembles the launcher bundle; mpv must exist on the target or be configured with `mpv_path`.
-- The packaging script currently refers to missing `packaging/steamdeck/config.example.json`; the actual example and documented format are `config.example.yaml`. Verify or fix this mismatch before relying on the bundle.
+- The Steam Deck bundle uses `packaging/steamdeck/config.example.yaml` and emits a `pepe` executable with `run-pepe.sh` and `pepe.desktop`.

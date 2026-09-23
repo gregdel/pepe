@@ -35,7 +35,7 @@ require_command sha256sum
 mkdir -p "$FONT_DIR"
 rm -f "$FONT_DIR/font.ttf" # Remove the legacy generated Fira Code asset.
 
-font_tmp="${TMPDIR:-/tmp}/polochon-gio-font.$$.ttf"
+font_tmp="${TMPDIR:-/tmp}/pepe-font.$$.ttf"
 trap 'rm -f "$font_tmp"' EXIT HUP INT TERM
 
 fetch_font() {

@@ -9,8 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/gregdel/polochon-gio/internal/app"
-	"github.com/gregdel/polochon-gio/internal/driver"
+	"github.com/gregdel/pepe/internal/app"
+	"github.com/gregdel/pepe/internal/driver"
 )
 
 const (
