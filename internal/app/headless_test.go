@@ -134,8 +134,8 @@ func TestHeadlessHomeSemanticTree(t *testing.T) {
 			t.Errorf("semantic tree does not contain %q", label)
 		}
 	}
-	if !headlessHasClass(tree, "editor") {
-		t.Error("semantic tree does not contain the search editor")
+	if headlessHasClass(tree, "editor") {
+		t.Error("semantic tree unexpectedly contains a text editor")
 	}
 	if f.app.browse.focus != browseFocusContent || !f.app.browse.nav.isAtRoot() || f.app.browse.nav.cursor != int(SectionMovies) {
 		t.Fatalf("initial browse state = (focus=%v, root=%t, cursor=%d)", f.app.browse.focus, f.app.browse.nav.isAtRoot(), f.app.browse.nav.cursor)
@@ -227,15 +227,9 @@ func TestHeadlessShowSeasonAndEpisodeNavigation(t *testing.T) {
 	}
 }
 
-func TestHeadlessEditorInput(t *testing.T) {
+func TestHeadlessBrowseDoesNotExposeTextEditor(t *testing.T) {
 	f := newHeadlessFixture(t)
-	if err := f.driver.Type("fixture query"); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.app.searchEditor.Text(); got != "fixture query" {
-		t.Fatalf("search text = %q, want fixture query", got)
-	}
-	if !headlessHasClass(f.driver.Tree(), "editor") {
-		t.Fatal("editor disappeared after text input")
+	if headlessHasClass(f.driver.Tree(), "editor") {
+		t.Fatal("browse UI unexpectedly contains a text editor")
 	}
 }

@@ -7,7 +7,6 @@ import (
 
 	gioapp "gioui.org/app"
 	"gioui.org/io/event"
-	"gioui.org/io/key"
 	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -110,14 +109,11 @@ type App struct {
 	detailList      layout.List
 
 	// key input tag — a stable pointer used as event.Tag
-	keyTag       *bool
-	searchEditor widget.Editor
-	searchText   string
+	keyTag *bool
 
-	invalidate   func()
-	closeWindow  func()
-	requestFocus bool
-	th           *material.Theme
+	invalidate  func()
+	closeWindow func()
+	th          *material.Theme
 }
 
 type libraryView struct {
@@ -232,7 +228,6 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 	th := newAppTheme()
 
 	keyTag := new(bool)
-	searchEditor := widget.Editor{SingleLine: true, InputHint: key.HintText}
 	mpvPath := "mpv"
 	playerFullscreen := false
 	if config != nil {
@@ -250,10 +245,8 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		playerFullscreen: playerFullscreen,
 		resumePos:        make(map[string]float64),
 		keyTag:           keyTag,
-		searchEditor:     searchEditor,
 		invalidate:       invalidate,
 		closeWindow:      closeWindow,
-		requestFocus:     true,
 		clickables:       make(map[string]*widget.Clickable),
 		th:               th,
 		leftList:         layout.List{Axis: layout.Vertical},
@@ -354,13 +347,6 @@ func (a *App) Layout(gtx C) D {
 	paint.Fill(gtx.Ops, colorBg)
 	area := clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops)
 	event.Op(gtx.Ops, a.keyTag)
-	if a.requestFocus {
-		// Register the editor tag before issuing the initial focus command; the
-		// editor itself is laid out later in the header.
-		event.Op(gtx.Ops, &a.searchEditor)
-		gtx.Execute(key.FocusCmd{Tag: &a.searchEditor})
-		a.requestFocus = false
-	}
 	a.handleKeys(gtx)
 	area.Pop()
 

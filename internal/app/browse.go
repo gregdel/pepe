@@ -12,7 +12,6 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
-	"gioui.org/widget/material"
 	"github.com/odwrtw/polochon/lib/papi"
 	"golang.org/x/exp/shiny/materialdesign/icons"
 )
@@ -154,9 +153,9 @@ func (a *App) layoutHeader(gtx C) D {
 				return D{Size: size}
 			}),
 			layout.Rigid(layout.Spacer{Width: dp16}.Layout),
-			// Breadcrumb / radix query
+			// Current section.
 			layout.Rigid(func(gtx C) D {
-				return a.layoutBreadcrumb(gtx)
+				return a.layoutSectionLabel(gtx)
 			}),
 			layout.Flexed(1, func(gtx C) D { return D{Size: image.Pt(gtx.Constraints.Max.X, 0)} }),
 			// Status + counts
@@ -167,31 +166,15 @@ func (a *App) layoutHeader(gtx C) D {
 	})
 }
 
-// layoutBreadcrumb renders "Movies · int|" — the current radix prefix shown as
-// a search query, making the tree drill-down feel like typing.
-func (a *App) layoutBreadcrumb(gtx C) D {
+// layoutSectionLabel renders the current browse section in the header.
+func (a *App) layoutSectionLabel(gtx C) D {
 	section := "Movies"
 	if a.browse.nav.isAtRoot() {
 		section = "Home"
 	} else if a.browse.nav.section == SectionShows {
 		section = "Shows"
 	}
-	if text := a.searchEditor.Text(); text != a.searchText {
-		a.searchText = text
-	}
-
-	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(func(gtx C) D {
-			return a.label(gtx, spMeta, section, colorFg, font.Medium)
-		}),
-		layout.Rigid(layout.Spacer{Width: dp16}.Layout),
-		layout.Flexed(1, func(gtx C) D {
-			style := material.Editor(a.th, &a.searchEditor, "title search")
-			style.TextSize = spMeta
-			style.Color = colorPrimary
-			return style.Layout(gtx)
-		}),
-	)
+	return a.label(gtx, spMeta, section, colorFg, font.Medium)
 }
 
 func (a *App) layoutHeaderStatus(gtx C) D {
