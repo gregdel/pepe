@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadConfigFromFile(t *testing.T) {
@@ -86,7 +88,8 @@ func TestLoadConfigNormalizesFileValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Config{PolochonURL: "http://deck.local:8080", Token: "file-token", MPVPath: "mpv"}
+	want := *DefaultConfig()
+	want.PolochonURL, want.Token = "http://deck.local:8080", "file-token"
 	if *cfg != want {
 		t.Fatalf("config = %#v, want %#v", *cfg, want)
 	}
@@ -101,7 +104,8 @@ func TestLoadConfigMissingFileWithEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Config{PolochonURL: "http://deck.local:8080", Token: "env-token", MPVPath: "mpv"}
+	want := *DefaultConfig()
+	want.PolochonURL, want.Token = "http://deck.local:8080", "env-token"
 	if *cfg != want {
 		t.Fatalf("config = %#v, want %#v", *cfg, want)
 	}
@@ -137,6 +141,69 @@ func TestLoadConfigInvalidYAML(t *testing.T) {
 
 	if _, err := LoadConfig(path); err == nil {
 		t.Fatal("LoadConfig succeeded for invalid YAML")
+	}
+}
+
+func TestLoadConfigPlayerSettings(t *testing.T) {
+	t.Setenv("POLOCHON_URL", "http://localhost")
+	t.Setenv("POLOCHON_TOKEN", "token")
+	t.Setenv("POLOCHON_MPV", "")
+
+	for _, test := range []struct {
+		name    string
+		yaml    string
+		managed bool
+		startup time.Duration
+		stop    time.Duration
+	}{
+		{"empty", "", false, 3 * time.Second, 2 * time.Second},
+		{"comments", "# Playback defaults\n", false, 3 * time.Second, 2 * time.Second},
+		{"empty document", "---\n", false, 3 * time.Second, 2 * time.Second},
+		{"defaults", "mpv_path: mpv\n", false, 3 * time.Second, 2 * time.Second},
+		{"managed", "mpv_managed_launcher: true\nmpv_startup_timeout: 45s\nmpv_stop_timeout: 30s\n", true, 45 * time.Second, 30 * time.Second},
+		{"partial", "mpv_stop_timeout: 500ms\n", false, 3 * time.Second, 500 * time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(test.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			config, err := LoadConfig(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if config.MPVManagedLauncher != test.managed || config.MPVStartupTimeout != test.startup || config.MPVStopTimeout != test.stop {
+				t.Fatalf("playback settings = %+v", config)
+			}
+			a := New(nil, nil, config, nil, nil)
+			if a.playerPolicy.managedLauncher != test.managed || a.playerPolicy.connectTimeout != test.startup || a.playerPolicy.stopTimeout != test.stop {
+				t.Fatalf("application policy = %+v", a.playerPolicy)
+			}
+		})
+	}
+}
+
+func TestLoadConfigRejectsInvalidPlayerSettings(t *testing.T) {
+	t.Setenv("POLOCHON_URL", "http://localhost")
+	t.Setenv("POLOCHON_TOKEN", "token")
+	t.Setenv("POLOCHON_MPV", "")
+
+	for _, key := range []string{"mpv_startup_timeout", "mpv_stop_timeout"} {
+		for _, value := range []string{"0s", "-1s", "invalid", "30", "true", "[]"} {
+			t.Run(key+"/"+value, func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "config.yaml")
+				if err := os.WriteFile(path, []byte(key+": "+value+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				_, err := LoadConfig(path)
+				if err == nil {
+					t.Fatal("invalid player setting accepted")
+				}
+				if (value == "0s" || value == "-1s") && !strings.Contains(err.Error(), key) {
+					t.Fatalf("error does not identify setting: %v", err)
+				}
+			})
+		}
 	}
 }
 

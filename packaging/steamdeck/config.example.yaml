@@ -3,3 +3,6 @@ polochon_token: replace-me
 mpv_path: mpv
 fullscreen: true
 player_fullscreen: true
+mpv_managed_launcher: false
+mpv_startup_timeout: 3s
+mpv_stop_timeout: 2s

@@ -29,6 +29,9 @@ polochon_token: your-token
 mpv_path: mpv
 fullscreen: false
 player_fullscreen: true
+mpv_managed_launcher: false
+mpv_startup_timeout: 3s
+mpv_stop_timeout: 2s
 ```
 
 `POLOCHON_URL` and `POLOCHON_TOKEN` override values in the file. `POLOCHON_MPV` overrides `mpv_path`. Keep the config readable only by yourself (for example, `chmod 600 ~/.config/pepe/config.yaml`); playback passes the token to mpv through a private temporary config file, not its process arguments. For example:
@@ -39,10 +42,48 @@ POLOCHON_TOKEN=your-token \
 ./pepe
 ```
 
+Explicit playback flags override YAML settings, including `-mpv-managed-launcher=false`.
+
 Useful flags:
 
 - `-config PATH` — config file
 - `-logFile PATH` — log file (default under `$XDG_STATE_HOME/pepe/`, or `~/.local/state/pepe/`)
 - `-fullscreen` — start the app and player fullscreen
 - `-windowed` — start the app windowed
-- `-mpv PATH` — mpv executable
+- `-mpv PATH` — mpv executable or wrapper
+- `-mpv-startup-timeout DURATION` — IPC connection timeout (default `3s`)
+- `-mpv-stop-timeout DURATION` — cancellation grace period before killing the launcher (default `2s`)
+- `-mpv-managed-launcher` — require external launcher teardown confirmation (default off)
+
+## Managed launchers
+
+Ordinary mpv and foreground wrappers need no managed mode. A **managed launcher**
+controls a separate playback worker or performs recovery afterward—for example,
+restoring the display session after direct-display playback. It must explicitly
+confirm that playback has stopped and recovery is complete.
+
+```yaml
+mpv_path: /absolute/path/to/launcher
+mpv_managed_launcher: true
+mpv_startup_timeout: 45s
+mpv_stop_timeout: 30s
+```
+
+Durations must be positive. The startup timeout only bounds IPC connection attempts;
+the stop timeout is the grace period after TERM before killing the launcher.
+
+Missing or malformed confirmation retains the private runtime and blocks new
+playback. Retry after the launcher writes a valid confirmation to clear the block.
+
+### Launcher protocol
+
+- Receive `--managed-runtime=DIR` before the original mpv arguments. Forward those
+  arguments unchanged, preserving authentication includes, subtitles, resume and IPC.
+- Stay in the foreground until the worker stops and recovery finishes, including
+  after TERM.
+- Then atomically rename a private temporary file to `DIR/launcher-complete`,
+  containing exactly `stopped-and-restored\n` (a final newline), and exit with
+  the playback result.
+
+Pépé trusts this confirmation. The block is in-memory; the launcher must handle
+parent disappearance and recovery across app restarts. App-close behavior is unchanged.

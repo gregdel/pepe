@@ -98,6 +98,8 @@ type App struct {
 	playerStop       chan struct{}
 	mpvPath          string
 	playerFullscreen bool
+	playerPolicy     playerPolicy
+	playerCleanupDir string             // retained until launcher teardown is confirmed
 	playerDone       chan playerResult  // goroutine → event loop
 	resumePos        map[string]float64 // mediaKey -> last position (seconds)
 
@@ -265,6 +267,7 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		playerStatus:     PlayerStatusIdle,
 		mpvPath:          mpvPath,
 		playerFullscreen: playerFullscreen,
+		playerPolicy:     playerPolicyFromConfig(config),
 		resumePos:        make(map[string]float64),
 		keyTag:           keyTag,
 		invalidate:       invalidate,
@@ -357,6 +360,10 @@ func (a *App) drainChannels() {
 		select {
 		case result := <-a.playerDone:
 			a.applyPlaybackSnapshot(result.tracker)
+			if result.retainedRuntime != "" {
+				a.playerCleanupDir = result.retainedRuntime
+				a.pendingPlayback = nil
+			}
 			a.playerDone = nil
 			a.playerStop = nil
 			a.playerTitle = ""

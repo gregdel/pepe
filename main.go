@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	gioapp "gioui.org/app"
 	"gioui.org/unit"
@@ -20,6 +21,7 @@ func main() {
 	fullscreenFlag := flag.Bool("fullscreen", false, "start in fullscreen mode")
 	windowedFlag := flag.Bool("windowed", false, "start in windowed mode")
 	mpvPath := flag.String("mpv", "", "mpv executable path")
+	playerFlags := registerMPVFlags(flag.CommandLine)
 	flag.Parse()
 
 	config, err := app.LoadConfig(*configPath)
@@ -32,6 +34,10 @@ func main() {
 	}
 	if *mpvPath != "" {
 		config.MPVPath = *mpvPath
+	}
+	if err := playerFlags.apply(config, flag.CommandLine); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
 	}
 	if *fullscreenFlag {
 		config.Fullscreen = true
@@ -76,6 +82,35 @@ func main() {
 		os.Exit(0)
 	}()
 	gioapp.Main()
+}
+
+type mpvFlags struct {
+	managedLauncher bool
+	startupTimeout  time.Duration
+	stopTimeout     time.Duration
+}
+
+func registerMPVFlags(flags *flag.FlagSet) *mpvFlags {
+	defaults := app.DefaultConfig()
+	f := &mpvFlags{}
+	flags.BoolVar(&f.managedLauncher, "mpv-managed-launcher", defaults.MPVManagedLauncher, "require external launcher teardown confirmation")
+	flags.DurationVar(&f.startupTimeout, "mpv-startup-timeout", defaults.MPVStartupTimeout, "player IPC connection timeout")
+	flags.DurationVar(&f.stopTimeout, "mpv-stop-timeout", defaults.MPVStopTimeout, "player cancellation grace period")
+	return f
+}
+
+func (f *mpvFlags) apply(config *app.Config, flags *flag.FlagSet) error {
+	flags.Visit(func(setting *flag.Flag) {
+		switch setting.Name {
+		case "mpv-managed-launcher":
+			config.MPVManagedLauncher = f.managedLauncher
+		case "mpv-startup-timeout":
+			config.MPVStartupTimeout = f.startupTimeout
+		case "mpv-stop-timeout":
+			config.MPVStopTimeout = f.stopTimeout
+		}
+	})
+	return config.ValidatePlayer()
 }
 
 func defaultLogFilePath() string {

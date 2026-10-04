@@ -24,7 +24,7 @@ This bundle is for a personal Steam Deck install from Desktop Mode.
 
    Edit `polochon_url` and `polochon_token`. The config contains the server token, so keep it private; mpv receives it through a private temporary config file rather than its process arguments.
 
-4. Ensure `mpv` is available on the Deck, or set `mpv_path` in the config to a bundled/wrapper executable.
+4. Ensure `mpv` is available on the Deck, or set `mpv_path` in the config to a bundled/wrapper executable. Leave managed mode off for ordinary mpv; see [managed launchers](../../README.md#managed-launchers) for worker/recovery wrappers.
 
 5. In Steam Desktop Mode, add `run-pepe.sh` or `pepe.desktop` as a Non-Steam Game, then launch from Gaming Mode.
 

@@ -3,6 +3,7 @@ package app
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -21,8 +22,6 @@ import (
 const (
 	minimumResumePosition = 30.0
 	playbackTrackerWait   = 100 * time.Millisecond
-	mpvConnectAttempts    = 30
-	playerStopTimeout     = 2 * time.Second
 )
 
 type PlayerStatus string
@@ -50,8 +49,42 @@ type playerCommand struct {
 }
 
 type playerResult struct {
-	err     error
-	tracker *playbackTracker
+	err             error
+	tracker         *playbackTracker
+	retainedRuntime string
+}
+
+// Managed launchers confirm worker teardown and recovery before runtime cleanup.
+type playerPolicy struct {
+	managedLauncher bool
+	connectTimeout  time.Duration
+	stopTimeout     time.Duration
+}
+
+func playerPolicyFromConfig(config *Config) playerPolicy {
+	var policy playerPolicy
+	if config != nil {
+		policy.managedLauncher = config.MPVManagedLauncher
+		policy.connectTimeout = config.MPVStartupTimeout
+		policy.stopTimeout = config.MPVStopTimeout
+	}
+	return policy.withDefaults()
+}
+
+// withDefaults also supports apps constructed directly without New.
+func (p playerPolicy) withDefaults() playerPolicy {
+	if p.connectTimeout <= 0 {
+		p.connectTimeout = defaultMPVStartupTimeout
+	}
+	if p.stopTimeout <= 0 {
+		p.stopTimeout = defaultMPVStopTimeout
+	}
+	return p
+}
+
+func launcherComplete(runtimeDir string) bool {
+	data, err := os.ReadFile(filepath.Join(runtimeDir, "launcher-complete"))
+	return err == nil && string(data) == "stopped-and-restored\n"
 }
 
 type playbackSource struct {
@@ -165,6 +198,9 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 		a.playerFullscreen,
 		configPath,
 	)
+	if a.playerPolicy.managedLauncher {
+		command.args = append([]string{command.args[0], "--managed-runtime=" + runtimeDir}, command.args[1:]...)
+	}
 	return command, nil
 }
 
@@ -183,6 +219,15 @@ func (a *App) externalSubtitleURLs(subtitles []*papi.Subtitle) []string {
 }
 
 func (a *App) startPlayer(command playerCommand) bool {
+	if a.playerCleanupDir != "" {
+		if !launcherComplete(a.playerCleanupDir) {
+			_ = os.RemoveAll(command.runtimeDir)
+			a.setPlayerError("previous launcher teardown is unconfirmed; playback is blocked")
+			return false
+		}
+		_ = os.RemoveAll(a.playerCleanupDir)
+		a.playerCleanupDir = ""
+	}
 	if a.playerStatus == PlayerStatusRunning {
 		_ = os.RemoveAll(command.runtimeDir)
 		return false
@@ -203,7 +248,8 @@ func (a *App) startPlayer(command playerCommand) bool {
 
 	done := make(chan playerResult, 1)
 	stop := make(chan struct{})
-	tracker := startIPC(command.sockPath, command.mediaKey)
+	policy := a.playerPolicy.withDefaults()
+	tracker := startIPC(command.sockPath, command.mediaKey, policy.connectTimeout)
 	a.playerDone = done
 	a.playerStop = stop
 	a.playerStatus = PlayerStatusRunning
@@ -224,14 +270,20 @@ func (a *App) startPlayer(command playerCommand) bool {
 			_ = cmd.Process.Signal(syscall.SIGTERM)
 			select {
 			case err = <-waited:
-			case <-time.After(playerStopTimeout):
+			case <-time.After(policy.stopTimeout):
 				_ = cmd.Process.Kill()
 				err = <-waited
 			}
 		}
 		tracker.stopIPC()
-		_ = os.RemoveAll(command.runtimeDir)
-		done <- playerResult{err: err, tracker: tracker}
+		result := playerResult{err: err, tracker: tracker}
+		if policy.managedLauncher && !launcherComplete(command.runtimeDir) {
+			result.retainedRuntime = command.runtimeDir
+			result.err = errors.Join(err, errors.New("managed launcher teardown is unconfirmed; private runtime retained"))
+		} else {
+			_ = os.RemoveAll(command.runtimeDir)
+		}
+		done <- result
 		if a.invalidate != nil {
 			a.invalidate()
 		}
@@ -405,9 +457,9 @@ func (t *playbackTracker) wait(timeout time.Duration) {
 }
 
 // startIPC launches ipcLoop in a goroutine and returns a passive playback tracker.
-func startIPC(sockPath, mediaKey string) *playbackTracker {
+func startIPC(sockPath, mediaKey string, connectTimeout time.Duration) *playbackTracker {
 	tracker := newPlaybackTracker(mediaKey)
-	go ipcLoop(sockPath, tracker)
+	go ipcLoop(sockPath, tracker, connectTimeout)
 	return tracker
 }
 
@@ -419,22 +471,24 @@ type mpvEvent struct {
 }
 
 // ipcLoop connects to the mpv IPC socket and processes events.
-func ipcLoop(sockPath string, tracker *playbackTracker) {
+func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Duration) {
 	defer close(tracker.done)
 
+	deadline := time.Now().Add(connectTimeout)
+	dialer := net.Dialer{Deadline: deadline, Timeout: 100 * time.Millisecond}
 	var conn net.Conn
-	for range mpvConnectAttempts {
+	for time.Now().Before(deadline) {
 		select {
 		case <-tracker.stop:
 			return
 		default:
 		}
-		c, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: sockPath, Net: "unix"})
+		c, err := dialer.Dial("unix", sockPath)
 		if err == nil {
 			conn = c
 			break
 		}
-		timer := time.NewTimer(100 * time.Millisecond)
+		timer := time.NewTimer(min(100*time.Millisecond, time.Until(deadline)))
 		select {
 		case <-tracker.stop:
 			if !timer.Stop() {
