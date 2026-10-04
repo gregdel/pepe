@@ -4,7 +4,7 @@
 
 **pépé** (*Polochon Player* -> “PP” -> pépé, I know that's a stretch) is a Go/Gio player interface for browsing and playing movies and shows from a Polochon server. It is designed for keyboard, remote, and controller navigation, including TVs and Steam Deck.
 
-Features include title-based directional search, recently added listings, movie and show details, subtitle selection, and playback through `mpv`.
+Features include title-based directional search, recently added listings, movie and show details, subtitle selection, and playback through `mpv`. Linux HDMI-CEC remotes are supported through kernel RC passthrough; see [Linux CEC setup](packaging/linux/README.md).
 
 ## Requirements
 

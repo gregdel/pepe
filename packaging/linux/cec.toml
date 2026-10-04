@@ -1,0 +1,33 @@
+# Linux CEC RC passthrough -> ordinary keyboard keys understood by Gio and mpv.
+# Load with ir-keytable --sysdev rcN --clear --write cec.toml.
+# Clear the default map so CEC power keys cannot reach logind.
+[[protocols]]
+name = "pepe-cec"
+protocol = "cec"
+[protocols.scancodes]
+0x00 = "KEY_ENTER" # Select/OK
+0x01 = "KEY_UP"
+0x02 = "KEY_DOWN"
+0x03 = "KEY_LEFT"
+0x04 = "KEY_RIGHT"
+0x09 = "KEY_HOME" # Device root menu
+0x0b = "KEY_HOME" # Contents menu
+0x0d = "KEY_ESC" # Exit/Back
+0x10 = "KEY_HOME" # Media top menu
+0x2b = "KEY_ENTER"
+0x44 = "KEY_F5" # Play
+0x45 = "KEY_F8" # Stop
+0x46 = "KEY_F6" # Pause
+0x48 = "KEY_F9" # Rewind
+0x49 = "KEY_F10" # Fast forward
+0x4b = "KEY_F12" # Next
+0x4c = "KEY_F11" # Previous
+0x60 = "KEY_F5" # Play function (normal speed)
+0x6024 = "KEY_F5" # Play function (forward)
+0x6025 = "KEY_F6" # Play function (still)
+0x61 = "KEY_F7" # Pause/play toggle
+0x64 = "KEY_F8" # Stop function
+0x71 = "KEY_F1" # Blue: subtitles
+0x72 = "KEY_F2" # Red: refresh
+0x73 = "KEY_F3" # Green: movies/shows
+0x74 = "KEY_HOME" # Yellow: home

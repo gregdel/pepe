@@ -16,6 +16,7 @@ const (
 	actionRight
 	actionActivate
 	actionBack
+	actionHome
 	actionToggleSection
 	actionRefresh
 	actionSubtitles
@@ -36,6 +37,11 @@ var keyBindings = []keyBinding{
 	{name: key.NameReturn, action: actionActivate},
 	{name: key.NameEnter, action: actionActivate},
 	{name: key.NameEscape, action: actionBack},
+	{name: key.NameHome, action: actionHome},
+	// Layout-independent shortcuts for Linux CEC remote colour buttons.
+	{name: key.NameF1, action: actionSubtitles},
+	{name: key.NameF2, action: actionRefresh},
+	{name: key.NameF3, action: actionToggleSection},
 	{name: "H", action: actionLeft, optional: key.ModShift},
 	{name: "J", action: actionDown, optional: key.ModShift},
 	{name: "K", action: actionUp, optional: key.ModShift},
@@ -106,7 +112,7 @@ func (a *App) handlePopupAction(action inputAction) {
 		}
 	case actionActivate:
 		a.subPopupSelect()
-	case actionBack, actionLeft:
+	case actionBack, actionLeft, actionHome:
 		a.closeSubtitlePopup()
 	}
 }
@@ -121,6 +127,8 @@ func (a *App) handleBrowseAction(action inputAction) {
 		a.navigateLeft()
 	case actionBack:
 		a.navigateEscape()
+	case actionHome:
+		a.navigateHome()
 	case actionRight:
 		a.navigateRight()
 	case actionActivate:
@@ -148,8 +156,10 @@ func (a *App) handleDetailAction(action inputAction) {
 	switch action {
 	case actionActivate:
 		a.launchMovie(&MediaItem{ID: detail.movieID, Title: detail.movieTitle, Type: mediaKindMovie})
-	case actionLeft:
+	case actionLeft, actionBack:
 		a.popDetail()
+	case actionHome:
+		a.navigateHome()
 	case actionUp:
 		a.scrollDetail(-1)
 	case actionDown:
@@ -169,6 +179,10 @@ func (a *App) handleShowAction(action inputAction, show *showPage) {
 		show.up()
 	case actionDown:
 		show.down()
+	case actionBack:
+		a.popDetail()
+	case actionHome:
+		a.navigateHome()
 	case actionLeft:
 		if show.focus == focusTabs {
 			if show.seasonCursor == 0 {

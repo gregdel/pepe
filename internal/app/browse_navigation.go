@@ -47,6 +47,13 @@ func (a *App) navigateLeft() {
 	a.browse.nav.goBack()
 }
 
+// navigateHome leaves details and restores the browse home, retaining the listing.
+func (a *App) navigateHome() {
+	a.popDetail()
+	a.browse.nav.returnToHome()
+	a.browse.focus = browseFocusContent
+}
+
 func (a *App) navigateEscape() {
 	if a.browse.focus == browseFocusModeRail {
 		a.browse.focus = browseFocusContent
