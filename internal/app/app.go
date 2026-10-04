@@ -65,6 +65,7 @@ type SubtitlePopup struct {
 	errMsg       string
 	doneAt       time.Time
 	list         layout.List
+	listSize     image.Point
 	resultCh     chan subPopupListResult
 	downloadDone chan subPopupDownloadResult
 }

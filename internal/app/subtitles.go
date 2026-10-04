@@ -228,6 +228,21 @@ func (a *App) layoutSubtitlePopupBody(gtx C, p *SubtitlePopup) D {
 		if len(p.entries) == 0 {
 			return a.label(gtx, sp, "No subtitles found", colorMuted, 0)
 		}
+		pos := p.list.Position
+		last := pos.First + pos.Count - 1
+		if p.listSize != gtx.Constraints.Max || pos.Count == 0 ||
+			p.cursor < pos.First || (p.cursor == pos.First && pos.Offset > 0) {
+			p.list.ScrollTo(p.cursor)
+		} else if p.cursor > last || (p.cursor == last && pos.OffsetLast < 0) {
+			// Count includes a partially visible trailing row. Leave room for
+			// the whole selection rather than only bringing it into the clip.
+			first := p.cursor - pos.Count + 1
+			if pos.OffsetLast < 0 {
+				first++
+			}
+			p.list.ScrollTo(first)
+		}
+		p.listSize = gtx.Constraints.Max
 		return p.list.Layout(gtx, len(p.entries), func(gtx C, i int) D {
 			entry := p.entries[i]
 			selected := i == p.cursor
