@@ -2,10 +2,15 @@ package app
 
 import (
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
+	"gioui.org/op/paint"
 	"github.com/gregdel/pepe/internal/driver"
 	polochon "github.com/odwrtw/polochon/lib"
 	"github.com/odwrtw/polochon/lib/papi"
@@ -295,6 +300,101 @@ func TestHeadlessLastAddedMovieDetailAndBack(t *testing.T) {
 	headlessKey(t, f, "LeftArrow")
 	if f.app.detail != nil || !f.app.browse.nav.isAtSectionRoot() {
 		t.Fatalf("after back = (detail=%v, section-root=%t)", f.app.detail, f.app.browse.nav.isAtSectionRoot())
+	}
+}
+
+func TestHeadlessMovieDetailScrollBoundaries(t *testing.T) {
+	for _, viewport := range []image.Point{image.Pt(1920, 1080), image.Pt(1024, 768)} {
+		for _, bright := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%dx%d/bright=%t", viewport.X, viewport.Y, bright), func(t *testing.T) {
+				f := newHeadlessFixture(t)
+				movie := f.app.client.movies["movie-new"]
+				movie.Plot = strings.Repeat("A long synopsis exercises backward scrolling across separate detail sections. ", 80)
+				shade := uint8(16)
+				if bright {
+					shade = 240
+				}
+				art := image.NewUniform(color.NRGBA{R: shade, G: shade, B: shade, A: 255})
+				// Use finite offline artwork; no network or player is needed.
+				img := image.NewNRGBA(image.Rect(0, 0, 64, 64))
+				draw.Draw(img, img.Bounds(), art, image.Point{}, draw.Src)
+				f.app.images.store("fanart:movie-new", paint.NewImageOp(img))
+				f.app.images.store("thumb:movie-new", paint.NewImageOp(img))
+				f.app.pushMovieDetail(&MediaItem{ID: "movie-new", Title: "New Movie", Type: mediaKindMovie})
+				f.app.detail.enteredAt = time.Now().Add(-detailFadeDuration)
+				if err := f.driver.Resize(viewport.X, viewport.Y); err != nil {
+					t.Fatal(err)
+				}
+				assertTop := func() {
+					t.Helper()
+					pos := f.app.detailList.Position
+					if pos.First != 0 || pos.Offset != 0 {
+						t.Fatalf("detail position = %+v, want top", pos)
+					}
+					for _, label := range []string{"New Movie", "Play movie"} {
+						if !headlessLabelInside(f.driver.Tree(), label, viewport) {
+							t.Fatalf("%q is not visible inside viewport", label)
+						}
+					}
+				}
+				assertTop()
+				// Reach the bottom, including repeated Down presses at the boundary.
+				for range 80 {
+					headlessKey(t, f, "DownArrow")
+				}
+				bottom := f.app.detailList.Position
+				if bottom.First == 0 {
+					t.Fatal("fixture did not scroll past the first section")
+				}
+				headlessKey(t, f, "DownArrow")
+				if got := f.app.detailList.Position; got.First != bottom.First || got.Offset != bottom.Offset {
+					t.Fatalf("Down at bottom moved position: %+v -> %+v", bottom, got)
+				}
+				for range 80 {
+					headlessKey(t, f, "UpArrow")
+				}
+				assertTop()
+				for range 5 {
+					headlessKey(t, f, "UpArrow")
+					assertTop()
+				}
+			})
+		}
+	}
+}
+
+func headlessLabelInside(nodes []driver.Node, label string, viewport image.Point) bool {
+	for _, node := range nodes {
+		b := node.Bounds
+		// Text semantics carry layout constraints, not glyph bounds. Check the
+		// origin for text and the full bounds for the Play button.
+		if node.Label == label && b.MinX >= 0 && b.MinY >= 0 &&
+			b.MinX < viewport.X && b.MinY < viewport.Y && b.MaxX > b.MinX && b.MaxY > b.MinY {
+			if node.Class != "button" || (b.MaxX <= viewport.X && b.MaxY <= viewport.Y) {
+				return true
+			}
+		}
+		if headlessLabelInside(node.Children, label, viewport) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestHeadlessMovieDetailShortContentScroll(t *testing.T) {
+	f := newHeadlessFixture(t)
+	f.app.pushMovieDetail(&MediaItem{ID: "movie-old", Title: "Old Movie", Type: mediaKindMovie})
+	f.app.detail.enteredAt = time.Now().Add(-detailFadeDuration)
+	if err := f.driver.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"UpArrow", "DownArrow", "UpArrow"} {
+		for range 5 {
+			headlessKey(t, f, key)
+			if pos := f.app.detailList.Position; pos.First != 0 || pos.Offset != 0 {
+				t.Fatalf("short detail after %s = %+v, want top", key, pos)
+			}
+		}
 	}
 }
 

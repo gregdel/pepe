@@ -401,10 +401,9 @@ func (a *App) drainChannels() {
 // scrollDetail scrolls the movie detail page content with the keyboard.
 func (a *App) scrollDetail(dir int) {
 	const step = 160 // px
+	// Offset is relative to the first visible item. Gio traverses earlier
+	// items for negative offsets and clamps the actual list boundaries.
 	a.detailList.Position.Offset += dir * step
-	if a.detailList.Position.Offset < 0 {
-		a.detailList.Position.Offset = 0
-	}
 }
 
 // ── Root layout ───────────────────────────────────────────────────────────────
