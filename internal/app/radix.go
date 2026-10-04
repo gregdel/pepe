@@ -227,12 +227,18 @@ func lookupHelper(node *RadixNode, remaining string) *RadixNode {
 		if node.IsTerminal {
 			return node
 		}
+		// Listing trees move a prefix terminal to an empty-edge leaf.
+		for _, child := range node.Children {
+			if child.Label == "" && child.IsTerminal {
+				return child
+			}
+		}
 		return nil
 	}
 
 	// Search children
 	for _, child := range node.Children {
-		if strings.HasPrefix(remaining, child.Label) {
+		if child.Label != "" && strings.HasPrefix(remaining, child.Label) {
 			return lookupHelper(child, remaining)
 		}
 	}

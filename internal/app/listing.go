@@ -99,6 +99,8 @@ func (radixListingBuilder) build(items []*listingItem) mediaListing {
 
 	tree := NewRadixTree(titles)
 	attachListingMedia(tree.Root(), titleToMedia)
+	separateListingTerminals(tree.Root())
+	orderChildren(tree.Root())
 
 	return mediaListing{tree: tree, titleToMedia: titleToMedia}
 }
@@ -170,6 +172,31 @@ func attachListingMedia(node *RadixNode, titleToMedia map[string]*MediaItem) {
 	}
 	for _, child := range node.Children {
 		attachListingMedia(child, titleToMedia)
+	}
+}
+
+// separateListingTerminals makes every playable title a leaf so directional
+// navigation can enter a prefix group without opening its terminal's detail.
+// Only call this on a freshly built listing tree, before publishing it.
+func separateListingTerminals(node *RadixNode) {
+	if node == nil {
+		return
+	}
+	if node.IsTerminal && len(node.Children) > 0 {
+		node.Children = append(node.Children, &RadixNode{
+			// The empty edge retains the accumulated prefix as this title.
+			IsTerminal:   true,
+			FullString:   node.FullString,
+			Media:        node.Media,
+			SubtreeCount: 1,
+		})
+		node.IsTerminal = false
+		node.FullString = ""
+		node.Media = nil
+		// Moving the terminal to a child leaves all ancestor counts unchanged.
+	}
+	for _, child := range node.Children {
+		separateListingTerminals(child)
 	}
 }
 
