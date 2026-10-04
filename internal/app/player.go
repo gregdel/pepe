@@ -275,7 +275,7 @@ func (a *App) startPlayer(command playerCommand) bool {
 				err = <-waited
 			}
 		}
-		tracker.stopIPC()
+		tracker.finishIPC()
 		result := playerResult{err: err, tracker: tracker}
 		if policy.managedLauncher && !launcherComplete(command.runtimeDir) {
 			result.retainedRuntime = command.runtimeDir
@@ -429,6 +429,14 @@ func (t *playbackTracker) stopIPC() {
 	t.stopOnce.Do(func() { close(t.stop) })
 }
 
+// finishIPC lets final events drain after process exit before forcing shutdown.
+// Only the player worker waits here; results publish a settled tracker.
+func (t *playbackTracker) finishIPC() {
+	t.wait(playbackTrackerWait)
+	t.stopIPC()
+	<-t.done
+}
+
 func (t *playbackTracker) updatePos(pos float64) {
 	t.mu.Lock()
 	t.pos = pos
@@ -465,9 +473,10 @@ func startIPC(sockPath, mediaKey string, connectTimeout time.Duration) *playback
 
 // mpvEvent is the JSON event structure sent by mpv over IPC.
 type mpvEvent struct {
-	Event string `json:"event"`
-	Name  string `json:"name"`
-	Data  any    `json:"data"`
+	Event  string `json:"event"`
+	Name   string `json:"name"`
+	Data   any    `json:"data"`
+	Reason string `json:"reason"`
 }
 
 // ipcLoop connects to the mpv IPC socket and processes events.
@@ -522,6 +531,10 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 		var ev mpvEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
 			continue
+		}
+		if ev.Event == "end-file" && ev.Reason == "eof" {
+			tracker.markEOF()
+			return
 		}
 		if ev.Event != "property-change" {
 			continue
