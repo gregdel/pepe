@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -303,9 +304,29 @@ func (c *APIClient) fetchAuthenticatedURL(rawURL string) (io.ReadCloser, error) 
 	}
 	req.Header.Set("X-Auth-Token", c.getToken())
 
-	client := c.artworkClient
-	if client == nil {
-		client = &http.Client{Timeout: artworkRequestTimeout}
+	// Copy configuration without mutating the client shared by artwork workers.
+	// The transport and its connection pool remain shared.
+	client := http.Client{Timeout: artworkRequestTimeout}
+	if c.artworkClient != nil {
+		client = *c.artworkClient
+	}
+	checkRedirect := client.CheckRedirect
+	origin := *req.URL
+	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		if checkRedirect != nil {
+			if err := checkRedirect(next, via); err != nil {
+				return err
+			}
+		}
+		// Custom headers are copied on every hop, including cross-host hops.
+		// Check after any existing callback so it cannot relax this boundary.
+		if !sameArtworkOrigin(&origin, next.URL) {
+			return fmt.Errorf("artwork redirect changes origin")
+		}
+		return nil
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -316,6 +337,26 @@ func (c *APIClient) fetchAuthenticatedURL(rawURL string) (io.ReadCloser, error) 
 		return nil, fmt.Errorf("download returned %s", resp.Status)
 	}
 	return resp.Body, nil
+}
+
+func sameArtworkOrigin(a, b *url.URL) bool {
+	return strings.EqualFold(a.Scheme, b.Scheme) &&
+		strings.EqualFold(a.Hostname(), b.Hostname()) &&
+		artworkOriginPort(a) == artworkOriginPort(b)
+}
+
+func artworkOriginPort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
 }
 
 // Events returns a channel that emits a signal whenever the server reports a

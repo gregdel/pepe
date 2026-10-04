@@ -42,6 +42,8 @@ POLOCHON_TOKEN=your-token \
 ./pepe
 ```
 
+Artwork redirects must stay on the original origin (scheme, hostname, and port). Redirects to another origin, including HTTPS-to-HTTP downgrades, are rejected to protect the authentication token.
+
 Explicit playback flags override YAML settings, including `-mpv-managed-launcher=false`.
 
 Useful flags:
