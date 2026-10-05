@@ -28,6 +28,8 @@ This bundle is for a personal Steam Deck install from Desktop Mode.
 
 5. In Steam Desktop Mode, add `run-pepe.sh` or `pepe.desktop` as a Non-Steam Game, then launch from Gaming Mode.
 
+Optionally set `web_ui_addr: ":8081"` to use the [web remote](../../README.md#web-remote-and-url-playback) from a phone at `http://<deck-address>:8081/`. It has no authentication: use only on trusted networks and never expose the port publicly. Leave the address empty to disable it.
+
 Recommended Steam Input mapping:
 
 - D-pad or left stick: arrow keys

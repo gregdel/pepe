@@ -59,6 +59,47 @@ func TestMPVFlagOverrides(t *testing.T) {
 	}
 }
 
+func TestWebUIFlagOverrides(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		want    string
+		invalid bool
+	}{
+		{"unset preserves YAML", nil, ":8081", false},
+		{"override", []string{"-web-ui-addr=127.0.0.1:8082"}, "127.0.0.1:8082", false},
+		{"disable", []string{"-web-ui-addr="}, "", false},
+		{"whitespace disables", []string{"-web-ui-addr=  "}, "", false},
+		{"invalid", []string{"-web-ui-addr=8081"}, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			flags := flag.NewFlagSet(tc.name, flag.ContinueOnError)
+			addr := flags.String("web-ui-addr", "", "")
+			if err := flags.Parse(tc.args); err != nil {
+				t.Fatal(err)
+			}
+			config := app.DefaultConfig()
+			config.WebUIAddr = ":8081"
+			err := applyWebUIAddr(config, flags, *addr)
+			if tc.invalid {
+				if err == nil {
+					t.Fatal("invalid address accepted")
+				}
+				return
+			}
+			if err != nil || config.WebUIAddr != tc.want {
+				t.Fatalf("address = %q, error %v", config.WebUIAddr, err)
+			}
+		})
+	}
+	flags := flag.NewFlagSet("defaults", flag.ContinueOnError)
+	addr := flags.String("web-ui-addr", "", "")
+	config := app.DefaultConfig()
+	if err := applyWebUIAddr(config, flags, *addr); err != nil || config.WebUIAddr != "" {
+		t.Fatal("web UI enabled by default")
+	}
+}
+
 func TestMPVFlagDefaultsAndManagedOptIn(t *testing.T) {
 	flags := flag.NewFlagSet("mpv", flag.ContinueOnError)
 	playerFlags := registerMPVFlags(flags)

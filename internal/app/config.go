@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +29,7 @@ type Config struct {
 	MPVManagedLauncher bool          `yaml:"mpv_managed_launcher"`
 	MPVStartupTimeout  time.Duration `yaml:"mpv_startup_timeout"`
 	MPVStopTimeout     time.Duration `yaml:"mpv_stop_timeout"`
+	WebUIAddr          string        `yaml:"web_ui_addr"`
 }
 
 // DefaultConfig returns a fresh configuration with playback defaults.
@@ -45,6 +48,22 @@ func (c *Config) ValidatePlayer() error {
 	}
 	if c.MPVStopTimeout <= 0 {
 		return fmt.Errorf("mpv_stop_timeout must be positive")
+	}
+	return nil
+}
+
+// ValidateWebUI checks the optional listener without resolving or binding it.
+func (c *Config) ValidateWebUI() error {
+	addr := strings.TrimSpace(c.WebUIAddr)
+	if addr == "" {
+		return nil
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("web_ui_addr must be a host:port address (for example :8081)")
+	}
+	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+		return fmt.Errorf("web_ui_addr must have a numeric port between 0 and 65535")
 	}
 	return nil
 }
@@ -75,6 +94,7 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	cfg.PolochonURL = strings.TrimSpace(cfg.PolochonURL)
 	cfg.Token = strings.TrimSpace(cfg.Token)
+	cfg.WebUIAddr = strings.TrimSpace(cfg.WebUIAddr)
 	if cfg.MPVPath = strings.TrimSpace(cfg.MPVPath); cfg.MPVPath == "" {
 		cfg.MPVPath = "mpv"
 	}
@@ -94,6 +114,9 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.MPVPath = value
 	}
 	if err := cfg.ValidatePlayer(); err != nil {
+		return nil, err
+	}
+	if err := cfg.ValidateWebUI(); err != nil {
 		return nil, err
 	}
 	return cfg, nil

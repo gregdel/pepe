@@ -4,7 +4,7 @@
 
 **pépé** (*Polochon Player* -> “PP” -> pépé, I know that's a stretch) is a Go/Gio player interface for browsing and playing movies and shows from a Polochon server. It is designed for keyboard, remote, and controller navigation, including TVs and Steam Deck.
 
-Features include title-based directional search, recently added listings, movie and show details, subtitle selection, and playback through `mpv`. Linux HDMI-CEC remotes are supported through kernel RC passthrough; see [Linux CEC setup](packaging/linux/README.md).
+Features include title-based directional search, recently added listings, movie and show details, subtitle selection, playback through `mpv`, and an opt-in web remote with URL playback. Linux HDMI-CEC remotes are supported through kernel RC passthrough; see [Linux CEC setup](packaging/linux/README.md).
 
 ## Requirements
 
@@ -32,6 +32,7 @@ player_fullscreen: true
 mpv_managed_launcher: false
 mpv_startup_timeout: 3s
 mpv_stop_timeout: 2s
+web_ui_addr: ""
 ```
 
 `POLOCHON_URL` and `POLOCHON_TOKEN` override values in the file. `POLOCHON_MPV` overrides `mpv_path`. Keep the config readable only by yourself (for example, `chmod 600 ~/.config/pepe/config.yaml`); playback passes the token to mpv through a private temporary config file, not its process arguments. For example:
@@ -56,6 +57,50 @@ Useful flags:
 - `-mpv-startup-timeout DURATION` — IPC connection timeout (default `3s`)
 - `-mpv-stop-timeout DURATION` — cancellation grace period before killing the launcher (default `2s`)
 - `-mpv-managed-launcher` — require external launcher teardown confirmation (default off)
+- `-web-ui-addr HOST:PORT` — enable the unauthenticated web remote; empty disables it (default)
+
+## Web remote and URL playback
+
+Set a listen address in YAML or explicitly on the command line:
+
+```yaml
+web_ui_addr: ":8081"
+```
+
+```sh
+./pepe -web-ui-addr=:8081
+```
+
+Open `http://<pepe-host-address>:8081/` from your phone or browser. `:8081` listens
+on all interfaces; use `127.0.0.1:8081` for local-only access. An omitted or empty
+address disables the server. Explicit CLI values override YAML, including
+`-web-ui-addr=` to disable it. An invalid or unavailable address fails startup.
+
+**There is no authentication or TLS. Use only on a trusted network; never expose
+this port publicly.** Anyone who can reach it can navigate, play, stop, or quit
+Pépé and ask mpv to fetch HTTP/HTTPS resources accessible from the host. Browser
+cross-origin checks are not authentication or a network security boundary.
+
+The remote mirrors Pépé's navigation: Right opens details, and OK plays from
+details (OK does not open a terminal in browse). Separate playback buttons
+pause/resume, seek ±10 seconds, and stop mpv. Stop cancels a pending replacement.
+
+The URL input accepts absolute HTTP/HTTPS URLs, replacing current playback only
+after its player has stopped. The latest pending selection wins. Pépé displays
+“Now playing from Web UI” without showing the submitted URL. URL playback does
+not add the Polochon token, catalog subtitles, or catalog resume positions.
+Signed URLs can still be visible in local process arguments; existing user mpv
+configuration and wrappers remain under your control.
+
+Direct media and manifest URLs work when supported by your mpv build. Website
+URLs depend on your existing mpv/resolver setup; Pépé installs or bundles no
+resolver. Normal Polochon configuration and initial library fetch remain required.
+
+HTTP command responses report queuing, not successful playback. Commands run on
+the application event loop; a suspended/minimized window may delay them. Playback
+controls can briefly be unavailable while mpv starts. Check the browser status
+for failures and retry if necessary. The server stops when Pépé closes; existing
+app-close playback behavior is unchanged.
 
 ## Managed launchers
 

@@ -207,6 +207,44 @@ func TestLoadConfigRejectsInvalidPlayerSettings(t *testing.T) {
 	}
 }
 
+func TestLoadConfigWebUIAddress(t *testing.T) {
+	t.Setenv("POLOCHON_URL", "http://localhost")
+	t.Setenv("POLOCHON_TOKEN", "token")
+	for _, tc := range []struct {
+		name, yaml, want string
+		invalid          bool
+	}{
+		{"omitted", "", "", false},
+		{"empty", "web_ui_addr: ''\n", "", false},
+		{"whitespace", "web_ui_addr: '  '\n", "", false},
+		{"LAN", "web_ui_addr: ':8081'\n", ":8081", false},
+		{"loopback", "web_ui_addr: ' 127.0.0.1:8081 '\n", "127.0.0.1:8081", false},
+		{"IPv6", "web_ui_addr: '[::1]:8081'\n", "[::1]:8081", false},
+		{"ephemeral", "web_ui_addr: 'localhost:0'\n", "localhost:0", false},
+		{"URL", "web_ui_addr: 'http://localhost:8081'\n", "", true},
+		{"missing port", "web_ui_addr: 'localhost'\n", "", true},
+		{"named port", "web_ui_addr: ':http'\n", "", true},
+		{"large port", "web_ui_addr: ':65536'\n", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tc.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := LoadConfig(path)
+			if tc.invalid {
+				if err == nil || !strings.Contains(err.Error(), "web_ui_addr") {
+					t.Fatalf("invalid web address error = %v", err)
+				}
+				return
+			}
+			if err != nil || cfg.WebUIAddr != tc.want {
+				t.Fatalf("config = %+v, error %v", cfg, err)
+			}
+		})
+	}
+}
+
 func TestBuildMPVArgsUsesPathAndFullscreen(t *testing.T) {
 	args := buildMPVArgs("/opt/bin/mpv", "Movie", "http://media", nil, PlayerModeGUI, 0, "/tmp/mpv.sock", true, "/tmp/auth.conf")
 

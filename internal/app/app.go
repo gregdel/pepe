@@ -98,6 +98,11 @@ type App struct {
 	playerMode       PlayerMode
 	playerTitle      string
 	playerError      string
+	playerFromWeb    bool
+	playerStopping   bool
+	playerSocket     string
+	playerSession    uint64
+	playerControls   *playerControls
 	pendingPlayback  *playbackSource
 	playerStop       chan struct{}
 	mpvPath          string
@@ -106,6 +111,10 @@ type App struct {
 	playerCleanupDir string             // retained until launcher teardown is confirmed
 	playerDone       chan playerResult  // goroutine → event loop
 	resumePos        map[string]float64 // mediaKey -> last position (seconds)
+
+	// opt-in HTTP transport; mutable app state stays on the event loop
+	webUI           *webUI
+	webCommandError string
 
 	// library refresh
 	refreshing       bool
@@ -322,9 +331,17 @@ func (a *App) forwardSSE(ctx context.Context, done chan<- struct{}) {
 	}
 }
 
-// Close stops background event forwarding. Run calls it when the window exits;
+// Close stops the web server, control worker, and background event forwarding.
+// Run calls it when the window exits;
 // headless users should call it when their driver/app lifetime ends.
 func (a *App) Close() {
+	if a.webUI != nil {
+		a.webUI.close()
+	}
+	if controls := a.playerControls; controls != nil {
+		a.cancelPlayerControls()
+		<-controls.done
+	}
 	if a.sseCancel != nil {
 		a.sseCancel()
 	}
@@ -341,6 +358,11 @@ func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 	var ops op.Ops
 
 	defer a.Close()
+	if config != nil {
+		if err := a.startWebUI(config.WebUIAddr); err != nil {
+			return err
+		}
+	}
 	for {
 		switch e := w.Event().(type) {
 		case gioapp.DestroyEvent:
@@ -368,9 +390,13 @@ func (a *App) drainChannels() {
 				a.playerCleanupDir = result.retainedRuntime
 				a.pendingPlayback = nil
 			}
+			a.cancelPlayerControls()
+			a.playerSocket = ""
 			a.playerDone = nil
 			a.playerStop = nil
 			a.playerTitle = ""
+			a.playerFromWeb = false
+			a.playerStopping = false
 			if next := a.pendingPlayback; next != nil {
 				a.pendingPlayback = nil
 				a.playerStatus = PlayerStatusIdle
@@ -385,6 +411,8 @@ func (a *App) drainChannels() {
 		default:
 		}
 	}
+
+	a.drainPlayerControls()
 
 	if a.sseSignal != nil {
 		select {
@@ -415,8 +443,10 @@ func (a *App) scrollDetail(dir int) {
 // Layout renders one frame and processes input routed by the supplied
 // layout context. It is intentionally independent of gioapp.Window.
 func (a *App) Layout(gtx C) D {
+	defer a.publishWebStatus()
 	gtx = scaleContext(gtx)
 	a.drainChannels()
+	a.drainWebCommands()
 	paint.Fill(gtx.Ops, colorBg)
 	area := clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops)
 	event.Op(gtx.Ops, a.keyTag)
@@ -457,7 +487,10 @@ func (a *App) layoutPlayingBar(gtx C) D {
 				layout.Stacked(func(gtx C) D {
 					return layout.Inset{Left: a.viewportInsets.Left, Right: a.viewportInsets.Right, Top: a.viewportInsets.Top, Bottom: dp8}.Layout(gtx, func(gtx C) D {
 						status := "Now playing"
-						if a.pendingPlayback != nil {
+						if a.playerFromWeb {
+							status = "Now playing from Web UI"
+						}
+						if a.playerStopping || a.pendingPlayback != nil {
 							status = "Stopping playback"
 						}
 						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,6 +47,7 @@ type playerCommand struct {
 	runtimeDir string
 	args       []string
 	mode       PlayerMode
+	fromWeb    bool
 }
 
 type playerResult struct {
@@ -92,6 +94,7 @@ type playbackSource struct {
 	title     string
 	video     papi.Downloadable
 	subtitles []*papi.Subtitle
+	url       string // nonempty only for credential-free web playback
 }
 
 func movieMediaKey(id string) string {
@@ -138,13 +141,39 @@ func (a *App) launchEpisode(node *DynamicNode) {
 	})
 }
 
+const maxPlaybackURLLength = 8192
+
+// validatePlaybackURL preserves signed URLs and never includes the input in errors.
+func validatePlaybackURL(raw string) (string, error) {
+	if len(raw) > maxPlaybackURLLength || !utf8.ValidString(raw) {
+		return "", fmt.Errorf("URL is too long or is not valid UTF-8")
+	}
+	for _, char := range raw {
+		if char < 0x20 || char == 0x7f {
+			return "", fmt.Errorf("URL contains a control character")
+		}
+	}
+	raw = strings.TrimSpace(raw)
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.Opaque != "" {
+		return "", fmt.Errorf("an absolute HTTP or HTTPS URL is required")
+	}
+	return raw, nil
+}
+
+func (a *App) launchURL(raw string) error {
+	videoURL, err := validatePlaybackURL(raw)
+	if err != nil {
+		return err
+	}
+	a.launchPlayback(playbackSource{title: "Web UI video", url: videoURL})
+	return nil
+}
+
 func (a *App) launchPlayback(source playbackSource) {
 	if a.playerStatus == PlayerStatusRunning {
 		a.pendingPlayback = &source
-		if a.playerStop != nil {
-			close(a.playerStop)
-			a.playerStop = nil
-		}
+		a.requestPlayerStop()
 		if a.invalidate != nil {
 			a.invalidate()
 		}
@@ -166,17 +195,47 @@ func (a *App) setPlayerError(message string) {
 	a.playerError = message
 }
 
+// requestPlayerStop is event-loop-only and safe to call repeatedly.
+func (a *App) requestPlayerStop() {
+	if a.playerStatus != PlayerStatusRunning {
+		return
+	}
+	a.playerStopping = true
+	a.cancelPlayerControls()
+	if a.playerStop != nil {
+		close(a.playerStop)
+		a.playerStop = nil
+	}
+}
+
 func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
-	if source.mediaKey == "" || source.video == nil {
-		return playerCommand{}, fmt.Errorf("playback source is incomplete")
+	var videoURL, token string
+	var subtitleURLs []string
+	var startPos float64
+	if source.url != "" {
+		if source.mediaKey != "" || source.video != nil || len(source.subtitles) != 0 {
+			return playerCommand{}, fmt.Errorf("web playback cannot include catalog media")
+		}
+		var err error
+		videoURL, err = validatePlaybackURL(source.url)
+		if err != nil {
+			return playerCommand{}, err
+		}
+	} else {
+		if source.mediaKey == "" || source.video == nil {
+			return playerCommand{}, fmt.Errorf("playback source is incomplete")
+		}
+		var err error
+		videoURL, err = a.client.getDownloadURL(source.video)
+		if err != nil {
+			return playerCommand{}, fmt.Errorf("video URL: %w", err)
+		}
+		token = a.client.getToken()
+		subtitleURLs = a.externalSubtitleURLs(source.subtitles)
+		startPos = a.resumePos[source.mediaKey]
 	}
 
-	videoURL, err := a.client.getDownloadURL(source.video)
-	if err != nil {
-		return playerCommand{}, fmt.Errorf("video URL: %w", err)
-	}
-
-	runtimeDir, configPath, sockPath, err := createPlayerRuntime(a.client.getToken())
+	runtimeDir, configPath, sockPath, err := createPlayerRuntime(token)
 	if err != nil {
 		return playerCommand{}, err
 	}
@@ -186,14 +245,15 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 		sockPath:   sockPath,
 		runtimeDir: runtimeDir,
 		mode:       detectPlayerMode(),
+		fromWeb:    source.url != "",
 	}
 	command.args = buildMPVArgs(
 		a.mpvPath,
 		source.title,
 		videoURL,
-		a.externalSubtitleURLs(source.subtitles),
+		subtitleURLs,
 		command.mode,
-		a.resumePos[source.mediaKey],
+		startPos,
 		command.sockPath,
 		a.playerFullscreen,
 		configPath,
@@ -255,6 +315,10 @@ func (a *App) startPlayer(command playerCommand) bool {
 	a.playerStatus = PlayerStatusRunning
 	a.playerTitle = command.title
 	a.playerMode = command.mode
+	a.playerSocket = command.sockPath
+	a.playerSession++
+	a.playerFromWeb = command.fromWeb
+	a.playerStopping = false
 	a.playerError = ""
 	if a.invalidate != nil {
 		a.invalidate()
@@ -264,15 +328,25 @@ func (a *App) startPlayer(command playerCommand) bool {
 		waited := make(chan error, 1)
 		go func() { waited <- cmd.Wait() }()
 		var err error
+		stopped := false
 		select {
 		case err = <-waited:
 		case <-stop:
+			stopped = true
 			_ = cmd.Process.Signal(syscall.SIGTERM)
 			select {
 			case err = <-waited:
 			case <-time.After(policy.stopTimeout):
 				_ = cmd.Process.Kill()
 				err = <-waited
+			}
+		}
+		// An ordinary mpv terminated by our Stop request is not a playback failure.
+		// Managed launcher failures and forced termination must remain visible.
+		var exitErr *exec.ExitError
+		if stopped && !policy.managedLauncher && errors.As(err, &exitErr) {
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signal() == syscall.SIGTERM {
+				err = nil
 			}
 		}
 		tracker.finishIPC()
@@ -353,7 +427,10 @@ func createPlayerRuntime(token string) (runtimeDir, configPath, sockPath string,
 		_ = os.RemoveAll(runtimeDir)
 		return "", "", "", fmt.Errorf("create private mpv configuration: %w", err)
 	}
-	content := "http-header-fields=" + mpvConfigQuote("X-Auth-Token: "+token) + "\n"
+	content := ""
+	if token != "" {
+		content = "http-header-fields=" + mpvConfigQuote("X-Auth-Token: "+token) + "\n"
+	}
 	_, writeErr := file.WriteString(content)
 	closeErr := file.Close()
 	if writeErr != nil || closeErr != nil {

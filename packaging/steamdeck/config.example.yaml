@@ -6,3 +6,5 @@ player_fullscreen: true
 mpv_managed_launcher: false
 mpv_startup_timeout: 3s
 mpv_stop_timeout: 2s
+# Empty disables the web remote. ":8081" enables unauthenticated LAN access.
+web_ui_addr: ""

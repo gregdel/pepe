@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	gioapp "gioui.org/app"
@@ -22,6 +23,7 @@ func main() {
 	windowedFlag := flag.Bool("windowed", false, "start in windowed mode")
 	mpvPath := flag.String("mpv", "", "mpv executable path")
 	playerFlags := registerMPVFlags(flag.CommandLine)
+	webUIAddr := flag.String("web-ui-addr", "", "web remote listen address (empty disables; no authentication)")
 	flag.Parse()
 
 	config, err := app.LoadConfig(*configPath)
@@ -36,6 +38,10 @@ func main() {
 		config.MPVPath = *mpvPath
 	}
 	if err := playerFlags.apply(config, flag.CommandLine); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if err := applyWebUIAddr(config, flag.CommandLine, *webUIAddr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
@@ -78,6 +84,8 @@ func main() {
 		}
 		if err := app.Run(w, apiClient, sseCh, config); err != nil {
 			log.Error("error running app", "error", err)
+			fmt.Fprintf(os.Stderr, "Error running app: %v\n", err)
+			os.Exit(1)
 		}
 		os.Exit(0)
 	}()
@@ -111,6 +119,15 @@ func (f *mpvFlags) apply(config *app.Config, flags *flag.FlagSet) error {
 		}
 	})
 	return config.ValidatePlayer()
+}
+
+func applyWebUIAddr(config *app.Config, flags *flag.FlagSet, addr string) error {
+	flags.Visit(func(setting *flag.Flag) {
+		if setting.Name == "web-ui-addr" {
+			config.WebUIAddr = strings.TrimSpace(addr)
+		}
+	})
+	return config.ValidateWebUI()
 }
 
 func defaultLogFilePath() string {

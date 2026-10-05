@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pépé remote</title>
+  <link rel="stylesheet" href="/remote.css">
+  <script src="/remote.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Pépé remote</h1>
+      <p id="status" role="status">Connecting…</p>
+      <p id="feedback" role="alert"></p>
+    </header>
+    <section aria-labelledby="navigation-heading">
+      <h2 id="navigation-heading">Navigation</h2>
+      <div class="dpad">
+        <button class="up" data-action="up" aria-label="Up">↑</button>
+        <button class="left" data-action="left" aria-label="Left">←</button>
+        <button class="ok" data-action="ok">OK</button>
+        <button class="right" data-action="right" aria-label="Right">→</button>
+        <button class="down" data-action="down" aria-label="Down">↓</button>
+      </div>
+      <div class="buttons">
+        <button data-action="back">Back</button>
+        <button data-action="home">Home</button>
+        <button data-action="section">Movies / Shows</button>
+        <button data-action="subtitles">Subtitles</button>
+        <button data-action="refresh">Refresh</button>
+      </div>
+    </section>
+    <section aria-labelledby="playback-heading">
+      <h2 id="playback-heading">Playback</h2>
+      <div class="buttons">
+        <button data-command="seek-back" disabled>−10 seconds</button>
+        <button data-command="pause" disabled>Pause / Resume</button>
+        <button data-command="seek-forward" disabled>+10 seconds</button>
+        <button data-command="stop" disabled>Stop</button>
+      </div>
+    </section>
+    <section aria-labelledby="url-heading">
+      <h2 id="url-heading">Play a URL</h2>
+      <form id="url-form">
+        <input id="url" aria-label="Video URL" name="url" type="url" inputmode="url" placeholder="https://…" required maxlength="8192" autocomplete="off" autocapitalize="none" spellcheck="false">
+        <button type="submit">Play URL</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
