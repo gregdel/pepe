@@ -1,6 +1,7 @@
 package app
 
 import (
+	"image"
 	"time"
 
 	"gioui.org/layout"
@@ -51,9 +52,11 @@ type showPage struct {
 	focus        showFocusZone
 
 	// persistent scroll state (must survive between frames)
-	tabsList layout.List
-	epList   layout.List
-	infoList layout.List
+	tabsList   layout.List
+	epList     layout.List
+	infoList   layout.List
+	tabsSize   image.Point
+	epListSize image.Point
 }
 
 // currentSeason returns the selected season node, or nil when empty.

@@ -90,6 +90,9 @@ type App struct {
 	// pushed full-screen detail page (nil = browse screen)
 	detail *detailScreen
 
+	// Shared edge spacing; not an overscan reservation.
+	viewportInsets layout.Inset
+
 	// player
 	playerStatus     PlayerStatus
 	playerMode       PlayerMode
@@ -452,7 +455,7 @@ func (a *App) layoutPlayingBar(gtx C) D {
 					return D{Size: size}
 				}),
 				layout.Stacked(func(gtx C) D {
-					return layout.Inset{Left: tvSafeHorizontalInset(gtx), Right: tvSafeHorizontalInset(gtx), Top: dp8, Bottom: dp8}.Layout(gtx, func(gtx C) D {
+					return layout.Inset{Left: a.viewportInsets.Left, Right: a.viewportInsets.Right, Top: a.viewportInsets.Top, Bottom: dp8}.Layout(gtx, func(gtx C) D {
 						status := "Now playing"
 						if a.pendingPlayback != nil {
 							status = "Stopping playback"
@@ -471,6 +474,7 @@ func (a *App) layoutPlayingBar(gtx C) D {
 }
 
 func (a *App) layout(gtx C) D {
+	a.viewportInsets = layout.UniformInset(dp24)
 	return layout.Stack{}.Layout(gtx,
 		layout.Expanded(func(gtx C) D {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -484,7 +488,7 @@ func (a *App) layout(gtx C) D {
 					if a.detail != nil {
 						return a.layoutDetail(gtx)
 					}
-					return a.layoutBrowse(gtx)
+					return layout.Inset{Top: a.viewportInsets.Top, Left: a.viewportInsets.Left, Right: a.viewportInsets.Right}.Layout(gtx, a.layoutBrowse)
 				}),
 				layout.Rigid(a.layoutHelp),
 			)
@@ -494,6 +498,14 @@ func (a *App) layout(gtx C) D {
 				return D{}
 			}
 			return a.layoutSubtitlePopup(gtx)
+		}),
+		layout.Stacked(func(gtx C) D {
+			if a.subPopup == nil {
+				return D{}
+			}
+			// Popup hints must remain readable above the full-screen dimmer.
+			gtx.Constraints.Min = gtx.Constraints.Max
+			return layout.S.Layout(gtx, a.layoutHelp)
 		}),
 	)
 }

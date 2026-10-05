@@ -98,6 +98,9 @@ func dispatch(req request, drv *driver.Driver, repoRoot string, shotNumber *uint
 	}
 	switch req.Method {
 	case "tree":
+		if err := drv.Refresh(); err != nil {
+			return nil, false, err
+		}
 		return drv.Tree(), false, nil
 	case "click":
 		var p clickParams

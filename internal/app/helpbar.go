@@ -39,7 +39,7 @@ func (a *App) currentHints() []hint {
 	if a.browse.focus == browseFocusModeRail {
 		return []hint{
 			{key: "↑↓", label: "change mode"},
-			{key: "→/enter/esc", label: "home"},
+			{key: "→/enter/esc", label: "content"},
 			{key: "r", label: "refresh"},
 			{key: "q", label: "quit"},
 		}
@@ -78,15 +78,12 @@ func (a *App) currentHints() []hint {
 
 func (a *App) layoutHelp(gtx C) D {
 	hints := a.currentHints()
-	horizontalInset := dp16
-	if a.detail != nil {
-		horizontalInset = tvSafeHorizontalInset(gtx)
-	}
+	horizontalInset := a.viewportInsets.Left
 
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(hairline),
 		layout.Rigid(func(gtx C) D {
-			return layout.Inset{Left: horizontalInset, Right: horizontalInset, Top: dp8, Bottom: dp8}.Layout(gtx, func(gtx C) D {
+			return layout.Inset{Left: horizontalInset, Right: horizontalInset, Top: dp8, Bottom: a.viewportInsets.Bottom}.Layout(gtx, func(gtx C) D {
 				children := make([]layout.FlexChild, 0, len(hints)*2)
 				for i, h := range hints {
 					if i > 0 {

@@ -108,6 +108,34 @@ func (d *Driver) Frame() error {
 	return nil
 }
 
+// Refresh updates asynchronous state and honors scheduled redraws before an
+// observation. Bound the wait because loading UIs may invalidate indefinitely.
+// Normal Gio windows schedule these frames themselves; headless windows do not.
+func (d *Driver) Refresh() error {
+	deadline := time.Now().Add(250 * time.Millisecond)
+	if err := d.Frame(); err != nil {
+		return err
+	}
+	for {
+		at, pending := d.router.WakeupTime()
+		if !pending {
+			return nil
+		}
+		now := time.Now()
+		if !now.Before(deadline) {
+			return nil
+		}
+		if at.After(deadline) {
+			return nil
+		}
+		delay := max(16*time.Millisecond, at.Sub(now))
+		time.Sleep(min(delay, time.Until(deadline)))
+		if err := d.Frame(); err != nil {
+			return err
+		}
+	}
+}
+
 func (d *Driver) FrameNumber() uint64 { return d.frameNumber }
 
 func (d *Driver) Size() image.Point { return d.size }
@@ -284,6 +312,9 @@ func (d *Driver) Screenshot(path string) error {
 	}
 	if path == "" {
 		return errors.New("screenshot path is required")
+	}
+	if err := d.Refresh(); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create screenshot directory: %w", err)

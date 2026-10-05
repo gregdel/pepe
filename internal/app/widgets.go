@@ -68,6 +68,15 @@ func strokeRounded(gtx C, size image.Point, radius unit.Dp, col color.NRGBA) {
 	paint.Fill(gtx.Ops, col)
 }
 
+// focusRing is inset so the outline remains within the control's bounds.
+func focusRing(gtx C, size image.Point, radius unit.Dp) {
+	r := gtx.Dp(radius)
+	inset := gtx.Dp(dp2)
+	rr := clip.RRect{Rect: image.Rect(inset, inset, size.X-inset, size.Y-inset), NE: r, NW: r, SE: r, SW: r}
+	defer clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(gtx.Dp(dp2))}.Op().Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, colorSelectFg)
+}
+
 // scrim paints the browse preview gradient. Full-screen details use the
 // stronger, independently tuned detailScrim.
 func scrim(gtx C) {
@@ -78,20 +87,21 @@ func scrim(gtx C) {
 	)
 }
 
-// detailScrim preserves fanart as atmosphere while ensuring the areas around
-// detail content start from a consistently dark foundation.
-func detailScrim(gtx C) {
+// detailScrim keeps a constant, contrast-safe surface under all text. The
+// gradient starts beyond the reading edge, leaving exposed fanart on the right.
+func detailScrim(gtx C, readingEdge int) {
 	defer clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops).Pop()
-	paint.Fill(gtx.Ops, color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x70})
+	paint.Fill(gtx.Ops, color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x40})
+	clear := colorDetailPanel
+	clear.A = 0
 	paintGradient(gtx,
-		f32.Pt(0, 0), f32.Pt(float32(gtx.Constraints.Max.X), 0),
-		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0xa8},
-		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x18},
+		f32.Pt(float32(readingEdge), 0), f32.Pt(float32(readingEdge+gtx.Dp(unit.Dp(320))), 0),
+		colorDetailPanel, clear,
 	)
 	paintGradient(gtx,
 		f32.Pt(0, 0), f32.Pt(0, float32(gtx.Constraints.Max.Y)),
-		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x28},
-		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0xd8},
+		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x00},
+		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x90},
 	)
 }
 
@@ -103,29 +113,6 @@ func paintGradient(gtx C, from, to f32.Point, fromColor, toColor color.NRGBA) {
 	stack := clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	stack.Pop()
-}
-
-// detailPanel gives arbitrary artwork-backed content a predictable reading
-// surface. The caller controls its outer size through the layout constraints.
-func detailPanel(gtx C, inset layout.Inset, content layout.Widget) D {
-	macro := op.Record(gtx.Ops)
-	dims := inset.Layout(gtx, content)
-	call := macro.Stop()
-	fillRounded(gtx, dims.Size, radiusCard, colorDetailPanel)
-	call.Add(gtx.Ops)
-	return dims
-}
-
-// tvSafeHorizontalInset returns five percent of the viewport in density-
-// independent units. scaleContext makes this approximately 96dp at 1080p.
-func tvSafeHorizontalInset(gtx C) unit.Dp {
-	return unit.Dp(float32(gtx.Constraints.Max.X) * 0.05 / gtx.Metric.PxPerDp)
-}
-
-func detailSafeInsets(gtx C) layout.Inset {
-	horizontal := tvSafeHorizontalInset(gtx)
-	vertical := unit.Dp(float32(gtx.Constraints.Max.Y) * 0.05 / gtx.Metric.PxPerDp)
-	return layout.Inset{Top: vertical, Bottom: vertical, Left: horizontal, Right: horizontal}
 }
 
 // hairline paints a 1dp horizontal separator.
@@ -161,6 +148,14 @@ func (a *App) body(gtx C, size unit.Sp, s string, col color.NRGBA, maxLines int)
 	return lbl.Layout(gtx)
 }
 
+// prose keeps editorial descriptions near 55–70 characters per line at the
+// body type size, independently of title and technical-metadata panel widths.
+func (a *App) prose(gtx C, s string) D {
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(720)))
+	gtx.Constraints.Min.X = min(gtx.Constraints.Min.X, gtx.Constraints.Max.X)
+	return a.body(gtx, spBody, s, colorFg, 0)
+}
+
 // twoTone renders "prefix" in bold accent + "rest" in the given colour on one
 // line — the radix prefix highlight used across nav rows and headers.
 func (a *App) twoTone(gtx C, size unit.Sp, prefix, rest string, restCol color.NRGBA, prefixCol color.NRGBA) D {
@@ -168,7 +163,7 @@ func (a *App) twoTone(gtx C, size unit.Sp, prefix, rest string, restCol color.NR
 		layout.Rigid(func(gtx C) D {
 			return a.label(gtx, size, prefix, prefixCol, font.Bold)
 		}),
-		layout.Rigid(func(gtx C) D {
+		layout.Flexed(1, func(gtx C) D {
 			return a.label(gtx, size, rest, restCol, 0)
 		}),
 	)
@@ -322,11 +317,14 @@ func (a *App) detailActionButton(gtx C, id, semanticLabel, text string, primary 
 		call := macro.Stop()
 
 		bg := colorSurface2
+		focused := primary && a.detail != nil && a.detail.kind == detailMovie
 		if primary {
 			bg = colorSelectBg
 		}
 		fillRounded(gtx, dims.Size, radiusRow, bg)
-		if !primary {
+		if focused {
+			focusRing(gtx, dims.Size, radiusRow)
+		} else if !primary {
 			strokeRounded(gtx, dims.Size, radiusRow, colorOutline)
 		}
 		call.Add(gtx.Ops)
@@ -364,7 +362,7 @@ func (a *App) hintItem(gtx C, h hint) D {
 		}),
 		layout.Rigid(layout.Spacer{Width: dp6}.Layout),
 		layout.Rigid(func(gtx C) D {
-			return a.label(gtx, spTiny, h.label, colorMuted, 0)
+			return a.label(gtx, spSmall, h.label, colorSubtle, 0)
 		}),
 	)
 }
@@ -393,18 +391,6 @@ func (a *App) renderLines(gtx C, list *layout.List, lines []labelLine) D {
 			return lbl.Layout(gtx)
 		})
 	})
-}
-
-// renderKV renders "Key: Value" on one line.
-func (a *App) renderKV(gtx C, k, v string) D {
-	return layout.Flex{}.Layout(gtx,
-		layout.Rigid(func(gtx C) D {
-			return a.label(gtx, sp, k+": ", colorSubtle, 0)
-		}),
-		layout.Rigid(func(gtx C) D {
-			return a.label(gtx, sp, v, colorFg, 0)
-		}),
-	)
 }
 
 // spacerFn returns a widget function that draws a vertical spacer.

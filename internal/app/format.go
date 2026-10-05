@@ -59,13 +59,6 @@ func formatAiredDate(value string) string {
 	return value
 }
 
-func formatDateAdded(date time.Time) string {
-	if date.IsZero() {
-		return ""
-	}
-	return date.Format("2006-01-02")
-}
-
 func formatGenres(genres []string) string { return strings.Join(genres, ", ") }
 
 var languageNames = map[string]string{"en": "English", "fr": "French"}
@@ -76,6 +69,35 @@ func formatLanguageName(lang polochon.Language) string {
 		return fmt.Sprintf("%s (%s)", name, short)
 	}
 	return fmt.Sprintf("%s (%s)", string(lang), string(lang))
+}
+
+// formatSubtitleSummary lists distinct available languages; individual tracks
+// and their source remain in the subtitle popup and browse preview.
+func formatSubtitleSummary(embeddedLangs []polochon.Language, externalSubs []*papi.Subtitle) string {
+	var languages []string
+	seen := make(map[string]bool)
+	add := func(lang polochon.Language) {
+		name := formatLanguageName(lang)
+		if !seen[name] {
+			seen[name] = true
+			languages = append(languages, name)
+		}
+	}
+	for _, lang := range embeddedLangs {
+		add(lang)
+	}
+	for _, sub := range externalSubs {
+		if sub != nil && sub.Subtitle != nil {
+			add(sub.Lang)
+		}
+	}
+	if len(languages) == 0 {
+		return "Subtitles: None"
+	}
+	if len(languages) > 3 {
+		languages = append(languages[:3], fmt.Sprintf("+%d more", len(languages)-3))
+	}
+	return "Subtitles: " + strings.Join(languages, " · ")
 }
 
 func formatSubtitles(embeddedLangs []polochon.Language, externalSubs []*papi.Subtitle) string {
@@ -89,11 +111,10 @@ func formatSubtitles(embeddedLangs []polochon.Language, externalSubs []*papi.Sub
 		fmt.Fprintf(&text, "  %s - embedded\n", formatLanguageName(lang))
 	}
 	for _, subtitle := range externalSubs {
-		size := ""
-		if subtitle.Size > 0 {
-			size = fmt.Sprintf(", %s", humanize.Bytes(uint64(subtitle.Size)))
+		if subtitle == nil || subtitle.Subtitle == nil {
+			continue
 		}
-		fmt.Fprintf(&text, "  %s - external%s\n", formatLanguageName(subtitle.Lang), size)
+		fmt.Fprintf(&text, "  %s - external\n", formatLanguageName(subtitle.Lang))
 	}
 	return strings.TrimRight(text.String(), "\n")
 }

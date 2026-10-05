@@ -416,7 +416,8 @@ func TestHeadlessShowSeasonAndEpisodeNavigation(t *testing.T) {
 		t.Fatalf("initial show focus = (focus=%v, season=%d, episode=%d)", show.focus, show.seasonCursor, show.epCursor)
 	}
 	for _, label := range []string{
-		"A catalog show synopsis that remains concise and readable.",
+		"Fixture Show",
+		"2024  ·  8.4  ·  2 seasons · 3 episodes",
 		"Play episode",
 		"Aired Jan 2, 2026  ·  45 min  ·  8.1",
 		"Episode details for Pilot",

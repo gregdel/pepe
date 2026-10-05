@@ -98,7 +98,7 @@ func TestHeadlessPrefixTitlesReachable(t *testing.T) {
 					if !headlessLabelInside(f.driver.Tree(), node.FullString, viewport) {
 						t.Fatalf("terminal %q is not visible", node.FullString)
 					}
-					if !headlessHasLabel(f.driver.Tree(), node.Media.Title) || !headlessHasLabel(f.driver.Tree(), "for details") {
+					if !headlessHasLabel(f.driver.Tree(), node.Media.Title) || !headlessHasLabel(f.driver.Tree(), "details") {
 						t.Fatalf("terminal %q has no media preview", node.FullString)
 					}
 					headlessKey(t, f, "Enter")

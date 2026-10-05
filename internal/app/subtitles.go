@@ -217,16 +217,16 @@ func (a *App) layoutSubtitlePopupContent(gtx C, p *SubtitlePopup) D {
 func (a *App) layoutSubtitlePopupBody(gtx C, p *SubtitlePopup) D {
 	switch p.state {
 	case SubtitlePopupLoading:
-		return a.label(gtx, sp, "Searching…", colorMuted, 0)
+		return a.label(gtx, sp, "Searching…", colorFg, 0)
 	case SubtitlePopupDownloading:
-		return a.label(gtx, sp, "Downloading…", colorMuted, 0)
+		return a.label(gtx, sp, "Downloading…", colorFg, 0)
 	case SubtitlePopupDone:
 		return a.label(gtx, spTitle, "Downloaded!", colorPrimary, font.Bold)
 	case SubtitlePopupError:
 		return a.body(gtx, sp, "Error: "+p.errMsg, colorTerminal, 0)
 	case SubtitlePopupReady:
 		if len(p.entries) == 0 {
-			return a.label(gtx, sp, "No subtitles found", colorMuted, 0)
+			return a.label(gtx, sp, "No subtitles found", colorFg, 0)
 		}
 		pos := p.list.Position
 		last := pos.First + pos.Count - 1
@@ -257,7 +257,7 @@ func (a *App) layoutSubtitlePopupBody(gtx C, p *SubtitlePopup) D {
 func (a *App) drawSubtitleEntry(gtx C, entry *polochon.SubtitleEntry, selected bool) D {
 	const sourceColDp = unit.Dp(180)
 
-	return a.rowShell(gtx, selected, false, 0, func(gtx C) D {
+	return a.rowShell(gtx, selected, false, browseRowHeight, func(gtx C) D {
 		fg := colorFg
 		fgSecondary := colorSubtle
 		if selected {

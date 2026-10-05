@@ -8,7 +8,7 @@ Features include title-based directional search, recently added listings, movie 
 
 ## Requirements
 
-- Go **1.26.1**
+- Go **1.27.1**
 - A reachable Polochon server and its URL/token
 - `mpv` for playback
 

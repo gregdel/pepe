@@ -16,7 +16,14 @@ import (
 
 // ── Detail screen dispatch ────────────────────────────────────────────────────
 
-const detailFadeDuration = 140 * time.Millisecond
+const (
+	detailFadeDuration = 140 * time.Millisecond
+	moviePosterWidth   = unit.Dp(280)
+	showPosterWidth    = unit.Dp(240)
+	movieDetailWidth   = unit.Dp(900)
+	showDetailWidth    = unit.Dp(1300)
+	detailColumnGap    = dp32
+)
 
 // layoutDetail renders the pushed detail page with a short fade-in transition.
 func (a *App) layoutDetail(gtx C) D {
@@ -52,16 +59,26 @@ func (a *App) layoutDetail(gtx C) D {
 	return dims
 }
 
-// detailShell draws fanart + scrim behind the page content.
-func (a *App) detailShell(gtx C, fanart layout.Widget, content layout.Widget) D {
+// detailShell protects the entire reading area, fading into exposed fanart
+// beyond it rather than drawing individual cards around the content.
+func (a *App) detailShell(gtx C, readingWidth unit.Dp, fanart layout.Widget, content layout.Widget) D {
 	return layout.Stack{}.Layout(gtx,
 		layout.Expanded(fanart),
 		layout.Expanded(func(gtx C) D {
-			detailScrim(gtx)
+			edge := min(gtx.Dp(a.viewportInsets.Left+readingWidth+dp12), gtx.Constraints.Max.X)
+			detailScrim(gtx, edge)
 			return D{Size: gtx.Constraints.Max}
 		}),
 		layout.Stacked(func(gtx C) D {
-			return detailSafeInsets(gtx).Layout(gtx, content)
+			insets := a.viewportInsets
+			insets.Bottom = dp16
+			if a.playerStatus == PlayerStatusRunning {
+				insets.Top = dp16
+			}
+			return insets.Layout(gtx, func(gtx C) D {
+				gtx.Constraints.Min.Y = gtx.Constraints.Max.Y
+				return content(gtx)
+			})
 		}),
 	)
 }
@@ -76,23 +93,15 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 	movieID := movie.ImdbID
 	id := d.movieID
 
+	playText := "▶ Play"
+	if pos := a.resumePos[movieMediaKey(movieID)]; pos > minimumResumePosition {
+		playText = "▶ Resume " + formatResumePos(pos)
+	}
+
 	var sections []func(C) D
 	sections = append(sections, func(gtx C) D {
 		return a.body(gtx, spTitle, d.movieTitle, colorFg, 2)
 	})
-
-	if movie.Tagline != "" {
-		tl := movie.Tagline
-		sections = append(sections, spacerFn(dp8))
-		sections = append(sections, func(gtx C) D {
-			lbl := material.Label(a.th, spBody, tl)
-			lbl.Color = colorSubtle
-			lbl.Font.Style = font.Italic
-			lbl.MaxLines = 2
-			lbl.LineHeightScale = 1.4
-			return lbl.Layout(gtx)
-		})
-	}
 
 	if metaLine := buildMetaLine(movie.Year, movie.Runtime, movie.Genres); metaLine != "" {
 		sections = append(sections, spacerFn(dp8))
@@ -105,7 +114,7 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 	sections = append(sections, func(gtx C) D {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
-				return a.detailActionButton(gtx, "detail:movie:play", "Play movie", "▶ Play", true, func() {
+				return a.detailActionButton(gtx, "detail:movie:play", "Play movie", playText, true, func() {
 					a.launchMovie(&MediaItem{ID: d.movieID, Title: d.movieTitle, Type: mediaKindMovie})
 				})
 			}),
@@ -120,62 +129,55 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 		p := movie.Plot
 		sections = append(sections, spacerFn(dp20))
 		sections = append(sections, func(gtx C) D {
-			return a.body(gtx, spBody, p, colorFg, 0)
+			return a.prose(gtx, p)
+		})
+	}
+
+	if movie.Tagline != "" {
+		tl := movie.Tagline
+		sections = append(sections, spacerFn(dp12))
+		sections = append(sections, func(gtx C) D {
+			lbl := material.Label(a.th, spMeta, tl)
+			lbl.Color = colorSubtle
+			lbl.Font.Style = font.Italic
+			lbl.MaxLines = 2
+			lbl.LineHeightScale = 1.4
+			return lbl.Layout(gtx)
 		})
 	}
 
 	if technical := formatTechnicalMetadata(movie.Size, movie.Quality, movie.VideoCodec, movie.AudioCodec, movie.Container, movie.ReleaseGroup); technical != "" {
 		sections = append(sections, spacerFn(dp16))
 		sections = append(sections, func(gtx C) D {
-			return a.body(gtx, spMeta, technical, colorSubtle, 2)
+			return a.body(gtx, spMeta, technical, colorSubtle, 1)
 		})
 	}
 
-	subText := formatSubtitles(movie.EmbeddedSubtitles, movie.Subtitles)
-	sections = append(sections, spacerFn(dp20))
+	subText := formatSubtitleSummary(movie.EmbeddedSubtitles, movie.Subtitles)
+	sections = append(sections, spacerFn(dp12))
 	sections = append(sections, func(gtx C) D {
-		return a.body(gtx, sp, subText, colorFg, 0)
+		return a.body(gtx, spMeta, subText, colorSubtle, 1)
 	})
 
-	if dt := formatDateAdded(movie.DateAdded); dt != "" {
-		sections = append(sections, spacerFn(dp12))
-		sections = append(sections, func(gtx C) D {
-			return a.renderKV(gtx, "Added", dt)
-		})
+	if a.playerStatus != "" && a.playerStatus != PlayerStatusIdle {
+		sections = append(sections, spacerFn(dp16), a.renderPlayerStatus)
 	}
 
-	movieKey := movieMediaKey(movieID)
-	if pos, ok := a.resumePos[movieKey]; ok && pos > minimumResumePosition {
-		p := pos
-		sections = append(sections, spacerFn(dp8))
-		sections = append(sections, func(gtx C) D {
-			return a.renderKV(gtx, "Resume", formatResumePos(p))
-		})
-	}
-
-	sections = append(sections, spacerFn(dp16))
-	sections = append(sections, func(gtx C) D {
-		return a.renderPlayerStatus(gtx)
-	})
-
-	return a.detailShell(gtx, func(gtx C) D {
+	return a.detailShell(gtx, moviePosterWidth+detailColumnGap+movieDetailWidth, func(gtx C) D {
 		return a.movieFanart(gtx, movieID)
 	}, func(gtx C) D {
-		posterWidth := gtx.Dp(unit.Dp(280))
-		gap := gtx.Dp(dp32)
-		panelWidth := min(gtx.Dp(unit.Dp(900)), max(0, gtx.Constraints.Max.X-posterWidth-gap))
+		panelWidth := min(gtx.Dp(movieDetailWidth), max(0, gtx.Constraints.Max.X-gtx.Dp(moviePosterWidth+detailColumnGap)))
 
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
-				return a.movieThumb(gtx, id, unit.Dp(280), radiusPoster)
+				return a.movieThumb(gtx, id, moviePosterWidth, radiusPoster)
 			}),
-			layout.Rigid(layout.Spacer{Width: dp32}.Layout),
+			layout.Rigid(layout.Spacer{Width: detailColumnGap}.Layout),
 			layout.Rigid(func(gtx C) D {
-				gtx.Constraints = layout.Exact(image.Pt(panelWidth, gtx.Constraints.Max.Y))
-				return detailPanel(gtx, layout.UniformInset(dp32), func(gtx C) D {
-					return a.detailList.Layout(gtx, len(sections), func(gtx C, i int) D {
-						return sections[i](gtx)
-					})
+				gtx.Constraints.Min = image.Pt(panelWidth, 0)
+				gtx.Constraints.Max.X = panelWidth
+				return a.detailList.Layout(gtx, len(sections), func(gtx C, i int) D {
+					return sections[i](gtx)
 				})
 			}),
 			layout.Flexed(1, func(gtx C) D { return D{Size: gtx.Constraints.Min} }),
@@ -184,8 +186,8 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 }
 
 func (a *App) detailMessage(gtx C, msg string) D {
-	return layout.UniformInset(dp48).Layout(gtx, func(gtx C) D {
-		return a.label(gtx, sp, msg, colorMuted, 0)
+	return a.viewportInsets.Layout(gtx, func(gtx C) D {
+		return a.label(gtx, sp, msg, colorFg, 0)
 	})
 }
 
@@ -213,8 +215,8 @@ func buildMetaLine(year, runtime int, genres []string) string {
 
 func (a *App) renderPlayerStatus(gtx C) D {
 	status := a.playerStatus
-	if status == "" {
-		status = PlayerStatusIdle
+	if status == "" || status == PlayerStatusIdle {
+		return D{}
 	}
 
 	var lines []labelLine
@@ -228,7 +230,7 @@ func (a *App) renderPlayerStatus(gtx C) D {
 		lines = append(lines, labelLine{text: fmt.Sprintf("Mode: %s", a.playerMode), color: colorFg, size: sp})
 	}
 	if status == PlayerStatusError && a.playerError != "" {
-		lines = append(lines, labelLine{text: "Error:", color: colorMuted, size: sp})
+		lines = append(lines, labelLine{text: "Error:", color: colorFg, size: sp})
 		lines = append(lines, labelLine{text: a.playerError, color: colorTerminal, size: sp})
 	}
 	return a.renderLines(gtx, &a.playerLinesList, lines)

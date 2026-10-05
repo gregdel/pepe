@@ -59,7 +59,11 @@ func mustModeIcon(data []byte) *widget.Icon {
 }
 
 func (a *App) layoutModeRail(gtx C) D {
-	width := min(gtx.Dp(modeRailWidth), gtx.Constraints.Max.X)
+	railWidth := modeRailWidth
+	if a.browse.focus == browseFocusModeRail {
+		railWidth = unit.Dp(240)
+	}
+	width := min(gtx.Dp(railWidth), gtx.Constraints.Max.X)
 	gtx.Constraints.Min.X = width
 	gtx.Constraints.Max.X = width
 
@@ -104,9 +108,21 @@ func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
 			}
 
 			return layout.Center.Layout(gtx, func(gtx C) D {
-				size := gtx.Dp(unit.Dp(36))
-				gtx.Constraints = layout.Exact(image.Pt(size, size))
-				return icon.Layout(gtx, iconColor)
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx C) D {
+						size := gtx.Dp(unit.Dp(36))
+						gtx.Constraints = layout.Exact(image.Pt(size, size))
+						return icon.Layout(gtx, iconColor)
+					}),
+					layout.Rigid(func(gtx C) D {
+						if a.browse.focus != browseFocusModeRail {
+							return D{}
+						}
+						return layout.Inset{Left: dp12}.Layout(gtx, func(gtx C) D {
+							return a.label(gtx, sp, listingModeLabel(mode), iconColor, font.Medium)
+						})
+					}),
+				)
 			})
 		})
 	}, func() {
@@ -118,7 +134,7 @@ func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
 // ── Header ────────────────────────────────────────────────────────────────────
 
 func (a *App) layoutHeader(gtx C) D {
-	return layout.Inset{Left: dp24, Right: dp24, Top: dp12, Bottom: dp12}.Layout(gtx, func(gtx C) D {
+	return layout.Inset{Left: dp8, Right: dp8, Top: dp8, Bottom: dp8}.Layout(gtx, func(gtx C) D {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			// Active listing mode.
 			layout.Rigid(func(gtx C) D {
@@ -132,11 +148,10 @@ func (a *App) layoutHeader(gtx C) D {
 				return D{Size: size}
 			}),
 			layout.Rigid(layout.Spacer{Width: dp16}.Layout),
-			// Current section.
-			layout.Rigid(func(gtx C) D {
+			// Current section and accumulated title prefix.
+			layout.Flexed(1, func(gtx C) D {
 				return a.layoutSectionLabel(gtx)
 			}),
-			layout.Flexed(1, func(gtx C) D { return D{Size: image.Pt(gtx.Constraints.Max.X, 0)} }),
 			// Status + counts
 			layout.Rigid(func(gtx C) D {
 				return a.layoutHeaderStatus(gtx)
@@ -152,6 +167,9 @@ func (a *App) layoutSectionLabel(gtx C) D {
 		section = "Home"
 	} else if a.browse.nav.section == SectionShows {
 		section = "Shows"
+	}
+	if prefix := a.browse.nav.getCurrentPath(); prefix != "" && !a.browse.nav.isAtRoot() {
+		section += " / " + prefix
 	}
 	return a.label(gtx, spMeta, section, colorFg, font.Medium)
 }
@@ -269,13 +287,15 @@ func (a *App) rowShell(gtx C, selected, active bool, minHeight unit.Dp, content 
 			gtx.Constraints.Min.Y = h
 		}
 		macro := op.Record(gtx.Ops)
-		dims := layout.Inset{Left: dp12, Right: dp12, Top: dp6, Bottom: dp6}.Layout(gtx, content)
+		dims := layout.Center.Layout(gtx, func(gtx C) D {
+			return layout.Inset{Left: dp12, Right: dp12, Top: dp6, Bottom: dp6}.Layout(gtx, content)
+		})
 		call := macro.Stop()
 		if selected {
 			fillRounded(gtx, dims.Size, radiusRow, colorSelectBg)
+			focusRing(gtx, dims.Size, radiusRow)
 		} else if active {
 			fillRounded(gtx, dims.Size, radiusRow, colorSurface2)
-			strokeRounded(gtx, dims.Size, radiusRow, colorPrimary)
 		}
 		call.Add(gtx.Ops)
 		return dims
@@ -284,7 +304,7 @@ func (a *App) rowShell(gtx C, selected, active bool, minHeight unit.Dp, content 
 
 // groupRow renders a radix prefix group: two-tone label + count pill.
 func (a *App) groupRow(gtx C, prefix, label string, count int, selected bool) D {
-	return a.rowShell(gtx, selected, false, 0, func(gtx C) D {
+	return a.rowShell(gtx, selected, false, browseRowHeight, func(gtx C) D {
 		fg := colorFg
 		prefixCol := colorPrimary
 		if selected {
@@ -299,10 +319,15 @@ func (a *App) groupRow(gtx C, prefix, label string, count int, selected bool) D 
 		}
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			layout.Flexed(1, func(gtx C) D {
-				return a.twoTone(gtx, sp, prefix, rest, fg, prefixCol)
+				return a.twoTone(gtx, spBrowse, prefix, rest, fg, prefixCol)
 			}),
 			layout.Rigid(func(gtx C) D {
 				return a.countPill(gtx, count, selected)
+			}),
+			layout.Rigid(func(gtx C) D {
+				return layout.Inset{Left: dp12}.Layout(gtx, func(gtx C) D {
+					return a.label(gtx, spBrowse, "›", fg, font.Bold)
+				})
 			}),
 		)
 	})
@@ -314,7 +339,7 @@ func (a *App) terminalRow(gtx C, node *RadixNode, currentPath string, selected b
 	fullString := node.FullString
 
 	return a.rowShell(gtx, selected, false, thumbW*3/2, func(gtx C) D {
-		titleCol := colorTerminal
+		titleCol := colorFg
 		subCol := colorMuted
 		if selected {
 			titleCol = colorSelectFg
@@ -338,12 +363,12 @@ func (a *App) terminalRow(gtx C, node *RadixNode, currentPath string, selected b
 			}),
 			layout.Flexed(1, func(gtx C) D {
 				if selected {
-					return a.label(gtx, sp, fullString, titleCol, font.Bold)
+					return a.label(gtx, spBrowse, fullString, titleCol, font.Bold)
 				}
 				if currentPath == "" || !strings.HasPrefix(fullString, currentPath) {
-					return a.label(gtx, sp, fullString, titleCol, 0)
+					return a.label(gtx, spBrowse, fullString, titleCol, 0)
 				}
-				return a.twoTone(gtx, sp, currentPath, fullString[len(currentPath):], titleCol, colorPrimary)
+				return a.twoTone(gtx, spBrowse, currentPath, fullString[len(currentPath):], titleCol, colorPrimary)
 			}),
 			layout.Rigid(func(gtx C) D {
 				q := a.rowQuality(media)

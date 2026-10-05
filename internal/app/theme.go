@@ -18,10 +18,10 @@ var (
 	colorSubtle = color.NRGBA{R: 0xa0, G: 0xa0, B: 0xab, A: 0xff} // secondary text
 	colorMuted  = color.NRGBA{R: 0x88, G: 0x88, B: 0x94, A: 0xff} // hints, disabled
 
-	// Detail surfaces remain readable over worst-case bright fanart.
-	colorDetailPanel = color.NRGBA{R: 0x10, G: 0x10, B: 0x14, A: 0xf2}
+	// Reading scrim remains readable over white artwork after linear blending.
+	colorDetailPanel = color.NRGBA{R: 0x10, G: 0x10, B: 0x14, A: 0xfa}
 
-	colorPrimary  = color.NRGBA{R: 0x87, G: 0x5f, B: 0xff, A: 0xff} // accent (prefix, wordmark)
+	colorPrimary  = color.NRGBA{R: 0x9c, G: 0x7f, B: 0xff, A: 0xff} // accent (prefix, wordmark)
 	colorSelectBg = color.NRGBA{R: 0x6a, G: 0x4f, B: 0xe0, A: 0xff} // selection pill (5.5:1 on white)
 	colorSelectFg = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
 	colorTerminal = color.NRGBA{R: 0xff, G: 0x69, B: 0xb4, A: 0xff} // playable items (kept pink)
@@ -30,13 +30,14 @@ var (
 // ── Type scale — calibrated for 10-foot / TV viewing distance at 1080p ──────
 
 const (
-	spTiny  = unit.Sp(18) // count pills, hint labels, row meta
-	spSmall = unit.Sp(20) // keycaps
-	sp      = unit.Sp(24) // nav rows, KV rows
-	spBody  = unit.Sp(28) // plot, multi-line text
-	spMeta  = unit.Sp(24) // year · runtime · genres line
-	spTitle = unit.Sp(46) // detail page title
-	spHero  = unit.Sp(30) // header wordmark
+	spTiny   = unit.Sp(22) // count pills, row meta
+	spSmall  = unit.Sp(24) // keycaps and essential hints
+	spBrowse = unit.Sp(32) // primary browse labels
+	sp       = unit.Sp(24) // controls, KV rows
+	spBody   = unit.Sp(28) // plot, multi-line text
+	spMeta   = unit.Sp(24) // year · runtime · genres line
+	spTitle  = unit.Sp(46) // detail page title
+	spHero   = unit.Sp(30) // header wordmark
 )
 
 // ── Spacing scale ────────────────────────────────────────────────────────────
@@ -66,7 +67,8 @@ const (
 // ── Layout proportions ───────────────────────────────────────────────────────
 
 const (
-	modeRailWidth = unit.Dp(88)
-	navFlex       = 0.38 // browse: nav list share of the width
-	previewFlex   = 0.62 // browse: preview panel share
+	modeRailWidth   = unit.Dp(80)
+	browseRowHeight = unit.Dp(64)
+	navFlex         = 0.38 // browse: nav list share of the width
+	previewFlex     = 0.62 // browse: preview panel share
 )

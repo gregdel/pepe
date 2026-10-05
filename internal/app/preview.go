@@ -35,7 +35,7 @@ func (a *App) layoutPreview(gtx C) D {
 
 func (a *App) previewMessage(gtx C, msg string) D {
 	return layout.UniformInset(dp32).Layout(gtx, func(gtx C) D {
-		return a.label(gtx, sp, msg, colorMuted, 0)
+		return a.label(gtx, sp, msg, colorFg, 0)
 	})
 }
 
@@ -56,10 +56,6 @@ func (a *App) previewRoot(gtx C) D {
 			layout.Rigid(func(gtx C) D {
 				return a.label(gtx, spMeta, fmt.Sprintf("%d items in the library", count), colorSubtle, 0)
 			}),
-			layout.Rigid(layout.Spacer{Height: dp24}.Layout),
-			layout.Rigid(func(gtx C) D {
-				return a.hintItem(gtx, hint{key: "enter", label: "to browse"})
-			}),
 		)
 	})
 }
@@ -73,22 +69,22 @@ func (a *App) previewGroup(gtx C, node *RadixNode) D {
 		group = currentPath + node.Label
 	}
 
-	return layout.UniformInset(dp32).Layout(gtx, func(gtx C) D {
+	return layout.UniformInset(dp24).Layout(gtx, func(gtx C) D {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			// Group title with highlighted prefix
 			layout.Rigid(func(gtx C) D {
-				if currentPath != "" && strings.HasPrefix(group, currentPath) {
-					return a.twoTone(gtx, spTitle, currentPath, group[len(currentPath):], colorFg, colorPrimary)
-				}
-				return a.label(gtx, spTitle, group, colorFg, font.Bold)
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, func(gtx C) D {
+						if currentPath != "" && strings.HasPrefix(group, currentPath) {
+							return a.twoTone(gtx, spTitle, currentPath, group[len(currentPath):], colorFg, colorPrimary)
+						}
+						return a.label(gtx, spTitle, group, colorFg, font.Bold)
+					}),
+					layout.Rigid(func(gtx C) D {
+						return a.countPill(gtx, node.SubtreeCount, false)
+					}),
+				)
 			}),
-			layout.Rigid(layout.Spacer{Height: dp8}.Layout),
-			layout.Rigid(func(gtx C) D {
-				return a.label(gtx, spMeta, fmt.Sprintf("%d items in this group", node.SubtreeCount), colorSubtle, 0)
-			}),
-			layout.Rigid(layout.Spacer{Height: dp20}.Layout),
-			layout.Rigid(hairline),
-			layout.Rigid(layout.Spacer{Height: dp20}.Layout),
+			layout.Rigid(layout.Spacer{Height: dp16}.Layout),
 			// Sample of the group's content
 			layout.Flexed(1, func(gtx C) D {
 				maxShow := 14
@@ -105,7 +101,7 @@ func (a *App) previewGroup(gtx C, node *RadixNode) D {
 					if child.IsTerminal && child.FullString != "" {
 						label = child.FullString
 					} else {
-						label = group + child.Label
+						label = group + child.Label + "  ›"
 					}
 					lines = append(lines, labelLine{text: label, color: colorFg, size: sp})
 				}
@@ -176,7 +172,7 @@ func (a *App) previewShow(gtx C, media *MediaItem) D {
 	})
 }
 
-// previewMediaContent lays out the shared poster, title, metadata, and hint.
+// previewMediaContent lays out the shared poster, title, and metadata.
 func (a *App) previewMediaContent(gtx C, media *MediaItem, meta string, poster layout.Widget) D {
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(gtx,
 		layout.Rigid(poster),
@@ -191,11 +187,7 @@ func (a *App) previewMediaContent(gtx C, media *MediaItem, meta string, poster l
 					if meta == "" {
 						return D{}
 					}
-					return a.label(gtx, spMeta, meta, colorSubtle, 0)
-				}),
-				layout.Rigid(layout.Spacer{Height: dp16}.Layout),
-				layout.Rigid(func(gtx C) D {
-					return a.hintItem(gtx, hint{key: "→", label: "for details"})
+					return a.body(gtx, spMeta, meta, colorSubtle, 2)
 				}),
 			)
 		}),

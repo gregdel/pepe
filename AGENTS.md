@@ -2,7 +2,7 @@
 
 ## Where to work
 
-- Go 1.26.1 module (`go.mod`): `main.go` handles flags and the Gio window; `internal/app` owns the Polochon client, catalog, navigation, UI, subtitles, refresh, and mpv; `internal/driver` and `cmd/gio-control` provide headless UI testing.
+- Go 1.27.1 module (`go.mod`): `main.go` handles flags and the Gio window; `internal/app` owns the Polochon client, catalog, navigation, UI, subtitles, refresh, and mpv; `internal/driver` and `cmd/gio-control` provide headless UI testing.
 - This is a TV/remote/Steam Deck interface. Preserve directional-key/controller navigation and fullscreen playback; mouse behavior is secondary. The radix tree is the core title-search interaction.
 - Keep changes with their owner in `internal/app`: `core.go` (API/config), `listing.go` (catalog builders), `input.go`/`browse_navigation.go` (actions/navigation), `player.go` (mpv/IPC/resume), `refresh.go` (async refresh), `subtitles.go` (popup), `format.go` (display formatting).
 - For build, configuration, flags, and Steam Deck packaging, consult `README.md` and `packaging/steamdeck/README.md` when relevant rather than assuming host services are available.
@@ -20,7 +20,7 @@
 
 ## Detail UI (when changing detail pages)
 
-- Design for 10-foot viewing: low density, obvious Play action, clear focus, TV-safe inner 90% margins. Keep the existing help-bar hints and ordering. Do not change browse-preview scrims while changing full-screen movie/show details.
+- Design for 10-foot viewing: low density, obvious Play action, clear focus, compact 24dp outer spacing (scaled with the UI), without reserving a fixed 5% overscan border. Keep the existing help-bar hints and ordering. Do not change browse-preview scrims while changing full-screen movie/show details.
 - Never put important text directly on uncontrolled fanart/posters: use a dark surface/gradient/scrim. Check final composited contrast (WCAG AA: 4.5:1 normal, 3:1 large); `colorMuted` is only for disabled or nonessential hints. Inspect both bright and dark artwork.
 - Use embedded proportional Roboto (`text.NoSystemFonts()`) for all text, including technical values and keycaps; retain normal/medium/bold/italic and Noto Sans Symbols/Symbols 2 glyph fallbacks. Keep the pinned, SHA-verified font workflow in `build.sh`.
 - Constrain/clamp descriptions to roughly 55–70 characters/line with ~1.35–1.5 line spacing. On shows, prioritize the selected episode synopsis over repeated show copy. Order episode content: title/Play, air date/runtime, synopsis, then one subdued technical line (size, quality, codecs, container, release group); do not restore bright file badges.

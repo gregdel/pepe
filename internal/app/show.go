@@ -2,19 +2,19 @@ package app
 
 import (
 	"fmt"
+	"image"
 	"strings"
 
 	"gioui.org/font"
 	"gioui.org/layout"
 	"gioui.org/op"
-	"gioui.org/unit"
 	"github.com/odwrtw/polochon/lib/papi"
 )
 
 // ── Show detail page ──────────────────────────────────────────────────────────
 //
-// Protected show summary and season tabs above a stable episode list and the
-// focused episode's details. Focus and playback remain owned by showPage.
+// A persistent poster column anchors the show identity beside the season and
+// episode controls. Focus and playback remain owned by showPage.
 
 func (a *App) layoutShowDetail(gtx C, s *showPage) D {
 	show, ok := a.client.getShow(s.showID)
@@ -23,26 +23,29 @@ func (a *App) layoutShowDetail(gtx C, s *showPage) D {
 	}
 	showID := show.ImdbID
 
-	return a.detailShell(gtx, func(gtx C) D {
+	return a.detailShell(gtx, showPosterWidth+detailColumnGap+showDetailWidth, func(gtx C) D {
 		return a.showFanart(gtx, showID)
 	}, func(gtx C) D {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		contentWidth := min(gtx.Dp(showDetailWidth), max(0, gtx.Constraints.Max.X-gtx.Dp(showPosterWidth+detailColumnGap)))
+		return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
-				return a.showHeader(gtx, s, show)
+				return a.showPoster(gtx, showID, showPosterWidth, radiusPoster)
 			}),
-			layout.Rigid(layout.Spacer{Height: dp20}.Layout),
+			layout.Rigid(layout.Spacer{Width: detailColumnGap}.Layout),
 			layout.Rigid(func(gtx C) D {
-				return a.showTabs(gtx, s)
-			}),
-			layout.Rigid(layout.Spacer{Height: dp12}.Layout),
-			layout.Flexed(1, func(gtx C) D {
-				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-					layout.Flexed(0.42, func(gtx C) D {
-						return a.showEpisodeList(gtx, s)
-					}),
-					layout.Rigid(layout.Spacer{Width: dp24}.Layout),
-					layout.Flexed(0.58, func(gtx C) D {
-						return a.showEpisodeInfo(gtx, s)
+				gtx.Constraints.Min.X = contentWidth
+				gtx.Constraints.Max.X = contentWidth
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(func(gtx C) D { return a.showHeader(gtx, s, show) }),
+					layout.Rigid(layout.Spacer{Height: dp24}.Layout),
+					layout.Rigid(func(gtx C) D { return a.showTabs(gtx, s) }),
+					layout.Rigid(layout.Spacer{Height: dp24}.Layout),
+					layout.Flexed(1, func(gtx C) D {
+						return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+							layout.Flexed(0.4, func(gtx C) D { return a.showEpisodeList(gtx, s) }),
+							layout.Rigid(layout.Spacer{Width: detailColumnGap}.Layout),
+							layout.Flexed(0.6, func(gtx C) D { return a.showEpisodeInfo(gtx, s) }),
+						)
 					}),
 				)
 			}),
@@ -50,41 +53,17 @@ func (a *App) layoutShowDetail(gtx C, s *showPage) D {
 	})
 }
 
-// showHeader renders a compact, protected poster + show summary. The width
-// leaves an artwork-only region on wide screens and keeps prose lines short.
+// showHeader keeps show identity above the season and episode controls.
 func (a *App) showHeader(gtx C, s *showPage, show *papi.Show) D {
-	showID := show.ImdbID
-	headerWidth := min(gtx.Dp(unit.Dp(1300)), gtx.Constraints.Max.X)
-	gtx.Constraints.Min.X = headerWidth
-	gtx.Constraints.Max.X = headerWidth
-
-	return detailPanel(gtx, layout.UniformInset(dp24), func(gtx C) D {
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
-			layout.Rigid(func(gtx C) D {
-				return a.showPoster(gtx, showID, unit.Dp(180), radiusPoster)
-			}),
-			layout.Rigid(layout.Spacer{Width: dp32}.Layout),
-			layout.Flexed(1, func(gtx C) D {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(func(gtx C) D {
-						return a.body(gtx, spTitle, s.title, colorFg, 2)
-					}),
-					layout.Rigid(layout.Spacer{Height: dp8}.Layout),
-					layout.Rigid(func(gtx C) D {
-						return a.body(gtx, spMeta, buildShowSummary(show), colorSubtle, 2)
-					}),
-					layout.Rigid(func(gtx C) D {
-						if show.Plot == "" {
-							return D{}
-						}
-						return layout.Inset{Top: dp16}.Layout(gtx, func(gtx C) D {
-							return a.body(gtx, spBody, show.Plot, colorFg, 2)
-						})
-					}),
-				)
-			}),
-		)
-	})
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx C) D {
+			return a.body(gtx, spTitle, s.title, colorFg, 2)
+		}),
+		layout.Rigid(layout.Spacer{Height: dp8}.Layout),
+		layout.Rigid(func(gtx C) D {
+			return a.body(gtx, spMeta, buildShowSummary(show), colorSubtle, 2)
+		}),
+	)
 }
 
 func showCounts(show *papi.Show) (seasons, episodes int) {
@@ -99,15 +78,20 @@ func showCounts(show *papi.Show) (seasons, episodes int) {
 
 // showTabs renders the horizontal season selector.
 func (a *App) showTabs(gtx C, s *showPage) D {
-	if pos := s.tabsList.Position; pos.Count > 0 {
-		if s.seasonCursor < pos.First {
-			s.tabsList.ScrollTo(s.seasonCursor)
-		} else if s.seasonCursor > pos.First+pos.Count-1 {
-			s.tabsList.ScrollTo(s.seasonCursor - pos.Count + 1)
+	pos := s.tabsList.Position
+	last := pos.First + pos.Count - 1
+	if s.tabsSize != gtx.Constraints.Max || pos.Count == 0 || s.seasonCursor < pos.First || (s.seasonCursor == pos.First && pos.Offset > 0) {
+		s.tabsList.ScrollTo(s.seasonCursor)
+	} else if s.seasonCursor > last || (s.seasonCursor == last && pos.OffsetLast < 0) {
+		first := s.seasonCursor - pos.Count + 1
+		if pos.OffsetLast < 0 {
+			first++
 		}
+		s.tabsList.ScrollTo(first)
 	}
+	s.tabsSize = gtx.Constraints.Max
 
-	return detailPanel(gtx, layout.Inset{Left: dp8, Right: dp8, Top: dp4, Bottom: dp4}, func(gtx C) D {
+	return layout.Inset{Top: dp4, Bottom: dp4}.Layout(gtx, func(gtx C) D {
 		return s.tabsList.Layout(gtx, len(s.seasons), func(gtx C, i int) D {
 			season := s.seasons[i]
 			current := i == s.seasonCursor
@@ -124,7 +108,7 @@ func (a *App) showTabs(gtx C, s *showPage) D {
 						col = colorSelectFg
 						weight = font.Bold
 					case current:
-						col = colorPrimary
+						col = colorFg
 					}
 					return a.label(gtx, sp, season.Label, col, weight)
 				})
@@ -133,9 +117,9 @@ func (a *App) showTabs(gtx C, s *showPage) D {
 				switch {
 				case focused:
 					fillRounded(gtx, dims.Size, radiusRow, colorSelectBg)
+					focusRing(gtx, dims.Size, radiusRow)
 				case current:
 					fillRounded(gtx, dims.Size, radiusRow, colorSurface2)
-					strokeRounded(gtx, dims.Size, radiusRow, colorPrimary)
 				}
 				call.Add(gtx.Ops)
 				return dims
@@ -144,38 +128,40 @@ func (a *App) showTabs(gtx C, s *showPage) D {
 	})
 }
 
-// showEpisodeList renders episodes on a stable surface for arbitrary fanart.
+// showEpisodeList shares the page's reading surface with the episode synopsis.
 func (a *App) showEpisodeList(gtx C, s *showPage) D {
-	return detailPanel(gtx, layout.Inset{Top: dp8, Bottom: dp8}, func(gtx C) D {
+	return layout.Inset{Top: dp8, Bottom: dp8}.Layout(gtx, func(gtx C) D {
 		season := s.currentSeason()
 		if season == nil || len(season.Children) == 0 {
 			return layout.UniformInset(dp16).Layout(gtx, func(gtx C) D {
-				return a.label(gtx, sp, "No episodes", colorMuted, 0)
+				return a.label(gtx, sp, "No episodes", colorFg, 0)
 			})
 		}
 
-		if pos := s.epList.Position; pos.Count > 0 {
-			if s.epCursor < pos.First {
-				s.epList.ScrollTo(s.epCursor)
-			} else if s.epCursor > pos.First+pos.Count-1 {
-				s.epList.ScrollTo(s.epCursor - pos.Count + 1)
+		pos := s.epList.Position
+		last := pos.First + pos.Count - 1
+		if s.epListSize != gtx.Constraints.Max || pos.Count == 0 || s.epCursor < pos.First || (s.epCursor == pos.First && pos.Offset > 0) {
+			s.epList.ScrollTo(s.epCursor)
+		} else if s.epCursor > last || (s.epCursor == last && pos.OffsetLast < 0) {
+			first := s.epCursor - pos.Count + 1
+			if pos.OffsetLast < 0 {
+				first++
 			}
+			s.epList.ScrollTo(first)
 		}
+		s.epListSize = gtx.Constraints.Max
 
 		episodes := season.Children
 		return s.epList.Layout(gtx, len(episodes), func(gtx C, i int) D {
 			node := episodes[i]
 			selected := i == s.epCursor && s.focus == focusEpisodes
-			isCursor := i == s.epCursor
 
-			return a.rowShell(gtx, selected, false, 0, func(gtx C) D {
+			return a.rowShell(gtx, selected, false, browseRowHeight, func(gtx C) D {
 				titleCol := colorFg
 				subCol := colorSubtle
 				if selected {
 					titleCol = colorSelectFg
 					subCol = colorSelectFg
-				} else if isCursor {
-					titleCol = colorPrimary
 				}
 				code, title := episodeDisplayParts(node)
 				weight := font.Normal
@@ -196,7 +182,9 @@ func (a *App) showEpisodeList(gtx C, s *showPage) D {
 						if node.Episode == nil || node.Episode.Runtime <= 0 {
 							return D{}
 						}
-						return a.label(gtx, spTiny, fmt.Sprintf("%d min", node.Episode.Runtime), subCol, 0)
+						return layout.Inset{Left: dp12}.Layout(gtx, func(gtx C) D {
+							return a.label(gtx, spTiny, fmt.Sprintf("%d min", node.Episode.Runtime), subCol, 0)
+						})
 					}),
 				)
 			})
@@ -222,16 +210,20 @@ func (a *App) showEpisodeInfo(gtx C, s *showPage) D {
 			}),
 			layout.Rigid(layout.Spacer{Height: dp4}.Layout),
 			layout.Rigid(func(gtx C) D {
-				return a.body(gtx, spBody, title, colorFg, 2)
+				return a.body(gtx, spBrowse, title, colorFg, 2)
 			}),
 		)
 	})
 
+	playText := "▶ Play"
+	if pos := a.resumePos[episodeMediaKey(node.ShowID, ep.Season, ep.Episode)]; pos > minimumResumePosition {
+		playText = "▶ Resume " + formatResumePos(pos)
+	}
 	sections = append(sections, spacerFn(dp12))
 	sections = append(sections, func(gtx C) D {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
-				return a.detailActionButton(gtx, "detail:show:play", "Play episode", "▶ Play", true, func() {
+				return a.detailActionButton(gtx, "detail:show:play", "Play episode", playText, true, func() {
 					a.launchEpisode(node)
 				})
 			}),
@@ -253,27 +245,23 @@ func (a *App) showEpisodeInfo(gtx C, s *showPage) D {
 		plot := ep.Plot
 		sections = append(sections, spacerFn(dp16))
 		sections = append(sections, func(gtx C) D {
-			return a.body(gtx, spBody, plot, colorFg, 0)
+			return a.prose(gtx, plot)
 		})
 	}
 
 	if technical := formatTechnicalMetadata(ep.Size, ep.Quality, ep.VideoCodec, ep.AudioCodec, ep.Container, ep.ReleaseGroup); technical != "" {
 		sections = append(sections, spacerFn(dp16))
 		sections = append(sections, func(gtx C) D {
-			return a.body(gtx, spMeta, technical, colorSubtle, 2)
+			return a.body(gtx, spMeta, technical, colorSubtle, 1)
 		})
 	}
 
-	epMediaKey := episodeMediaKey(node.ShowID, ep.Season, ep.Episode)
-	if pos, ok := a.resumePos[epMediaKey]; ok && pos > minimumResumePosition {
-		position := pos
-		sections = append(sections, spacerFn(dp12))
-		sections = append(sections, func(gtx C) D {
-			return a.renderKV(gtx, "Resume", formatResumePos(position))
-		})
+	if a.playerStatus == PlayerStatusError {
+		sections = append(sections, spacerFn(dp12), a.renderPlayerStatus)
 	}
 
-	return detailPanel(gtx, layout.UniformInset(dp24), func(gtx C) D {
+	gtx.Constraints.Min = image.Point{}
+	return layout.Inset{Top: dp8, Bottom: dp8}.Layout(gtx, func(gtx C) D {
 		return s.infoList.Layout(gtx, len(sections), func(gtx C, i int) D {
 			return sections[i](gtx)
 		})

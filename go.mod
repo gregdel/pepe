@@ -1,6 +1,6 @@
 module github.com/gregdel/pepe
 
-go 1.26.1
+go 1.27.1
 
 require (
 	gioui.org v0.10.2
