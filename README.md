@@ -73,7 +73,14 @@ web_ui_addr: ":8081"
 
 Open `http://<pepe-host-address>:8081/` from your phone or browser. `:8081` listens
 on all interfaces; use `127.0.0.1:8081` for local-only access. An omitted or empty
-address disables the server. Explicit CLI values override YAML, including
+address disables the server. Choose **Web remote** in the mode menu (Left from
+Home, then Up) to display a large QR code linking directly to the HTTP LAN address
+and actual listening port. Scan it with your phone on the same network. If several
+network addresses are available, press Right then Up/Down to choose another.
+Localhost-only listeners show setup guidance instead of an unusable QR code.
+The page keeps your current catalog listing; Escape returns to it.
+
+Explicit CLI values override YAML, including
 `-web-ui-addr=` to disable it. An invalid or unavailable address fails startup.
 
 **There is no authentication or TLS. Use only on a trusted network; never expose

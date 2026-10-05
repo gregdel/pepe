@@ -36,6 +36,16 @@ func (a *App) currentHints() []hint {
 		}
 	}
 
+	if a.browse.remote != nil {
+		hints := []hint{{key: "←", label: "menu"}, {key: "esc", label: "back"}, {key: "home", label: "browse"}}
+		if a.browse.focus == browseFocusModeRail {
+			hints = append([]hint{{key: "↑↓", label: "change mode"}, {key: "→/enter", label: "content"}}, hints[1:]...)
+		} else if len(a.browse.remote.urls) > 1 {
+			hints = append([]hint{{key: "↑↓", label: "address"}}, hints...)
+		}
+		return append(hints, hint{key: "q", label: "quit"})
+	}
+
 	if a.browse.focus == browseFocusModeRail {
 		return []hint{
 			{key: "↑↓", label: "change mode"},

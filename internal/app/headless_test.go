@@ -248,7 +248,7 @@ func TestHeadlessPlayingBarAndSwitchInputs(t *testing.T) {
 func TestHeadlessLastAddedPreviews(t *testing.T) {
 	f := newHeadlessFixture(t)
 	headlessKey(t, f, "LeftArrow")
-	headlessKey(t, f, "UpArrow")
+	headlessKey(t, f, "DownArrow")
 	headlessKey(t, f, "RightArrow")
 	headlessKey(t, f, "RightArrow")
 	for _, label := range []string{"New Movie", "2026  ·  2h 5m  ·  Drama, Sci-Fi"} {
@@ -271,7 +271,7 @@ func TestHeadlessLastAddedMovieDetailAndBack(t *testing.T) {
 	f := newHeadlessFixture(t)
 
 	headlessKey(t, f, "LeftArrow")
-	headlessKey(t, f, "UpArrow")
+	headlessKey(t, f, "DownArrow")
 	if f.app.browse.library.mode != ListingModeDateAdded || f.app.browse.focus != browseFocusModeRail {
 		t.Fatalf("mode-rail state = (mode=%v, focus=%v)", f.app.browse.library.mode, f.app.browse.focus)
 	}
@@ -402,7 +402,7 @@ func TestHeadlessShowSeasonAndEpisodeNavigation(t *testing.T) {
 	f := newHeadlessFixture(t)
 
 	headlessKey(t, f, "LeftArrow")
-	headlessKey(t, f, "UpArrow")
+	headlessKey(t, f, "DownArrow")
 	headlessKey(t, f, "RightArrow")
 	headlessKey(t, f, "DownArrow")
 	headlessKey(t, f, "RightArrow")

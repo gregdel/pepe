@@ -25,6 +25,13 @@ func (a *App) layoutBrowse(gtx C) D {
 		layout.Rigid(a.layoutHeader),
 		layout.Rigid(hairline),
 		layout.Flexed(1, func(gtx C) D {
+			if a.browse.remote != nil {
+				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+					layout.Rigid(a.layoutModeRail),
+					layout.Rigid(verticalHairline),
+					layout.Flexed(1, a.layoutWebRemote),
+				)
+			}
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 				layout.Rigid(a.layoutModeRail),
 				layout.Rigid(verticalHairline),
@@ -48,6 +55,7 @@ func verticalHairline(gtx C) D {
 var (
 	radixModeIcon     = mustModeIcon(icons.ActionList)
 	dateAddedModeIcon = mustModeIcon(icons.ActionSchedule)
+	webRemoteIcon     = mustModeIcon(icons.CommunicationPhoneLinkRing)
 )
 
 func mustModeIcon(data []byte) *widget.Icon {
@@ -83,6 +91,9 @@ func (a *App) layoutModeRail(gtx C) D {
 					layout.Rigid(func(gtx C) D {
 						return a.layoutModeOption(gtx, ListingModeDateAdded)
 					}),
+					layout.Rigid(func(gtx C) D {
+						return a.layoutModeOption(gtx, listingModeCount)
+					}),
 				)
 			})
 		}),
@@ -90,11 +101,14 @@ func (a *App) layoutModeRail(gtx C) D {
 }
 
 func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
-	active := a.browse.library.mode == mode
+	active := a.railOption() == mode
 	focused := a.browse.focus == browseFocusModeRail && active
 	icon := radixModeIcon
-	if mode == ListingModeDateAdded {
+	switch mode {
+	case ListingModeDateAdded:
 		icon = dateAddedModeIcon
+	case listingModeCount:
+		icon = webRemoteIcon
 	}
 
 	return a.clickableLayout(gtx, "mode:"+listingModeLabel(mode), listingModeLabel(mode), func(gtx C) D {
@@ -127,7 +141,7 @@ func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
 		})
 	}, func() {
 		a.browse.focus = browseFocusModeRail
-		a.applyListingMode(mode)
+		a.selectRailOption(mode)
 	})
 }
 
@@ -138,7 +152,7 @@ func (a *App) layoutHeader(gtx C) D {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			// Active listing mode.
 			layout.Rigid(func(gtx C) D {
-				return a.label(gtx, spHero, listingModeLabel(a.browse.library.mode), colorPrimary, font.Bold)
+				return a.label(gtx, spHero, listingModeLabel(a.railOption()), colorPrimary, font.Bold)
 			}),
 			layout.Rigid(layout.Spacer{Width: dp16}.Layout),
 			layout.Rigid(func(gtx C) D {
@@ -162,6 +176,9 @@ func (a *App) layoutHeader(gtx C) D {
 
 // layoutSectionLabel renders the current browse section in the header.
 func (a *App) layoutSectionLabel(gtx C) D {
+	if a.browse.remote != nil {
+		return a.label(gtx, spMeta, "Scan to connect", colorFg, font.Medium)
+	}
 	section := "Movies"
 	if a.browse.nav.isAtRoot() {
 		section = "Home"
@@ -198,6 +215,9 @@ func (a *App) layoutHeaderStatus(gtx C) D {
 }
 
 func listingModeLabel(mode ListingMode) string {
+	if mode == listingModeCount {
+		return "Web remote"
+	}
 	if mode == ListingModeDateAdded {
 		return "Last added"
 	}

@@ -17,6 +17,8 @@ github.com/odwrtw/polochon v0.0.0-20260601073335-6f700a7ca1cf h1:dxIvNWZfqAq75Gf
 github.com/odwrtw/polochon v0.0.0-20260601073335-6f700a7ca1cf/go.mod h1:6O8z1mC6w7J0LlHBK6DP+x5B9zuNWzcSnDcaPEsiF6I=
 github.com/odwrtw/polochon v0.0.0-20260823133424-bbaf79e37c68 h1:RSUi8zBj+6OMp7+UweAIlqd7MqK5fjYs0NJXT6SVcPI=
 github.com/odwrtw/polochon v0.0.0-20260823133424-bbaf79e37c68/go.mod h1:APL5qOhVJPkB+3muOKsypGLwDFjbwAzeG8SV1rJS6pU=
+github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e h1:MRM5ITcdelLK2j1vwZ3Je0FKVCfqOLp5zO6trqMLYs0=
+github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e/go.mod h1:XV66xRDqSt+GTGFMVlhk3ULuV0y9ZmzeVGR4mloJI3M=
 golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 h1:R84qjqJb5nVJMxqWYb3np9L5ZsaDtB+a39EqjV0JSUM=
 golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0/go.mod h1:S9Xr4PYopiDyqSyp5NjCrhFrqg6A5zA2E/iPHPhqnS8=
 golang.org/x/exp/shiny v0.0.0-20250408133849-7e4ce0ab07d0 h1:tMSqXTK+AQdW3LpCbfatHSRPHeW6+2WuxaVQuHftn80=

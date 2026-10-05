@@ -157,6 +157,7 @@ type browseState struct {
 	library libraryView
 	nav     *NavigationState
 	focus   browseFocus
+	remote  *webRemotePage // separate from the catalog's listing mode
 }
 
 // savedSelection captures the identity of the currently selected media item so
@@ -239,6 +240,7 @@ func (a *App) snapshotForMode(mode ListingMode) LibrarySnapshot {
 }
 
 func (a *App) applyListingMode(mode ListingMode) {
+	a.browse.remote = nil
 	wasAtRoot := a.browse.nav.isAtRoot()
 	section := a.browse.nav.section
 	homeCursor := a.browse.nav.cursor
