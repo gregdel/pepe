@@ -357,16 +357,19 @@ func (a *App) Close() {
 // Run drives the application in a normal Gio window.
 func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Config) error {
 	a := New(client, sseCh, config, w.Invalidate, func() { w.Perform(system.ActionClose) })
-	var ops op.Ops
-
 	defer a.Close()
 	if config != nil {
 		if err := a.startWebUI(config.WebUIAddr); err != nil {
 			return err
 		}
 	}
+	return a.run(w.Event)
+}
+
+func (a *App) run(nextEvent func() event.Event) error {
+	var ops op.Ops
 	for {
-		switch e := w.Event().(type) {
+		switch e := nextEvent().(type) {
 		case gioapp.DestroyEvent:
 			return e.Err
 
@@ -378,6 +381,13 @@ func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 			a.Layout(gtx)
 
 			e.Frame(gtx.Ops)
+
+		default:
+			// Invalidate wakes inactive/occluded windows without a FrameEvent.
+			// Keep remote commands and async playback results moving even then.
+			a.drainChannels()
+			a.drainWebCommands()
+			a.publishWebStatus()
 		}
 	}
 }

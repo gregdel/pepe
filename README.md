@@ -104,10 +104,10 @@ URLs depend on your existing mpv/resolver setup; Pépé installs or bundles no
 resolver. Normal Polochon configuration and initial library fetch remain required.
 
 HTTP command responses report queuing, not successful playback. Commands run on
-the application event loop; a suspended/minimized window may delay them. Playback
-controls can briefly be unavailable while mpv starts. Check the browser status
-for failures and retry if necessary. The server stops when Pépé closes; existing
-app-close playback behavior is unchanged.
+the application event loop, including wake-ups while the window is minimized or
+covered by fullscreen mpv. Playback controls can briefly be unavailable while mpv
+starts. Check the browser status for failures and retry if necessary. The server
+stops when Pépé closes; existing app-close playback behavior is unchanged.
 
 ## Managed launchers
 
