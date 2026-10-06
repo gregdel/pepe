@@ -117,7 +117,7 @@ func (a *App) launchMovie(media *MediaItem) {
 	}
 	a.launchPlayback(playbackSource{
 		mediaKey:  movieMediaKey(movie.ImdbID),
-		title:     media.Title,
+		title:     formatTitle(movie.Title, movie.Year),
 		video:     movie,
 		subtitles: movie.Subtitles,
 	})
@@ -131,7 +131,7 @@ func (a *App) launchEpisode(node *DynamicNode) {
 	ep := node.Episode
 	title := node.Label
 	if show, ok := a.client.getShow(node.ShowID); ok && show != nil && show.Title != "" {
-		title = show.Title + " · " + title
+		title = show.Title + " " + title
 	}
 	a.launchPlayback(playbackSource{
 		mediaKey:  episodeMediaKey(node.ShowID, ep.Season, ep.Episode),
@@ -472,7 +472,8 @@ func buildMPVArgs(mpvPath, title, videoURL string, subtitleURLs []string, mode P
 		args = append(args, "--fs", "--no-border")
 	}
 	if title != "" {
-		args = append(args, "--title="+title)
+		// Make the playback title available to scripts and IPC, not just the window.
+		args = append(args, "--title="+title, "--force-media-title="+title)
 	}
 	for _, subtitleURL := range subtitleURLs {
 		if subtitleURL != "" {

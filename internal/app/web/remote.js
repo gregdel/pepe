@@ -1,6 +1,7 @@
 "use strict";
 
 const statusText = document.getElementById("status");
+const nowPlaying = document.getElementById("now-playing");
 const feedback = document.getElementById("feedback");
 const urlInput = document.getElementById("url");
 let requests = Promise.resolve();
@@ -57,9 +58,13 @@ async function poll() {
     const response = await fetch("/api/status", {cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(6000)});
     if (!response.ok) throw new Error("Disconnected");
     const status = await response.json();
-    let text = status.state;
+    const running = status.state === "Running";
+    const title = running ? (status.title || "Untitled video") : "Nothing playing";
+    if (nowPlaying.textContent !== title) nowPlaying.textContent = title;
+    document.title = running ? title + " · Pépé remote" : "Pépé remote";
+    let text = status.state === "Idle" ? "Ready to play" : status.state;
     if (status.stopping) text = "Stopping playback";
-    else if (status.state === "Running") text = (status.source === "web" ? "Playing from Web UI" : "Now playing") + ": " + status.title;
+    else if (running) text = status.source === "web" ? "Playing from Web UI" : "Now playing";
     if (status.queued_commands) text += " — " + status.queued_commands + " queued";
     if (statusText.textContent !== text) statusText.textContent = text;
     if (status.error || status.command_error) feedback.textContent = status.command_error || status.error;
@@ -68,6 +73,8 @@ async function poll() {
       button.disabled = status.state !== "Running" || (status.stopping && button.dataset.command !== "stop");
     });
   } catch (_) {
+    nowPlaying.textContent = "Pépé remote";
+    document.title = "Pépé remote";
     statusText.textContent = "Disconnected — check that Pépé is running.";
     document.querySelectorAll("[data-command]").forEach(button => { button.disabled = true; });
   } finally {

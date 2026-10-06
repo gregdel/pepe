@@ -10,10 +10,38 @@
 <body>
   <main>
     <header>
-      <h1>Pépé remote</h1>
+      <p class="brand">Pépé remote</p>
+      <h1 id="now-playing">Nothing playing</h1>
       <p id="status" role="status">Connecting…</p>
       <p id="feedback" role="alert"></p>
     </header>
+    <section class="playback" aria-labelledby="playback-heading">
+      <h2 id="playback-heading">Playback</h2>
+      <div class="playback-bar" role="group" aria-label="Playback controls">
+        <button data-command="seek-back" aria-label="Seek back 10 seconds" title="Seek back 10 seconds" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M8 3 4 7l4 4M4 7h9a8 8 0 0 1 0 16" transform="translate(0 -1)"/>
+            <text x="11" y="17">10</text>
+          </svg>
+        </button>
+        <button class="playback-toggle" data-command="pause" aria-label="Pause or resume" title="Pause or resume" disabled>
+          <svg viewBox="0 0 32 24" aria-hidden="true" focusable="false">
+            <path class="solid" d="m3 5 10 7-10 7zM20 5h3v14h-3zM26 5h3v14h-3z"/>
+          </svg>
+        </button>
+        <button data-command="seek-forward" aria-label="Seek forward 10 seconds" title="Seek forward 10 seconds" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="m16 3 4 4-4 4m4-4h-9a8 8 0 0 0 0 16" transform="translate(0 -1)"/>
+            <text x="13" y="17">10</text>
+          </svg>
+        </button>
+        <button class="playback-stop" data-command="stop" aria-label="Stop playback" title="Stop playback" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <rect class="solid" x="5" y="5" width="14" height="14" rx="2"/>
+          </svg>
+        </button>
+      </div>
+    </section>
     <section aria-labelledby="navigation-heading">
       <h2 id="navigation-heading">Navigation</h2>
       <div class="dpad">
@@ -28,16 +56,6 @@
         <button data-action="home">Home</button>
         <button data-action="section">Movies / Shows</button>
         <button data-action="subtitles">Subtitles</button>
-        <button data-action="refresh">Refresh</button>
-      </div>
-    </section>
-    <section aria-labelledby="playback-heading">
-      <h2 id="playback-heading">Playback</h2>
-      <div class="buttons">
-        <button data-command="seek-back" disabled>−10 seconds</button>
-        <button data-command="pause" disabled>Pause / Resume</button>
-        <button data-command="seek-forward" disabled>+10 seconds</button>
-        <button data-command="stop" disabled>Stop</button>
       </div>
     </section>
     <section aria-labelledby="url-heading">

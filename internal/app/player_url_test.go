@@ -164,7 +164,7 @@ while :; do sleep 0.05; done
 		data, _ := os.ReadFile(logPath)
 		return strings.HasSuffix(string(data), "stopped\n"+catalogURL+"\n")
 	})
-	if a.playerFromWeb || a.playerTitle != "Catalog" {
+	if a.playerFromWeb || a.playerTitle != "Catalog (2020)" {
 		t.Fatal("catalog replacement retained web identity")
 	}
 }

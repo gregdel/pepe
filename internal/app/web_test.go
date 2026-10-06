@@ -28,7 +28,8 @@ func TestWebPageControlsAndCopy(t *testing.T) {
 	response := webRequest(web.handler(), "GET", "/", "")
 	page := response.Body.String()
 	for _, removed := range []string{
-		`data-action="quit"`, "Quit Pépé", "No authentication. Use only on a trusted network.",
+		`data-action="quit"`, `data-action="refresh"`, "Quit Pépé", "No authentication. Use only on a trusted network.",
+		">Pause / Resume<", ">−10 seconds<", ">+10 seconds<",
 		"Right opens details. OK plays from details.",
 		"Replaces current playback. Website support depends on your existing mpv setup.",
 		"HTTP or HTTPS video URL",
@@ -37,10 +38,18 @@ func TestWebPageControlsAndCopy(t *testing.T) {
 			t.Errorf("page still contains %q", removed)
 		}
 	}
-	for _, retained := range []string{`aria-label="Video URL"`, `id="url-form"`, `data-action="right"`, `data-command="stop"`} {
+	for _, retained := range []string{
+		`aria-label="Video URL"`, `id="url-form"`, `data-action="right"`, `data-command="stop"`,
+		`id="now-playing"`, `class="playback-bar"`, `aria-label="Playback controls"`,
+		`aria-label="Seek back 10 seconds"`, `aria-label="Pause or resume"`,
+		`aria-label="Seek forward 10 seconds"`, `aria-label="Stop playback"`,
+	} {
 		if !strings.Contains(page, retained) {
 			t.Errorf("page is missing %q", retained)
 		}
+	}
+	if got := strings.Count(page, `aria-hidden="true" focusable="false"`); got != 4 {
+		t.Errorf("decorative playback SVG icons = %d, want 4", got)
 	}
 }
 

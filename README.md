@@ -109,6 +109,15 @@ covered by fullscreen mpv. Playback controls can briefly be unavailable while mp
 starts. Check the browser status for failures and retry if necessary. The server
 stops when Pépé closes; existing app-close playback behavior is unchanged.
 
+## Playback titles
+
+Catalog playback uses `Movie name (2024)` or
+`Show name S02E05 - Episode name`, omitting unavailable years or show names.
+Pépé passes the title both as mpv's window title and as `force-media-title`.
+Scripts, on-screen controls and JSON IPC clients can read the standard
+`media-title` property without any Pépé-specific integration. The same
+catalog title is used by Pépé's now-playing indicator and web status.
+
 ## Managed launchers
 
 Ordinary mpv and foreground wrappers need no managed mode. A **managed launcher**

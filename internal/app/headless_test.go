@@ -228,7 +228,7 @@ func TestHeadlessPlayingBarAndSwitchInputs(t *testing.T) {
 	if err := f.driver.Click(driver.ClickTarget{Label: "Play movie", Occurrence: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if f.app.playerStatus != PlayerStatusRunning || f.app.playerDone != completion || f.app.pendingPlayback == nil || f.app.pendingPlayback.title != "New Movie" {
+	if f.app.playerStatus != PlayerStatusRunning || f.app.playerDone != completion || f.app.pendingPlayback == nil || f.app.pendingPlayback.title != "New Movie (2026)" {
 		t.Fatal("keyboard or pointer Play did not queue replacement")
 	}
 	select {

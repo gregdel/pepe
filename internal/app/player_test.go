@@ -151,6 +151,44 @@ while :; do sleep 0.1; done
 	}
 }
 
+func TestMoviePlaybackTitleUsesMetadata(t *testing.T) {
+	client := NewEmptyAPIClient(nil)
+	for _, tc := range []struct {
+		year int
+		want string
+	}{
+		{2024, "Fixture Movie (2024)"},
+		{0, "Fixture Movie"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			client.movies["movie-one"] = testMovie("movie-one", "Fixture Movie", tc.year)
+			a := &App{client: client, playerStatus: PlayerStatusRunning}
+			a.launchMovie(&MediaItem{ID: "movie-one", Title: "Stale listing title"})
+			if a.pendingPlayback == nil || a.pendingPlayback.title != tc.want {
+				t.Fatalf("movie playback title = %+v, want %q", a.pendingPlayback, tc.want)
+			}
+		})
+	}
+}
+
+func TestPlaybackTitleIsPassedLiterallyToMPV(t *testing.T) {
+	for _, title := range []string{"", "Movie (2024)", "Show S02E05 - Episode", "${filename} {\\b1} · Title"} {
+		args := buildMPVArgs("mpv", title, "https://video", nil, PlayerModeGUI, 0, "/unused/mpv.sock", false, "/unused/auth.conf")
+		windowTitle, mediaTitle := "", ""
+		for _, arg := range args {
+			if strings.HasPrefix(arg, "--title=") {
+				windowTitle = strings.TrimPrefix(arg, "--title=")
+			}
+			if strings.HasPrefix(arg, "--force-media-title=") {
+				mediaTitle = strings.TrimPrefix(arg, "--force-media-title=")
+			}
+		}
+		if windowTitle != title || mediaTitle != title {
+			t.Fatalf("titles = (%q, %q), want %q", windowTitle, mediaTitle, title)
+		}
+	}
+}
+
 func TestEpisodePlaybackTitleIncludesShow(t *testing.T) {
 	client := NewEmptyAPIClient(nil)
 	client.shows["show-one"] = testShow("show-one", "Fixture Show", 2024)
@@ -158,7 +196,7 @@ func TestEpisodePlaybackTitleIncludesShow(t *testing.T) {
 		showID string
 		want   string
 	}{
-		{"show-one", "Fixture Show · S01E02 - Pilot"},
+		{"show-one", "Fixture Show S01E02 - Pilot"},
 		{"missing", "S01E02 - Pilot"},
 	} {
 		t.Run(tc.showID, func(t *testing.T) {
