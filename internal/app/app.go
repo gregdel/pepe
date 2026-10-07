@@ -103,6 +103,7 @@ type App struct {
 	playerSocket     string
 	playerSession    uint64
 	playerControls   *playerControls
+	playerTracker    *playbackTracker
 	pendingPlayback  *playbackSource
 	playerStop       chan struct{}
 	mpvPath          string
@@ -405,6 +406,7 @@ func (a *App) drainChannels() {
 			a.cancelPlayerControls()
 			a.playerSocket = ""
 			a.playerDone = nil
+			a.playerTracker = nil
 			a.playerStop = nil
 			a.playerTitle = ""
 			a.playerFromWeb = false
@@ -424,6 +426,7 @@ func (a *App) drainChannels() {
 		}
 	}
 
+	a.updatePlayerTitle()
 	a.drainPlayerControls()
 
 	if a.sseSignal != nil {

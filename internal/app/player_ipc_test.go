@@ -12,7 +12,7 @@ import (
 )
 
 // Connect a fake mpv peer and consume the tracker's property subscriptions.
-func playbackIPCPeer(t *testing.T, key string) (*playbackTracker, net.Conn) {
+func playbackIPCPeer(t *testing.T, key string, onTitle func()) (*playbackTracker, net.Conn) {
 	t.Helper()
 	dir, _, socket, err := createPlayerRuntime("secret")
 	if err != nil {
@@ -27,7 +27,7 @@ func playbackIPCPeer(t *testing.T, key string) (*playbackTracker, net.Conn) {
 	if err := listener.SetDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	tracker := startIPC(socket, key, time.Second)
+	tracker := startIPC(socket, key, time.Second, onTitle)
 	t.Cleanup(func() {
 		tracker.stopIPC()
 		select {
@@ -45,9 +45,9 @@ func playbackIPCPeer(t *testing.T, key string) (*playbackTracker, net.Conn) {
 		t.Fatal(err)
 	}
 	scanner := bufio.NewScanner(conn)
-	for range 2 {
-		if !scanner.Scan() {
-			t.Fatalf("missing property subscription: %v", scanner.Err())
+	for _, property := range []string{"time-pos", "eof-reached", "force-media-title"} {
+		if !scanner.Scan() || !strings.Contains(scanner.Text(), `"`+property+`"`) {
+			t.Fatalf("missing %s subscription: %s, %v", property, scanner.Text(), scanner.Err())
 		}
 	}
 	return tracker, conn
@@ -57,7 +57,7 @@ func TestPlayerIPCEndFileResume(t *testing.T) {
 	for _, key := range []string{movieMediaKey("first"), episodeMediaKey("show", 3, 4)} {
 		for _, reason := range []string{"eof", "stop", "quit", "error", "redirect", "", "unknown"} {
 			t.Run(key+"/"+reason, func(t *testing.T) {
-				tracker, conn := playbackIPCPeer(t, key)
+				tracker, conn := playbackIPCPeer(t, key, nil)
 				endEvent := fmt.Sprintf("{\"event\":\"end-file\",\"reason\":%q}\n", reason)
 				if reason == "" {
 					endEvent = "{\"event\":\"end-file\"}\n"
@@ -104,7 +104,7 @@ func TestPlayerIPCEndFileResume(t *testing.T) {
 }
 
 func TestPlayerIPCRedirectContinuesTracking(t *testing.T) {
-	tracker, conn := playbackIPCPeer(t, "movie:first")
+	tracker, conn := playbackIPCPeer(t, "movie:first", nil)
 	_, err := fmt.Fprint(conn, "{\"event\":\"end-file\",\"reason\":\"redirect\"}\n{\"event\":\"property-change\",\"name\":\"time-pos\",\"data\":180}\n{\"event\":\"end-file\",\"reason\":\"eof\"}\n")
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestPlayerCompletionPublishesSettledTracker(t *testing.T) {
 				defer func() { _ = conn.Close() }()
 				_ = conn.SetDeadline(time.Now().Add(time.Second))
 				scanner := bufio.NewScanner(conn)
-				for range 2 {
+				for range 3 {
 					if !scanner.Scan() {
 						t.Fatal("missing IPC subscription")
 					}
@@ -188,7 +188,7 @@ func TestPlayerCompletionPublishesSettledTracker(t *testing.T) {
 }
 
 func TestPlaybackTrackerFinishCancelsSilentPeer(t *testing.T) {
-	tracker, _ := playbackIPCPeer(t, "movie:first")
+	tracker, _ := playbackIPCPeer(t, "movie:first", nil)
 	finished := make(chan struct{})
 	go func() {
 		tracker.finishIPC()

@@ -274,7 +274,7 @@ func TestPlayerIPCTracksDelayedStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	tracker := startIPC(socket, "movie:delayed", 5*time.Second)
+	tracker := startIPC(socket, "movie:delayed", 5*time.Second, nil)
 	defer tracker.stopIPC()
 	time.Sleep(3200 * time.Millisecond) // Beyond the unchanged desktop timeout.
 	listener, err := net.Listen("unix", socket)
@@ -290,7 +290,7 @@ func TestPlayerIPCTracksDelayedStartup(t *testing.T) {
 		defer func() { _ = conn.Close() }()
 		_ = conn.SetDeadline(time.Now().Add(time.Second))
 		scanner := bufio.NewScanner(conn)
-		for range 2 {
+		for range 3 {
 			if !scanner.Scan() {
 				return
 			}
@@ -321,7 +321,7 @@ func TestPlayerIPCDeadlineAndCancellation(t *testing.T) {
 				timeout = 15 * time.Second
 			}
 			started := time.Now()
-			tracker := startIPC(socket, "movie:missing", timeout)
+			tracker := startIPC(socket, "movie:missing", timeout, nil)
 			defer tracker.stopIPC()
 			if cancel {
 				tracker.stopIPC()

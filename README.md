@@ -118,6 +118,12 @@ Scripts, on-screen controls and JSON IPC clients can read the standard
 `media-title` property without any Pépé-specific integration. The same
 catalog title is used by Pépé's now-playing indicator and web status.
 
+For web URL playback, Pépé leaves mpv's title unset and observes
+`force-media-title`, which mpv's yt-dlp hook fills with the resolved video title.
+The title updates in both the display and web remote, including during fullscreen
+playback. Until a title is available, Pépé shows “Web UI video”; it does not use
+mpv's URL/filename fallback. User mpv configuration can still override the title.
+
 ## Managed launchers
 
 Ordinary mpv and foreground wrappers need no managed mode. A **managed launcher**

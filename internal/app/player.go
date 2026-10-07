@@ -141,7 +141,10 @@ func (a *App) launchEpisode(node *DynamicNode) {
 	})
 }
 
-const maxPlaybackURLLength = 8192
+const (
+	maxPlaybackURLLength = 8192
+	webPlaybackTitle     = "Web UI video"
+)
 
 // validatePlaybackURL preserves signed URLs and never includes the input in errors.
 func validatePlaybackURL(raw string) (string, error) {
@@ -166,7 +169,7 @@ func (a *App) launchURL(raw string) error {
 	if err != nil {
 		return err
 	}
-	a.launchPlayback(playbackSource{title: "Web UI video", url: videoURL})
+	a.launchPlayback(playbackSource{title: webPlaybackTitle, url: videoURL})
 	return nil
 }
 
@@ -247,9 +250,14 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 		mode:       detectPlayerMode(),
 		fromWeb:    source.url != "",
 	}
+	mpvTitle := source.title
+	if command.fromWeb {
+		// Let the yt-dlp hook supply its resolved title instead of forcing our placeholder.
+		mpvTitle = ""
+	}
 	command.args = buildMPVArgs(
 		a.mpvPath,
-		source.title,
+		mpvTitle,
 		videoURL,
 		subtitleURLs,
 		command.mode,
@@ -309,7 +317,8 @@ func (a *App) startPlayer(command playerCommand) bool {
 	done := make(chan playerResult, 1)
 	stop := make(chan struct{})
 	policy := a.playerPolicy.withDefaults()
-	tracker := startIPC(command.sockPath, command.mediaKey, policy.connectTimeout)
+	tracker := startIPC(command.sockPath, command.mediaKey, policy.connectTimeout, a.invalidate)
+	a.playerTracker = tracker
 	a.playerDone = done
 	a.playerStop = stop
 	a.playerStatus = PlayerStatusRunning
@@ -484,12 +493,14 @@ func buildMPVArgs(mpvPath, title, videoURL string, subtitleURLs []string, mode P
 	return args
 }
 
-// playbackTracker is updated by the mpv IPC goroutine without waking the UI.
+// playbackTracker stores IPC state. Only title changes wake the UI.
 type playbackTracker struct {
 	mu       sync.RWMutex
 	mediaKey string
 	pos      float64
 	eof      bool
+	title    string
+	onTitle  func()
 	done     chan struct{}
 	stop     chan struct{}
 	stopOnce sync.Once
@@ -521,6 +532,33 @@ func (t *playbackTracker) updatePos(pos float64) {
 	t.mu.Unlock()
 }
 
+func (t *playbackTracker) updateTitle(title string) {
+	title = strings.TrimSpace(title)
+	t.mu.Lock()
+	changed := t.title != title
+	t.title = title
+	t.mu.Unlock()
+	if changed && t.onTitle != nil {
+		t.onTitle()
+	}
+}
+
+func (t *playbackTracker) resolvedTitle() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.title
+}
+
+func (a *App) updatePlayerTitle() {
+	if a.playerStatus != PlayerStatusRunning || !a.playerFromWeb || a.playerTracker == nil || a.playerStopping {
+		return
+	}
+	a.playerTitle = a.playerTracker.resolvedTitle()
+	if a.playerTitle == "" {
+		a.playerTitle = webPlaybackTitle
+	}
+}
+
 func (t *playbackTracker) markEOF() {
 	t.mu.Lock()
 	t.eof = true
@@ -542,9 +580,10 @@ func (t *playbackTracker) wait(timeout time.Duration) {
 	}
 }
 
-// startIPC launches ipcLoop in a goroutine and returns a passive playback tracker.
-func startIPC(sockPath, mediaKey string, connectTimeout time.Duration) *playbackTracker {
+// startIPC launches ipcLoop in a goroutine and returns a playback tracker.
+func startIPC(sockPath, mediaKey string, connectTimeout time.Duration, onTitle func()) *playbackTracker {
 	tracker := newPlaybackTracker(mediaKey)
+	tracker.onTitle = onTitle
 	go ipcLoop(sockPath, tracker, connectTimeout)
 	return tracker
 }
@@ -602,6 +641,9 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 	// Send observe_property commands.
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 1, \"time-pos\"]}\n")
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 2, \"eof-reached\"]}\n")
+	// yt-dlp sets this file-local option, which supplies media-title. Observe
+	// it directly to avoid exposing media-title's URL/filename fallback.
+	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 3, \"force-media-title\"]}\n")
 
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
@@ -618,6 +660,12 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 			continue
 		}
 		switch ev.Name {
+		case "force-media-title":
+			if title, ok := ev.Data.(string); ok {
+				tracker.updateTitle(title)
+			} else if ev.Data == nil {
+				tracker.updateTitle("")
+			}
 		case "time-pos":
 			if pos, ok := ev.Data.(float64); ok && pos > minimumResumePosition {
 				tracker.updatePos(pos)

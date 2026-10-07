@@ -57,7 +57,7 @@ func TestWebPlaybackCommandHasNoCatalogCredentialsOrResume(t *testing.T) {
 				t.Fatalf("web command = %+v", command)
 			}
 			args := strings.Join(command.args, "\n")
-			if strings.Contains(args, "--start=") || strings.Contains(args, "--sub-file=") || strings.Contains(args, "private-polochon-token") {
+			if strings.Contains(args, "--start=") || strings.Contains(args, "--sub-file=") || strings.Contains(args, "private-polochon-token") || strings.Contains(args, "--title=") || strings.Contains(args, "--force-media-title=") {
 				t.Fatalf("catalog data in web arguments: %s", args)
 			}
 			if strings.Contains(args, "--managed-runtime=") != managed {
@@ -215,7 +215,10 @@ func TestHeadlessWebPlayingBar(t *testing.T) {
 				}
 				f.app.playerStatus = PlayerStatusRunning
 				f.app.playerFromWeb = true
-				f.app.playerTitle = "Web UI video"
+				f.app.playerTitle = webPlaybackTitle
+				f.app.playerTracker = newPlaybackTracker("")
+				resolvedTitle := "A resolved web video — Linux systems, explained"
+				f.app.playerTracker.updateTitle(resolvedTitle)
 				f.app.applyListingMode(ListingModeDateAdded)
 				f.app.navigateRight()
 				for _, view := range []string{"browse", "movie", "show"} {
@@ -231,7 +234,7 @@ func TestHeadlessWebPlayingBar(t *testing.T) {
 					if err := f.driver.Resize(size.X, size.Y); err != nil {
 						t.Fatal(err)
 					}
-					if !headlessLabelInside(f.driver.Tree(), "Now playing from Web UI", size) || !headlessLabelInside(f.driver.Tree(), "Web UI video", size) {
+					if !headlessLabelInside(f.driver.Tree(), "Now playing from Web UI", size) || !headlessLabelInside(f.driver.Tree(), resolvedTitle, size) {
 						t.Fatal("web playing indicator missing or clipped")
 					}
 					tvCapture(t, f, fmt.Sprintf("web-%s-%d-art-%d", view, size.X, shade))
