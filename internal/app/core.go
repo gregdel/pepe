@@ -77,6 +77,9 @@ func NewAPIClient(endpoint, token string, log *slog.Logger) (*APIClient, error) 
 	if log == nil {
 		log = slog.Default()
 	}
+	if endpointURL, err := url.Parse(endpoint); err == nil && strings.EqualFold(endpointURL.Scheme, "http") {
+		log.Warn("polochon_url uses unencrypted HTTP; use the canonical HTTPS URL if available: HTTP-to-HTTPS artwork redirects are blocked")
+	}
 	c := &APIClient{
 		client:        papiClient,
 		token:         token,

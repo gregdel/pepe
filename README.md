@@ -43,7 +43,7 @@ POLOCHON_TOKEN=your-token \
 ./pepe
 ```
 
-Artwork redirects must stay on the original origin (scheme, hostname, and port). Redirects to another origin, including HTTPS-to-HTTP downgrades, are rejected to protect the authentication token.
+Artwork redirects must stay on the original origin (scheme, hostname, and port). Redirects to another origin, including HTTP-to-HTTPS upgrades and HTTPS-to-HTTP downgrades, are rejected to protect the authentication token. Use the server's canonical HTTPS URL directly if available. An effective `polochon_url` using HTTP (including a `POLOCHON_URL` override) produces a startup log warning; intentional HTTP-only setups remain allowed.
 
 Explicit playback flags override YAML settings, including `-mpv-managed-launcher=false`.
 
