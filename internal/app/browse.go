@@ -25,19 +25,21 @@ func (a *App) layoutBrowse(gtx C) D {
 		layout.Rigid(a.layoutHeader),
 		layout.Rigid(hairline),
 		layout.Flexed(1, func(gtx C) D {
-			if a.browse.remote != nil {
-				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-					layout.Rigid(a.layoutModeRail),
-					layout.Rigid(verticalHairline),
-					layout.Flexed(1, a.layoutWebRemote),
-				)
-			}
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 				layout.Rigid(a.layoutModeRail),
 				layout.Rigid(verticalHairline),
-				layout.Flexed(navFlex, a.layoutNavPanel),
-				layout.Rigid(verticalHairline),
-				layout.Flexed(previewFlex, a.layoutPreview),
+				layout.Flexed(1, func(gtx C) D {
+					// Rail clicks can open or close the remote page. Choose the
+					// content after the rigid rail has processed those clicks.
+					if a.browse.remote != nil {
+						return a.layoutWebRemote(gtx)
+					}
+					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+						layout.Flexed(navFlex, a.layoutNavPanel),
+						layout.Rigid(verticalHairline),
+						layout.Flexed(previewFlex, a.layoutPreview),
+					)
+				}),
 			)
 		}),
 	)

@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/gregdel/pepe/internal/driver"
 )
 
 func TestWebRemoteURLs(t *testing.T) {
@@ -85,6 +87,71 @@ func TestWebRemoteNavigationPreservesListing(t *testing.T) {
 	a.navigateHome()
 	if a.browse.remote != nil || !a.browse.nav.isAtRoot() || a.browse.focus != browseFocusContent {
 		t.Fatal("Home did not leave the QR page")
+	}
+}
+
+func TestHeadlessWebRemoteListingClicks(t *testing.T) {
+	for _, mode := range []ListingMode{ListingModeTitle, ListingModeDateAdded} {
+		for _, section := range []string{"Home", "Movies", "Shows"} {
+			t.Run(listingModeLabel(mode)+"/"+section, func(t *testing.T) {
+				f := newHeadlessFixture(t)
+				if section != "Home" {
+					selected := SectionMovies
+					if section == "Shows" {
+						selected = SectionShows
+					}
+					f.app.browse.nav.resetToSection(selected, f.app.sectionRoot(selected))
+				}
+				wasAtRoot, selectedSection := f.app.browse.nav.isAtRoot(), f.app.browse.nav.section
+				if err := f.driver.Frame(); err != nil {
+					t.Fatal(err)
+				}
+				var clickButton func([]driver.Node, string) bool
+				clickButton = func(nodes []driver.Node, label string) bool {
+					for _, node := range nodes {
+						if node.Class == "button" && node.Label == label {
+							if err := f.driver.Click(driver.ClickTarget{ID: &node.ID}); err != nil {
+								t.Fatal(err)
+							}
+							return true
+						}
+						if clickButton(node.Children, label) {
+							return true
+						}
+					}
+					return false
+				}
+				var remoteMessage string
+				for _, label := range []string{"Web remote", listingModeLabel(mode)} {
+					if !clickButton(f.driver.Tree(), label) {
+						t.Fatalf("missing rail button %q", label)
+					}
+					if label == "Web remote" {
+						if f.app.browse.remote == nil {
+							t.Fatal("remote click did not open the remote page")
+						}
+						remoteMessage = f.app.browse.remote.message
+						if !headlessHasLabel(f.driver.Tree(), remoteMessage) {
+							t.Fatal("remote click did not render the remote content in the same frame")
+						}
+					} else if headlessHasLabel(f.driver.Tree(), remoteMessage) {
+						t.Fatal("listing click still rendered remote content in the same frame")
+					}
+					if err := f.driver.Frame(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if f.app.browse.remote != nil || f.app.browse.library.mode != mode || f.app.browse.focus != browseFocusModeRail {
+					t.Fatal("listing click did not leave the remote and select the mode rail")
+				}
+				if f.app.browse.nav.isAtRoot() != wasAtRoot || f.app.browse.nav.section != selectedSection {
+					t.Fatal("listing click lost the selected browse section")
+				}
+				if !headlessHasLabel(f.driver.Tree(), section) || headlessHasLabel(f.driver.Tree(), "Scan to connect") {
+					t.Fatal("listing click did not restore the selected browse section")
+				}
+			})
+		}
 	}
 }
 
