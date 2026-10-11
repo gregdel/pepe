@@ -5,7 +5,7 @@
 - Go 1.27.1 module (`go.mod`): `main.go` handles flags and the Gio window; `internal/app` owns the Polochon client, catalog, navigation, UI, subtitles, refresh, and mpv; `internal/driver` and `cmd/gio-control` provide headless UI testing.
 - This is a TV/remote/Steam Deck interface. Preserve directional-key/controller navigation and fullscreen playback; mouse behavior is secondary. The radix tree is the core title-search interaction.
 - Keep changes with their owner in `internal/app`: `core.go` (API/config), `listing.go` (catalog builders), `input.go`/`browse_navigation.go` (actions/navigation), `player.go` (mpv/IPC/resume), `refresh.go` (async refresh), `subtitles.go` (popup), `format.go` (display formatting).
-- For build, configuration, flags, and Steam Deck packaging, consult `README.md` and `packaging/steamdeck/README.md` when relevant rather than assuming host services are available.
+- For build, configuration, flags, Linux desktop registration, and optional Steam Deck setup, consult `README.md` and `packaging/linux/README.md` when relevant rather than assuming host services are available.
 
 ## Behavioral invariants (when touching the relevant code)
 
@@ -28,6 +28,7 @@
 
 ## Checks and headless UI
 
+- For desktop packaging changes, run `shellcheck scripts/install-desktop.sh scripts/test-desktop.sh` and `scripts/test-desktop.sh`; these use isolated HOME/XDG fixtures and mocked downloads. The installed icon is downloaded and SHA-verified, never committed.
 - Run focused tests for the changed area, then `go test ./...` for code changes. Run `go test -race ./...` after async refresh/cache/subtitle/player/UI changes; `golangci-lint run` for cleanup. Tests are local and require no Polochon service.
 - Use `gofmt -w <changed-go-files>`; build with `go build .` when relevant.
 - Embedded fonts are gitignored: on a fresh clone, `./build.sh` fetches and SHA-verifies them before `go build .` can succeed. Do not assume a sibling Polochon checkout; the upstream module is pinned in `go.mod`.

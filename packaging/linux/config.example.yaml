@@ -1,7 +1,7 @@
-polochon_url: http://192.168.1.10:8080
+polochon_url: https://polochon.example
 polochon_token: replace-me
 mpv_path: mpv
-fullscreen: true
+fullscreen: false
 player_fullscreen: true
 mpv_managed_launcher: false
 mpv_startup_timeout: 3s

@@ -4,7 +4,7 @@
 
 **pépé** (*Polochon Player* -> “PP” -> pépé, I know that's a stretch) is a Go/Gio player interface for browsing and playing movies and shows from a Polochon server. It is designed for keyboard, remote, and controller navigation, including TVs and Steam Deck.
 
-Features include title-based directional search, recently added listings, movie and show details, subtitle selection, playback through `mpv`, and an opt-in web remote with URL playback. Linux HDMI-CEC remotes are supported through kernel RC passthrough; see [Linux CEC setup](packaging/linux/README.md).
+Features include title-based directional search, recently added listings, movie and show details, subtitle selection, playback through `mpv`, and an opt-in web remote with URL playback. Linux HDMI-CEC remotes are supported through kernel RC passthrough; see [Linux CEC setup](packaging/linux/README.md#hdmi-cec-remote).
 
 ## Requirements
 
@@ -62,6 +62,31 @@ Useful flags:
 - `-mpv-stop-timeout DURATION` — cancellation grace period before killing the launcher (default `2s`)
 - `-mpv-managed-launcher` — require external launcher teardown confirmation (default off)
 - `-web-ui-addr HOST:PORT` — enable the unauthenticated web remote; empty disables it (default)
+
+## Linux desktop integration
+
+After building and configuring Pépé, register this checkout's binary in your
+application menu:
+
+```sh
+scripts/install-desktop.sh
+```
+
+No sudo, binary copying, or graphical installer is involved. The script downloads
+and SHA-256-verifies the hosted icon into your XDG data directory; no icon image
+is stored in the repository. A verified cached icon works offline; failed downloads
+use a generic icon without preventing registration. `curl` and `sha256sum` are
+needed for the download.
+
+Rebuilds take effect immediately. If you move the checkout, run the script again.
+Remove only the desktop registration and its verified icon with:
+
+```sh
+scripts/install-desktop.sh --uninstall
+```
+
+See [Linux setup](packaging/linux/README.md) for configuration, paths,
+troubleshooting, and optional Steam Deck instructions.
 
 ## Web remote and URL playback
 

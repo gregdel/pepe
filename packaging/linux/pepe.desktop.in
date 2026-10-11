@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Pépé
+GenericName=Media Player
+Comment=Browse and play your Polochon movies and shows
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=Polochon;Movies;Shows;TV;
+X-Pepe-Managed=true

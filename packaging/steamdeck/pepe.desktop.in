@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Pépé
-Comment=Polochon Player
-Exec=@INSTALL_DIR@/run-pepe.sh
-Path=@INSTALL_DIR@
-Terminal=false
-Categories=AudioVideo;Video;Player;
