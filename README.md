@@ -43,14 +43,18 @@ POLOCHON_TOKEN=your-token \
 ./pepe
 ```
 
-Artwork redirects must stay on the original origin (scheme, hostname, and port). Redirects to another origin, including HTTP-to-HTTPS upgrades and HTTPS-to-HTTP downgrades, are rejected to protect the authentication token. Use the server's canonical HTTPS URL directly if available. An effective `polochon_url` using HTTP (including a `POLOCHON_URL` override) produces a startup log warning; intentional HTTP-only setups remain allowed.
+Artwork redirects must stay on the original origin (scheme, hostname, and port). Redirects to another origin, including HTTP-to-HTTPS upgrades and HTTPS-to-HTTP downgrades, are rejected to protect the authentication token. Use the server's canonical HTTPS URL directly if available. When logging is enabled, an effective `polochon_url` using HTTP (including a `POLOCHON_URL` override) produces a startup warning; intentional HTTP-only setups remain allowed.
+
+Logging is disabled by default. For troubleshooting, launch with
+`./pepe -logFile ./pepe.log`, then reproduce the issue and check the log for
+warnings and errors. Startup failures are still reported on stderr.
 
 Explicit playback flags override YAML settings, including `-mpv-managed-launcher=false`.
 
 Useful flags:
 
 - `-config PATH` — config file
-- `-logFile PATH` — log file (default under `$XDG_STATE_HOME/pepe/`, or `~/.local/state/pepe/`)
+- `-logFile PATH` — enable logging to this file (disabled by default)
 - `-fullscreen` — start the app and player fullscreen
 - `-windowed` — start the app windowed
 - `-mpv PATH` — mpv executable or wrapper

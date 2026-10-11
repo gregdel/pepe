@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"io"
+	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +14,65 @@ import (
 
 	"github.com/gregdel/pepe/internal/app"
 )
+
+func TestLoggingDisabledByDefault(t *testing.T) {
+	original := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(original) })
+	var output bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
+	stateDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateDir)
+
+	file, err := configureLogging("")
+	if err != nil || file != nil {
+		t.Fatalf("disabled logging returned file %v, error %v", file, err)
+	}
+	slog.Info("should be discarded")
+	log.Print("standard logging should also be discarded")
+	if output.Len() != 0 {
+		t.Fatalf("logging was not disabled: %s", output.String())
+	}
+	entries, err := os.ReadDir(stateDir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("disabled logging created state entries: %v, error %v", entries, err)
+	}
+}
+
+func TestLoggingToExplicitFile(t *testing.T) {
+	original := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(original) })
+	path := filepath.Join(t.TempDir(), "pepe.log")
+	if err := os.WriteFile(path, []byte("existing entry\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := configureLogging(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = file.Close() })
+	slog.Info("explicit logging enabled")
+	log.Print("standard logging enabled")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"existing entry\n", "explicit logging enabled", "standard logging enabled"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("log file missing %q: %s", want, data)
+		}
+	}
+}
+
+func TestLoggingInvalidPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing", "pepe.log")
+	file, err := configureLogging(path)
+	if err == nil || file != nil {
+		t.Fatalf("invalid path returned file %v, error %v", file, err)
+	}
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatalf("logging created parent directory: %v", err)
+	}
+}
 
 func TestMPVFlagOverrides(t *testing.T) {
 	t.Setenv("POLOCHON_URL", "http://localhost")

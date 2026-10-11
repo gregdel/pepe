@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"io"
@@ -241,14 +242,33 @@ func (c *APIClient) downloadSubtitle(video polochon.Video, lang polochon.Languag
 	return c.client.DownloadSubtitle(video, lang, entry)
 }
 
+// artworkError carries an app-controlled diagnostic for logging. The original
+// error remains available to callers, but its text may contain credentials or
+// server-controlled content and must not be logged by the artwork UI.
+type artworkError struct {
+	reason string
+	err    error
+}
+
+func (e *artworkError) Error() string { return e.err.Error() }
+func (e *artworkError) Unwrap() error { return e.err }
+
+func artworkLogReason(err error) string {
+	var failure *artworkError
+	if errors.As(err, &failure) {
+		return failure.reason
+	}
+	return "artwork load failed"
+}
+
 func fetchMediaImage[T any](c *APIClient, id string, lookup func(string) (T, bool), pick func(T) *papi.File, kind string) (image.Image, error) {
 	entity, ok := lookup(id)
 	if !ok {
-		return nil, fmt.Errorf("%s %s not found", kind, id)
+		return nil, &artworkError{"media not found", fmt.Errorf("%s %s not found", kind, id)}
 	}
 	f := pick(entity)
 	if f == nil {
-		return nil, fmt.Errorf("%s %s: image file not set", kind, id)
+		return nil, &artworkError{"image file not set", fmt.Errorf("%s %s: image file not set", kind, id)}
 	}
 	return c.fetchImageFile(f)
 }
@@ -268,7 +288,15 @@ func (c *APIClient) fetchImageFile(f papi.Downloadable) (image.Image, error) {
 		return nil, fmt.Errorf("image fetch: %w", err)
 	}
 	defer func() { _ = body.Close() }()
-	return decodeArtwork(body)
+	img, err := decodeArtwork(body)
+	if err != nil {
+		reason := "artwork decode failed (corrupt image or size limit exceeded)"
+		if errors.Is(err, image.ErrFormat) {
+			reason = "unsupported image format"
+		}
+		return nil, &artworkError{reason, err}
+	}
+	return img, nil
 }
 
 func decodeArtwork(body io.Reader) (image.Image, error) {
@@ -295,7 +323,7 @@ func decodeArtwork(body io.Reader) (image.Image, error) {
 func (c *APIClient) downloadFile(file papi.Downloadable) (io.ReadCloser, error) {
 	rawURL, err := c.getDownloadURL(file)
 	if err != nil {
-		return nil, fmt.Errorf("download URL: %w", err)
+		return nil, &artworkError{"invalid artwork download URL", fmt.Errorf("download URL: %w", err)}
 	}
 	return c.fetchAuthenticatedURL(rawURL)
 }
@@ -303,7 +331,7 @@ func (c *APIClient) downloadFile(file papi.Downloadable) (io.ReadCloser, error) 
 func (c *APIClient) fetchAuthenticatedURL(rawURL string) (io.ReadCloser, error) {
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, &artworkError{"invalid artwork request URL", err}
 	}
 	req.Header.Set("X-Auth-Token", c.getToken())
 
@@ -317,7 +345,7 @@ func (c *APIClient) fetchAuthenticatedURL(rawURL string) (io.ReadCloser, error) 
 	origin := *req.URL
 	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
-			return fmt.Errorf("stopped after 10 redirects")
+			return &artworkError{"stopped after 10 redirects", fmt.Errorf("stopped after 10 redirects")}
 		}
 		if checkRedirect != nil {
 			if err := checkRedirect(next, via); err != nil {
@@ -327,17 +355,28 @@ func (c *APIClient) fetchAuthenticatedURL(rawURL string) (io.ReadCloser, error) 
 		// Custom headers are copied on every hop, including cross-host hops.
 		// Check after any existing callback so it cannot relax this boundary.
 		if !sameArtworkOrigin(&origin, next.URL) {
-			return fmt.Errorf("artwork redirect changes origin")
+			return &artworkError{"artwork redirect changes origin", fmt.Errorf("artwork redirect changes origin")}
 		}
 		return nil
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		var failure *artworkError
+		if errors.As(err, &failure) {
+			return nil, err
+		}
+		reason := "artwork request failed (check connection, TLS and redirects)"
+		if errors.Is(err, context.DeadlineExceeded) {
+			reason = "artwork request timed out"
+		}
+		return nil, &artworkError{reason, err}
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("download returned %s", resp.Status)
+		return nil, &artworkError{
+			fmt.Sprintf("download returned %d %s", resp.StatusCode, http.StatusText(resp.StatusCode)),
+			fmt.Errorf("download returned %s", resp.Status),
+		}
 	}
 	return resp.Body, nil
 }

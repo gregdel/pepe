@@ -206,6 +206,18 @@ func fetchImageOp(fetchFn func() (image.Image, error), maxWidth, maxHeight int) 
 	return paint.NewImageOp(img), nil
 }
 
+// fetchArtwork keeps failures visible in the log even though the cache resolves
+// them to empty images. Do not log request URLs, which may contain credentials.
+func (a *App) fetchArtwork(cacheKey string, fetchFn func() (image.Image, error), maxWidth, maxHeight int) {
+	a.images.fetch(cacheKey, func() (paint.ImageOp, error) {
+		img, err := fetchImageOp(fetchFn, maxWidth, maxHeight)
+		if err != nil && a.client != nil && a.client.log != nil {
+			a.client.log.Warn("failed to load artwork", "key", cacheKey, "error", artworkLogReason(err))
+		}
+		return img, err
+	})
+}
+
 // posterImage renders a 2:3 poster at the given width, asynchronously fetching
 // it on first use. A placeholder surface is drawn while loading or on failure.
 func (a *App) posterImage(gtx C, cacheKey string, fetchFn func() (image.Image, error), width, radius unit.Dp) D {
@@ -217,7 +229,7 @@ func (a *App) posterImage(gtx C, cacheKey string, fetchFn func() (image.Image, e
 
 	img, ok := a.images.get(cacheKey)
 	if !ok {
-		a.images.fetch(cacheKey, func() (paint.ImageOp, error) { return fetchImageOp(fetchFn, posterMaxWidth, posterMaxHeight) })
+		a.fetchArtwork(cacheKey, fetchFn, posterMaxWidth, posterMaxHeight)
 	}
 	defer clip.RRect{
 		Rect: image.Rectangle{Max: size},
@@ -246,7 +258,7 @@ func (a *App) fanart(gtx C, cacheKey string, fetchFn func() (image.Image, error)
 		}
 		return D{Size: gtx.Constraints.Max}
 	}
-	a.images.fetch(cacheKey, func() (paint.ImageOp, error) { return fetchImageOp(fetchFn, fanartMaxWidth, fanartMaxHeight) })
+	a.fetchArtwork(cacheKey, fetchFn, fanartMaxWidth, fanartMaxHeight)
 	return D{Size: gtx.Constraints.Max}
 }
 

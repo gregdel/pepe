@@ -4,9 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,9 +16,8 @@ import (
 )
 
 func main() {
-	defaultLogFile := defaultLogFilePath()
 	configPath := flag.String("config", app.DefaultConfigPath(), "config file path")
-	logFilePath := flag.String("logFile", defaultLogFile, "log file path")
+	logFilePath := flag.String("logFile", "", "enable logging to a file (disabled by default)")
 	fullscreenFlag := flag.Bool("fullscreen", false, "start in fullscreen mode")
 	windowedFlag := flag.Bool("windowed", false, "start in windowed mode")
 	mpvPath := flag.String("mpv", "", "mpv executable path")
@@ -53,18 +52,19 @@ func main() {
 		config.Fullscreen = false
 	}
 
-	logFile, err := os.OpenFile(*logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logFile, err := configureLogging(*logFilePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to open log file '%s': %v\n", *logFilePath, err)
-		logFile = os.Stderr
-	} else {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	} else if logFile != nil {
 		defer func() { _ = logFile.Close() }()
 	}
 
-	log := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{})).With("app", "pepe")
+	log := slog.Default().With("app", "pepe")
 	apiClient, err := app.NewAPIClient(config.PolochonURL, config.Token, log)
 	if err != nil {
 		log.Error("failed to create API client", "error", err)
+		fmt.Fprintf(os.Stderr, "Failed to create API client: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -73,6 +73,7 @@ func main() {
 	sseCh := apiClient.Events(ctx)
 	if err := apiClient.FetchLibrary(); err != nil {
 		log.Error("failed to fetch library", "error", err)
+		fmt.Fprintf(os.Stderr, "Failed to fetch library: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -130,18 +131,18 @@ func applyWebUIAddr(config *app.Config, flags *flag.FlagSet, addr string) error 
 	return config.ValidateWebUI()
 }
 
-func defaultLogFilePath() string {
-	base := os.Getenv("XDG_STATE_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil || home == "" {
-			return "pepe.log"
+func configureLogging(path string) (*os.File, error) {
+	output := io.Discard
+	var file *os.File
+	if path != "" {
+		var err error
+		file, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return nil, err
 		}
-		base = filepath.Join(home, ".local", "state")
+		output = file
 	}
-	dir := filepath.Join(base, "pepe")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "pepe.log"
-	}
-	return filepath.Join(dir, "pepe.log")
+	// SetDefault also routes standard-library log calls through this handler.
+	slog.SetDefault(slog.New(slog.NewTextHandler(output, nil)))
+	return file, nil
 }
