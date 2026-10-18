@@ -3,6 +3,12 @@ polochon_token: replace-me
 mpv_path: mpv
 fullscreen: false
 player_fullscreen: true
+# Use hdmi-cec for remote colour hints and session-local mpv remote bindings.
+controls: keyboard
+# Independent of controls; false also hides automatic playback guidance.
+help_bar: true
+# pepe shares the pause panel across desktop/appliance; native opts out.
+mpv_osd: pepe
 mpv_managed_launcher: false
 mpv_startup_timeout: 3s
 mpv_stop_timeout: 2s

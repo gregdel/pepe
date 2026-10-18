@@ -27,7 +27,8 @@ protocol = "cec"
 0x6025 = "KEY_F6" # Play function (still)
 0x61 = "KEY_F7" # Pause/play toggle
 0x64 = "KEY_F8" # Stop function
-0x71 = "KEY_F1" # Blue: subtitles
-0x72 = "KEY_F2" # Red: refresh
-0x73 = "KEY_F3" # Green: movies/shows
-0x74 = "KEY_HOME" # Yellow: home
+# Colours share Pépé's keyboard shortcuts. Letter keys follow the seat's XKB layout.
+0x71 = "KEY_S" # Blue: subtitle search / cycle
+0x72 = "KEY_HOME" # Red: home / return
+0x73 = "KEY_R" # Green: refresh / playback help
+0x74 = "KEY_TAB" # Yellow: movies/shows / subtitle tracks

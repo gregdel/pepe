@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"gioui.org/io/key"
 	"gioui.org/io/semantic"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -84,6 +85,27 @@ func TestRefreshBoundsContinuousInvalidation(t *testing.T) {
 	}
 	if time.Since(started) > 2*time.Second {
 		t.Fatal("Refresh did not bound a continuously invalidating UI")
+	}
+}
+
+func TestLetterKeyNames(t *testing.T) {
+	for _, name := range []string{"s", "S", "r", "R", "h", "j", "k", "l", "q"} {
+		got, err := keyName(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := name[0]
+		if want >= 'a' && want <= 'z' {
+			want -= 'a' - 'A'
+		}
+		if got != key.Name(string(want)) {
+			t.Fatalf("keyName(%q) = %q", name, got)
+		}
+	}
+	for _, name := range []string{"", "Refresh", "Sss"} {
+		if _, err := keyName(name); err == nil {
+			t.Fatalf("invalid key %q accepted", name)
+		}
 	}
 }
 

@@ -349,6 +349,7 @@ func (a *App) detailActionButton(gtx C, id, semanticLabel, text string, primary 
 type hint struct {
 	key   string
 	label string
+	color color.NRGBA // nonzero draws a remote bar; key remains its accessible name
 }
 
 // keycap renders a keyboard key as an outlined rounded cap.
@@ -366,11 +367,18 @@ func (a *App) keycap(gtx C, key string) D {
 	return dims
 }
 
-// hintItem renders "keycap + label" for the help bar.
+// hintItem renders a keyboard keycap or remote colour bar beside its action.
 func (a *App) hintItem(gtx C, h hint) D {
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx C) D {
-			return a.keycap(gtx, h.key)
+			if h.color.A == 0 {
+				return a.keycap(gtx, h.key)
+			}
+			size := gtx.Constraints.Constrain(image.Pt(gtx.Dp(unit.Dp(40)), gtx.Dp(dp8)))
+			defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
+			semantic.LabelOp(h.key).Add(gtx.Ops)
+			fillRounded(gtx, size, dp2, h.color)
+			return D{Size: size}
 		}),
 		layout.Rigid(layout.Spacer{Width: dp6}.Layout),
 		layout.Rigid(func(gtx C) D {

@@ -92,6 +92,9 @@ type App struct {
 
 	// Shared edge spacing; not an overscan reservation.
 	viewportInsets layout.Inset
+	controls       ControlProfile
+	hideHelp       bool
+	nativeOSD      bool
 
 	// player
 	playerStatus     PlayerStatus
@@ -296,6 +299,11 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		detailList:       layout.List{Axis: layout.Vertical},
 		images:           newWeightedAsyncCache[paint.ImageOp](3, 24, imageCacheBudget, imageOpWeight),
 		sseCh:            sseCh,
+	}
+	if config != nil {
+		app.controls = config.Controls
+		app.hideHelp = config.HelpBar != nil && !*config.HelpBar
+		app.nativeOSD = config.MPVOSD == "native"
 	}
 	if sseCh != nil {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -538,7 +546,16 @@ func (a *App) layout(gtx C) D {
 					}
 					return layout.Inset{Top: a.viewportInsets.Top, Left: a.viewportInsets.Left, Right: a.viewportInsets.Right}.Layout(gtx, a.layoutBrowse)
 				}),
-				layout.Rigid(a.layoutHelp),
+				layout.Rigid(func(gtx C) D {
+					if a.subPopup == nil {
+						return a.layoutHelp(gtx)
+					}
+					// Reserve the footer once; draw only above the popup dimmer.
+					record := op.Record(gtx.Ops)
+					dims := a.layoutHelp(gtx)
+					record.Stop()
+					return dims
+				}),
 			)
 		}),
 		layout.Stacked(func(gtx C) D {

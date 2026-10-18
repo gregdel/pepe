@@ -19,26 +19,50 @@ const (
 	defaultMPVStopTimeout    = 2 * time.Second
 )
 
+// ControlProfile selects hint presentation and session-local mpv bindings.
+type ControlProfile string
+
+const (
+	ControlsKeyboard ControlProfile = "keyboard"
+	ControlsHDMICEC  ControlProfile = "hdmi-cec"
+)
+
 // Config holds the application configuration.
 type Config struct {
-	PolochonURL        string        `yaml:"polochon_url"`
-	Token              string        `yaml:"polochon_token"`
-	MPVPath            string        `yaml:"mpv_path"`
-	Fullscreen         bool          `yaml:"fullscreen"`
-	PlayerFullscreen   bool          `yaml:"player_fullscreen"`
-	MPVManagedLauncher bool          `yaml:"mpv_managed_launcher"`
-	MPVStartupTimeout  time.Duration `yaml:"mpv_startup_timeout"`
-	MPVStopTimeout     time.Duration `yaml:"mpv_stop_timeout"`
-	WebUIAddr          string        `yaml:"web_ui_addr"`
+	PolochonURL        string         `yaml:"polochon_url"`
+	Token              string         `yaml:"polochon_token"`
+	MPVPath            string         `yaml:"mpv_path"`
+	Fullscreen         bool           `yaml:"fullscreen"`
+	PlayerFullscreen   bool           `yaml:"player_fullscreen"`
+	MPVManagedLauncher bool           `yaml:"mpv_managed_launcher"`
+	MPVStartupTimeout  time.Duration  `yaml:"mpv_startup_timeout"`
+	MPVStopTimeout     time.Duration  `yaml:"mpv_stop_timeout"`
+	WebUIAddr          string         `yaml:"web_ui_addr"`
+	Controls           ControlProfile `yaml:"controls"`
+	HelpBar            *bool          `yaml:"help_bar"` // nil means visible, including minimal programmatic configs
+	MPVOSD             string         `yaml:"mpv_osd"`
 }
 
 // DefaultConfig returns a fresh configuration with playback defaults.
 func DefaultConfig() *Config {
 	return &Config{
 		MPVPath:           "mpv",
+		Controls:          ControlsKeyboard,
+		MPVOSD:            "pepe",
 		MPVStartupTimeout: defaultMPVStartupTimeout,
 		MPVStopTimeout:    defaultMPVStopTimeout,
 	}
+}
+
+// ValidateInterface checks controls and OSD settings independently of help visibility.
+func (c *Config) ValidateInterface() error {
+	if c.Controls != ControlsKeyboard && c.Controls != ControlsHDMICEC {
+		return fmt.Errorf("controls must be keyboard or hdmi-cec")
+	}
+	if c.MPVOSD != "pepe" && c.MPVOSD != "native" {
+		return fmt.Errorf("mpv_osd must be pepe or native")
+	}
+	return nil
 }
 
 // ValidatePlayer checks playback settings after configuration or flag overrides.
@@ -117,6 +141,9 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := cfg.ValidateWebUI(); err != nil {
+		return nil, err
+	}
+	if err := cfg.ValidateInterface(); err != nil {
 		return nil, err
 	}
 	return cfg, nil

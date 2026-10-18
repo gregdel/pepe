@@ -128,25 +128,42 @@ forward every button.
 
 ### Controls
 
-| Remote | Pépé | mpv with mpv-cec.conf |
+Select `controls: hdmi-cec` in YAML or launch with `-controls=hdmi-cec`.
+`help_bar: false` / `-help-bar=false` hides hints without disabling controls.
+The playback overrides below are only enabled by this control profile.
+
+| Remote | Pépé | mpv with HDMI-CEC controls |
 | --- | --- | --- |
 | Arrows | Navigate; **Right** opens a title's detail | Default mpv seek controls |
 | OK | Activate (does not open browse terminals) | Toggle pause |
 | Back/Exit | Close subtitles, leave details, or go back | Quit to Pépé |
-| Root/contents menu, yellow | Home (close subtitles first) | Quit to Pépé |
+| Root/contents menu, red | Home (close subtitles first) | Quit to Pépé |
 | Blue | Subtitle search | Cycle subtitles |
-| Red | Refresh library | Ignored |
-| Green | Movies/shows in browse | Ignored |
+| Green | Refresh library in browse | Toggle help |
+| Yellow | Movies/shows in browse | Select subtitle track |
 | Play, pause, play/pause | Ignored | Resume, pause, toggle |
 | Stop | Ignored | Quit to Pépé |
 | Rewind / fast forward | Ignored | Seek -10 / +10 seconds |
 | Previous / next | Ignored | Previous / next chapter |
 
 `cec.toml` maps CEC Select/Exit to Enter/Escape; the kernel defaults
-KEY_OK/KEY_EXIT are not understood by Gio's pinned XKB backend. Colour and
-transport buttons use layout-independent F keys. Existing keyboard/vim
-navigation is unchanged; Escape now also leaves movie/show details, and
-Home returns to browse home without changing the listing mode.
+KEY_OK/KEY_EXIT are not understood by Gio's pinned XKB backend. Colour buttons
+share keyboard shortcuts: Blue sends S, Green sends R, Red sends Home, and
+Yellow sends Tab. Letter keys follow the seat's active keyboard layout; the
+layout must translate KEY_S/KEY_R to s/r (including lock/modifier state). Unlike
+the old F-key mapping, these shortcuts are not layout-independent. Transport
+buttons retain dedicated F5–F12 mappings because Play/Pause/Stop have distinct
+semantics and no Pépé browse shortcuts. Existing keyboard/vim navigation is
+unchanged. Home returns to browse home without changing the listing mode.
+
+During playback, Yellow opens mpv's native selection UI with an Off entry and
+all loaded subtitle tracks. Up/Down and OK choose a track; Back dismisses the
+list without quitting or changing pause state. Blue remains a quick cycle.
+Green shows help without pausing. Keyboard-mode mpv retains its own shortcuts.
+
+**Migration:** reload `cec.toml` after upgrading. Old colour assignments were
+Red=refresh, Green=movies/shows, Yellow=Home, and Blue/Red/Green emitted F1–F3.
+Do not mix an old installed keymap with the new help/bindings.
 
 Power, volume, mute, and unsupported buttons are deliberately absent.
 **Clear the default keymap** when loading this one, so forwarded CEC power
@@ -155,8 +172,11 @@ system shutdown, ARC or volume control is implemented.
 
 ### Manual setup
 
-The Raspberry Pi appliance configures this automatically. On other Linux
-systems, inspect the actual devices first:
+The Raspberry Pi appliance manages device setup separately; its source pin,
+launch profile, and keymap must be updated together. Older images also inject
+their own pause overlay/input.conf and need migration before using this shared
+interface (remove the duplicate overlay and unconditional input overrides).
+On other Linux systems, inspect the actual devices first:
 
 ```sh
 cec-ctl --list-devices
@@ -180,13 +200,13 @@ the keymap must be reloaded when the RC device is recreated or after reboot.
 For persistent setup, use your distribution's udev/systemd configuration.
 Do not run a competing libCEC/cec-follower process that takes ownership.
 
-For mpv, merge `mpv-cec.conf` into your existing input.conf, or select an
-mpv wrapper through Pépé's `mpv_path` / `-mpv` option:
-
-```sh
-#!/bin/sh
-exec mpv --input-conf=/absolute/path/to/packaging/linux/mpv-cec.conf "$@"
-```
+No mpv input.conf installation or special wrapper is required. Pépé loads its
+embedded playback script and installs the remote bindings only with
+`-controls=hdmi-cec`. `mpv-cec.conf` documents those bindings; do not load it
+unconditionally or merge it into global mpv configuration. Existing wrappers
+must forward Pépé's script/options/fonts along with its original arguments.
+See [playback help](../../README.md#controls-and-playback-help) for the shared
+panel, native/custom OSD opt-out, and mpv requirements.
 
 If your compositor ignores the device, it needs a CEC-specific udev rule
 setting `ID_INPUT_KEYBOARD=1`. Keep input access seat-scoped; do not add Pépé

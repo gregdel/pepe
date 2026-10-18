@@ -159,7 +159,7 @@ func TestHeadlessSubtitleDownloadsVisibleSelection(t *testing.T) {
 	f := newHeadlessFixture(t)
 	f.app.client.client = client.client
 	f.app.pushMovieDetail(&MediaItem{ID: "movie-new", Type: mediaKindMovie})
-	headlessKey(t, f, "F1")
+	headlessKey(t, f, "S")
 	p := f.app.subPopup
 	if p == nil {
 		t.Fatal("subtitle action did not open popup")

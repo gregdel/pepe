@@ -266,6 +266,14 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 		a.playerFullscreen,
 		configPath,
 	)
+	interfaceArgs, err := a.playerInterfaceArgs(runtimeDir, command.fromWeb)
+	if err != nil {
+		_ = os.RemoveAll(runtimeDir)
+		return playerCommand{}, err
+	}
+	// Keep the media URL last for wrappers that add platform options before it.
+	last := len(command.args) - 1
+	command.args = append(append(command.args[:last:last], interfaceArgs...), command.args[last])
 	if a.playerPolicy.managedLauncher {
 		command.args = append([]string{command.args[0], "--managed-runtime=" + runtimeDir}, command.args[1:]...)
 	}

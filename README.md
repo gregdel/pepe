@@ -10,7 +10,7 @@ Features include title-based directional search, recently added listings, movie 
 
 - Go **1.27.1**
 - A reachable Polochon server and its URL/token
-- `mpv` for playback
+- `mpv` **0.41 or newer with Lua support** for the shared playback interface (or `-mpv-osd=native -controls=keyboard` to use your existing player without it)
 
 ## Build and run
 
@@ -33,6 +33,9 @@ mpv_managed_launcher: false
 mpv_startup_timeout: 3s
 mpv_stop_timeout: 2s
 web_ui_addr: ""
+controls: keyboard
+help_bar: true
+mpv_osd: pepe
 ```
 
 `POLOCHON_URL` and `POLOCHON_TOKEN` override values in the file. `POLOCHON_MPV` overrides `mpv_path`. Keep the config readable only by yourself (for example, `chmod 600 ~/.config/pepe/config.yaml`); playback passes the token to mpv through a private temporary config file, not its process arguments. For example:
@@ -57,11 +60,64 @@ Useful flags:
 - `-logFile PATH` — enable logging to this file (disabled by default)
 - `-fullscreen` — start the app and player fullscreen
 - `-windowed` — start the app windowed
+- `-controls keyboard|hdmi-cec` — keyboard hints/native mpv keys (default), or remote hints/CEC playback bindings
+- `-help-bar=false` — hide instructional bars without changing controls
+- `-mpv-osd pepe|native` — shared playback panel (default), or native/custom mpv OSD
 - `-mpv PATH` — mpv executable or wrapper
 - `-mpv-startup-timeout DURATION` — IPC connection timeout (default `3s`)
 - `-mpv-stop-timeout DURATION` — cancellation grace period before killing the launcher (default `2s`)
 - `-mpv-managed-launcher` — require external launcher teardown confirmation (default off)
 - `-web-ui-addr HOST:PORT` — enable the unauthenticated web remote; empty disables it (default)
+
+## Controls and playback help
+
+```sh
+./pepe                                      # Keyboard hints and native mpv keys
+./pepe -controls=hdmi-cec                    # Remote hints and CEC playback keys
+./pepe -controls=hdmi-cec -help-bar=false    # Same controls without automatic hints
+```
+
+The matching YAML settings are `controls`, `help_bar`, and `mpv_osd`. Only
+explicit flags override YAML, including `-help-bar=true` and `-controls=keyboard`.
+In browse, **Right** opens details; OK/Enter does not open a terminal title.
+Show details start on season tabs: Down/OK enters episodes, then OK plays.
+
+The shared mpv panel shows elapsed/remaining/total time, progress, and estimated
+finish time when paused. It uses the local timezone and cannot estimate unknown
+or live durations. Mouse movement keeps the paused panel visible, with room
+below for mpv's standard clickable controls. No global mpv configuration is
+installed or modified. Pépé extracts its embedded
+script/fonts into the private playback runtime and removes them with that session.
+Wrappers must forward the original `--script`, `--script-opts-append`, and font
+arguments, as well as authentication and IPC arguments.
+
+Keyboard playback retains mpv's native keys: Space pauses, `j` cycles subtitles,
+`g` then `s` opens its subtitle selector, and `q` returns. The shared Pépé interface
+also offers **Tab** for subtitle selection (user `input.conf` bindings take
+priority). The CEC profile instead binds Blue/`s` to subtitle cycling,
+Green/`r` to help, Red/Home to return, and
+Yellow/Tab to subtitle selection. In that list, arrows navigate, OK selects, and
+Back closes without quitting. Selection includes **Off**, embedded tracks, and
+loaded external tracks; it does not search/download new subtitles.
+
+`-help-bar=false` hides the footer and automatic playback guidance, not pause
+metadata, controls, or explicitly requested Green-button help. Use
+`-mpv-osd=native` to disable the automatic Pépé playback panel for custom setups;
+the CEC bindings still apply if that control profile is selected. CEC overrides
+are session-local and intentionally take priority over those keys in input.conf.
+Arbitrary third-party mpv controllers/layouts may require the native option.
+See [Linux CEC setup](packaging/linux/README.md#hdmi-cec-remote) for keymap setup,
+keyboard-layout limitations, and the complete remote mapping.
+
+Offline playback UI checks (use the Lua runtime matching your mpv):
+
+```sh
+luajit tests/mpv-osd.lua internal/app/mpv/pepe.lua
+PEPE_TEST_MPV=1 go test ./internal/app -run TestMPVInterfaceIntegration -count=1
+```
+
+The second check uses synthetic video, null video/audio outputs, and local
+subtitle fixtures; it does not access Polochon or play actual media.
 
 ## Linux desktop integration
 

@@ -370,6 +370,17 @@ func keyModifiers(names []string) (key.Modifiers, error) {
 }
 
 func keyName(name string) (key.Name, error) {
+	// Gio names letter keys in uppercase, regardless of Shift. Accept both
+	// spellings so remote shortcuts use the same input path as navigation.
+	if len(name) == 1 {
+		letter := name[0]
+		if letter >= 'a' && letter <= 'z' {
+			letter -= 'a' - 'A'
+		}
+		if letter >= 'A' && letter <= 'Z' {
+			return key.Name(string(letter)), nil
+		}
+	}
 	names := map[string]key.Name{
 		"Return": key.NameReturn, "Enter": key.NameEnter, "Escape": key.NameEscape,
 		"Tab": key.NameTab, "Space": key.NameSpace, "Backspace": key.NameDeleteBackward,

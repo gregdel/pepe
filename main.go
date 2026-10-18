@@ -22,6 +22,7 @@ func main() {
 	windowedFlag := flag.Bool("windowed", false, "start in windowed mode")
 	mpvPath := flag.String("mpv", "", "mpv executable path")
 	playerFlags := registerMPVFlags(flag.CommandLine)
+	interfaceFlags := registerInterfaceFlags(flag.CommandLine)
 	webUIAddr := flag.String("web-ui-addr", "", "web remote listen address (empty disables; no authentication)")
 	flag.Parse()
 
@@ -41,6 +42,10 @@ func main() {
 		os.Exit(2)
 	}
 	if err := applyWebUIAddr(config, flag.CommandLine, *webUIAddr); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if err := interfaceFlags.apply(config, flag.CommandLine); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
@@ -91,6 +96,35 @@ func main() {
 		os.Exit(0)
 	}()
 	gioapp.Main()
+}
+
+type interfaceFlags struct {
+	controls string
+	helpBar  bool
+	mpvOSD   string
+}
+
+func registerInterfaceFlags(flags *flag.FlagSet) *interfaceFlags {
+	f := &interfaceFlags{}
+	flags.StringVar(&f.controls, "controls", string(app.ControlsKeyboard), "control profile: keyboard or hdmi-cec")
+	flags.BoolVar(&f.helpBar, "help-bar", true, "show contextual help (independent of controls)")
+	flags.StringVar(&f.mpvOSD, "mpv-osd", "pepe", "playback overlay: pepe or native")
+	return f
+}
+
+func (f *interfaceFlags) apply(config *app.Config, flags *flag.FlagSet) error {
+	flags.Visit(func(setting *flag.Flag) {
+		switch setting.Name {
+		case "controls":
+			config.Controls = app.ControlProfile(f.controls)
+		case "help-bar":
+			visible := f.helpBar
+			config.HelpBar = &visible
+		case "mpv-osd":
+			config.MPVOSD = f.mpvOSD
+		}
+	})
+	return config.ValidateInterface()
 }
 
 type mpvFlags struct {

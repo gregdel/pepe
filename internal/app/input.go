@@ -38,10 +38,7 @@ var keyBindings = []keyBinding{
 	{name: key.NameEnter, action: actionActivate},
 	{name: key.NameEscape, action: actionBack},
 	{name: key.NameHome, action: actionHome},
-	// Layout-independent shortcuts for Linux CEC remote colour buttons.
-	{name: key.NameF1, action: actionSubtitles},
-	{name: key.NameF2, action: actionRefresh},
-	{name: key.NameF3, action: actionToggleSection},
+	// CEC colours use the same S/R/Tab/Home bindings as the keyboard.
 	{name: "H", action: actionLeft, optional: key.ModShift},
 	{name: "J", action: actionDown, optional: key.ModShift},
 	{name: "K", action: actionUp, optional: key.ModShift},
