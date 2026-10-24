@@ -13,9 +13,17 @@ import (
 	gioapp "gioui.org/app"
 	"gioui.org/unit"
 	"github.com/gregdel/pepe/internal/app"
+	"github.com/gregdel/pepe/internal/install"
 )
 
 func main() {
+	if handled, status := install.Run(os.Args[1:], os.Stdout, os.Stderr); handled {
+		os.Exit(status)
+	}
+	flag.Usage = func() {
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "Usage: pepe [flags]\n       pepe install|uninstall [-h]\n\n")
+		flag.PrintDefaults()
+	}
 	configPath := flag.String("config", app.DefaultConfigPath(), "config file path")
 	logFilePath := flag.String("logFile", "", "enable logging to a file (disabled by default)")
 	fullscreenFlag := flag.Bool("fullscreen", false, "start in fullscreen mode")
@@ -25,6 +33,11 @@ func main() {
 	interfaceFlags := registerInterfaceFlags(flag.CommandLine)
 	webUIAddr := flag.String("web-ui-addr", "", "web remote listen address (empty disables; no authentication)")
 	flag.Parse()
+	if flag.NArg() != 0 {
+		fmt.Fprintf(os.Stderr, "Unexpected argument: %s\n", flag.Arg(0))
+		flag.Usage()
+		os.Exit(2)
+	}
 
 	config, err := app.LoadConfig(*configPath)
 	if err != nil {

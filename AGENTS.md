@@ -2,7 +2,7 @@
 
 ## Where to work
 
-- Go 1.27.1 module (`go.mod`): `main.go` handles flags and the Gio window; `internal/app` owns the Polochon client, catalog, navigation, UI, subtitles, refresh, and mpv; `internal/driver` and `cmd/gio-control` provide headless UI testing.
+- Go 1.27.1 module (`go.mod`): `main.go` handles commands, flags and the Gio window; `internal/install` owns offline per-user installation; `packaging/assets.go` embeds artwork/templates/wrappers; `internal/app` owns the Polochon client, catalog, navigation, UI, subtitles, refresh, and mpv; `internal/driver` and `cmd/gio-control` provide headless UI testing.
 - This is a TV/remote/Steam Deck interface. Preserve directional-key/controller navigation and fullscreen playback; mouse behavior is secondary. The radix tree is the core title-search interaction.
 - Keep changes with their owner in `internal/app`: `core.go` (API/config), `listing.go` (catalog builders), `input.go`/`browse_navigation.go` (actions/navigation), `player.go` (mpv/IPC/resume), `refresh.go` (async refresh), `subtitles.go` (popup), `format.go` (display formatting).
 - For build, configuration, flags, Linux desktop registration, and optional Steam Deck setup, consult `README.md` and `packaging/linux/README.md` when relevant rather than assuming host services are available.
@@ -33,9 +33,9 @@
 
 ## Checks and headless UI
 
-- For desktop packaging changes, run `shellcheck scripts/install-desktop.sh scripts/test-desktop.sh` and `scripts/test-desktop.sh`; these use isolated HOME/XDG fixtures and mocked downloads. The installed icon is downloaded and SHA-verified, never committed.
+- For desktop packaging changes, run `shellcheck scripts/install-desktop.sh scripts/test-desktop.sh` and `scripts/test-desktop.sh`; these use isolated HOME/XDG fixtures and mocked downloads. For standalone installation changes, also run `shellcheck build.sh scripts/fetch-assets.sh scripts/test-assets.sh scripts/test-install.sh packaging/linux/mpv-auto.sh`, `scripts/test-assets.sh`, `scripts/test-install.sh`, and `go test ./internal/install ./packaging`. Artwork is downloaded and SHA-verified from `packaging/assets.txt` into gitignored `packaging/embed` at build time, never committed or fetched by installation/launch. Keep the shared manifest usable by future macOS packaging; keep source registration separate from installed-copy ownership.
 - Run focused tests for the changed area, then `go test ./...` for code changes. Run `go test -race ./...` after async refresh/cache/subtitle/player/UI changes; `golangci-lint run` for cleanup. Tests are local and require no Polochon service.
 - Use `gofmt -w <changed-go-files>`; build with `go build .` when relevant.
-- Embedded fonts are gitignored: on a fresh clone, `./build.sh` fetches and SHA-verifies them before `go build .` can succeed. Do not assume a sibling Polochon checkout; the upstream module is pinned in `go.mod`.
+- Embedded fonts and artwork are gitignored: on a fresh clone, `./build.sh` fetches and SHA-verifies them before `go build .` can succeed. Do not assume a sibling Polochon checkout; the upstream module is pinned in `go.mod`.
 - For Linux headless tests/driver, set `EGL_PLATFORM=surfaceless` and `LIBGL_ALWAYS_SOFTWARE=1`. Run `go test ./internal/driver` for driver changes. In Pi use `gio_start`, `gio_tree`, `gio_key`, `gio_resize`, `gio_screenshot` (and `gio_restart` after UI edits); prefer semantic targets if testing pointer controls. The driver uses an empty offline catalog without config; real catalog needs `GIO_CONTROL_CONFIG` or `POLOCHON_URL`/`POLOCHON_TOKEN`.
 - With a populated catalog, from home: Left (mode rail), Up (Last added), Right (content), Right (Movies), then Right through any radix prefixes and on a terminal to open detail. Enter on detail activates Play, so do not use it to navigate there. Use `gio_tree` to confirm the state instead of assuming a fixed number of key presses.

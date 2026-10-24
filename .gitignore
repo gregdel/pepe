@@ -5,4 +5,5 @@ polochon-gio
 polochon-gio.log
 dist/
 internal/app/embed/*.ttf
+packaging/embed/
 .pi/tmp/

@@ -8,20 +8,85 @@ Features include title-based directional search, recently added listings, movie 
 
 ## Requirements
 
-- Go **1.27.1**
-- A reachable Polochon server and its URL/token
-- `mpv` **0.41 or newer with Lua support** for the shared playback interface (or `-mpv-osd=native -controls=keyboard` to use your existing player without it)
+- Linux with compatible native Gio graphics shared libraries, **even for installation**; macOS packaging is separate
+- A reachable Polochon server and its URL/token to run the app, not to install it
+- External `mpv` **0.41 or newer with Lua support** for the shared playback interface (or `-mpv-osd=native -controls=keyboard` to use your existing player without it)
 
-## Build and run
+## Linux installation
+
+Obtain the native Linux binary for your architecture as `pepe`, not a `.tar.gz`.
+Optionally verify it with the supplied `pepe.sha256` in the same directory:
+
+```sh
+sha256sum -c pepe.sha256
+```
+
+If this checkout owns your desktop registration, first run
+`scripts/install-desktop.sh --uninstall`; source registration stays separate.
+Install for your user, with no sudo, compiler or network access required:
+
+```sh
+chmod +x ./pepe
+./pepe install
+```
+
+Installation runs before configuration/server checks and UI startup. Edit
+`polochon_url` and `polochon_token` in
+`${XDG_CONFIG_HOME:-$HOME/.config}/pepe/config.yaml`, then launch:
+
+```sh
+"$HOME/.local/bin/pepe"
+```
+
+The binary, embedded artwork and `mpv-auto.sh`, `mpv-inhibit.sh`, `mpv-keepawake.sh`
+are copied into one fixed directory, `$XDG_DATA_HOME/pepe/`
+(default data home: `$HOME/.local/share`); `$HOME/.local/bin/pepe` stays stable.
+Reinstalling replaces the managed files without retaining old releases. Individual
+files are replaced atomically, not the whole installation. Artwork is copied, not
+symlinked to the download; you can delete the download or checkout after installation.
+Existing config, including `mpv_path`, is preserved; only a fresh config selects
+the installed `mpv-auto.sh`. mpv stays external, and inhibit/keepawake wrappers stay
+opt-in. No packages, power settings or Steam databases are changed automatically.
+
+Upgrade by running `./pepe install` from the next downloaded binary. Uninstall
+using the installed binary, with the same HOME/XDG paths:
+
+```sh
+"$HOME/.local/bin/pepe" uninstall
+```
+
+Configuration is preserved. Older `pepe/app/...` installations must be uninstalled
+with their original installer first; update any old wrapper paths in config manually.
+See
+[Linux setup](packaging/linux/README.md#native-binary-installation) for installed
+wrapper/artwork paths, compatibility, removal details and Steam Deck limitations.
+
+## Build from source
+
+Developers need Go **1.27.1** and native Gio development libraries:
 
 ```sh
 ./build.sh
 ./pepe
 ```
 
-On a fresh checkout, `build.sh` downloads the pinned Roboto and Noto Sans Symbols font files and verifies their SHA-256 hashes before building. You can also use `go build .` once those embedded font files are present.
+To keep the output separate:
 
-The default config path is `$XDG_CONFIG_HOME/pepe/config.yaml`, or the platform config directory's `pepe/config.yaml`. If no platform config directory is available, the fallback is `./pepe.yaml`. Create a YAML file like this:
+```sh
+mkdir -p dist
+./build.sh -o dist/pepe .
+(cd dist && sha256sum pepe > pepe.sha256)
+```
+
+`build.sh` fetches and SHA-256-verifies pinned Roboto/Noto Sans Symbols fonts and
+artwork from `packaging/assets.txt`, using `scripts/fetch-assets.sh packaging/embed`
+for the latter. Embedded inputs are gitignored; verified cached files work offline.
+These downloads happen at build time, never during binary installation or launch.
+You can use `go build .` once both embedded fonts and artwork are present.
+
+## Configuration
+
+The default config path is `$XDG_CONFIG_HOME/pepe/config.yaml`, or the platform config directory's `pepe/config.yaml`. If no platform config directory is available, the fallback is `./pepe.yaml`. For source runs, create a YAML file like this; keep the installed `mpv_path` when editing an installer-created config:
 
 ```yaml
 polochon_url: https://polochon.example
@@ -119,10 +184,11 @@ PEPE_TEST_MPV=1 go test ./internal/app -run TestMPVInterfaceIntegration -count=1
 The second check uses synthetic video, null video/audio outputs, and local
 subtitle fixtures; it does not access Polochon or play actual media.
 
-## Linux desktop integration
+## Desktop registration from source
 
-After building and configuring Pépé, register this checkout's binary in your
-application menu:
+This development-only registration is separate from `pepe install`; unregister it
+before switching to a copied installation. After building and configuring this
+checkout, register its binary in your application menu:
 
 ```sh
 scripts/install-desktop.sh

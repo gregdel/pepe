@@ -1,0 +1,7 @@
+# SHA-256 filename URL — artwork from https://git.quimbo.fr/gregdel/pepe/issues/1
+# Keep originals at their current resolutions; filenames reflect the author's names.
+0a7ccf087cf627109d7756378ec05f9a86ffc1854a81ecb6855c4ba1723c374e application_icon_1024.png https://git.quimbo.fr/attachments/ab9e56b5-bf62-4723-8f30-1438ab62a282
+90879c589bca890e5810ed0ee69dba1c23e175934cf5b089b6572ab90955e8af logo_1280x720.png https://git.quimbo.fr/attachments/455a4d0e-3a67-4d73-bd95-2d4427bd53f6
+f7021ecbf05da381e9e7513d676a572becf8a32a451702b4e927b436a274562b background_1920x620.jpg https://git.quimbo.fr/attachments/f87f765f-ef79-4b01-9899-cd660d3006d9
+a4bd8d7ead10064eaaaa5365ce108f70fd49fe568f182652a2f5c5e276930890 wide_cover_920x430.jpg https://git.quimbo.fr/attachments/9dbfe278-6ad8-4b77-a2b5-860c2825f4ce
+6cecb0fb528ac01b0804a530152df04dbf5b8f47d7dc34f63c8be402eb4363ba cover_600x900.jpg https://git.quimbo.fr/attachments/7782a22b-5f40-4595-8467-0e4624432523

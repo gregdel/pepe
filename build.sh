@@ -63,5 +63,7 @@ fetch_font "$FONT_ITALIC_PATH" "$FONT_ITALIC_URL" "$FONT_ITALIC_SHA256" "Roboto 
 fetch_font "$FONT_SYMBOLS_PATH" "$FONT_SYMBOLS_URL" "$FONT_SYMBOLS_SHA256" "Noto Sans Symbols fallback font"
 fetch_font "$FONT_SYMBOLS2_PATH" "$FONT_SYMBOLS2_URL" "$FONT_SYMBOLS2_SHA256" "Noto Sans Symbols 2 fallback font"
 
+"$ROOT_DIR/scripts/fetch-assets.sh" "$ROOT_DIR/packaging/embed"
+
 cd "$ROOT_DIR"
 go build "$@"

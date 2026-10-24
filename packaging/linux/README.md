@@ -1,5 +1,135 @@
 # Linux setup
 
+## Native binary installation
+
+Obtain the native Linux `pepe` binary for your architecture (amd64 for Steam Deck),
+not a tar archive. Optionally verify it alongside the supplied `pepe.sha256`:
+
+```sh
+sha256sum -c pepe.sha256
+```
+
+If a checkout owns the desktop entry, first unregister it with
+`scripts/install-desktop.sh --uninstall`. Source registration stays separate and
+likewise refuses to replace a copied installation's desktop entry.
+
+Install for the current user:
+
+```sh
+chmod +x ./pepe
+./pepe install
+```
+
+No sudo, compiler or network is needed. Installation runs before configuration
+loading, Polochon server access or UI startup. mpv is external and is not installed.
+The executable and its embedded artwork/wrappers are copied, not symlinked to the
+download:
+
+- `$XDG_DATA_HOME/pepe/`: one real directory containing the binary,
+  artwork in `assets/`, and `mpv-auto.sh`, `mpv-inhibit.sh`, `mpv-keepawake.sh`.
+- `$HOME/.local/bin/pepe`: stable launcher for the menu, terminal and Steam.
+- `$XDG_DATA_HOME/applications/pepe.desktop`: menu entry using absolute paths.
+- `$XDG_CONFIG_HOME/pepe/config.yaml`: mode-600 template **only if absent**.
+
+XDG defaults are `$HOME/.local/share` and `$HOME/.config`; relative XDG data paths
+are ignored, while relative XDG config paths are rejected to match application
+configuration lookup. Symlink installation parents and unrelated existing files
+are refused. The download and source checkout can be deleted after installation.
+
+Edit `polochon_url` and `polochon_token` in
+`${XDG_CONFIG_HOME:-$HOME/.config}/pepe/config.yaml` before launching:
+
+```sh
+"$HOME/.local/bin/pepe"
+```
+
+Existing config, `mpv_path` and permissions are preserved. Only a fresh config
+selects `${XDG_DATA_HOME:-$HOME/.local/share}/pepe/mpv-auto.sh`, which
+tries native mpv in PATH, then user/default-system Flatpak `io.mpv.Mpv`.
+Polochon environment overrides and command-line precedence are unchanged. mpv
+0.41+ with Lua is required; discovery does not guarantee player capabilities.
+The mpv Lua UI/fonts are already embedded and extracted temporarily per playback
+session, not installed globally. No packages, global mpv config, power settings
+or Steam shortcut/artwork/controller databases are changed automatically.
+Missing/invalid config or an unavailable server still prevents normal UI startup;
+installation needs neither. There is no setup UI.
+
+Upgrade or reinstall with `./pepe install`. The payload is staged and verified,
+then managed files are replaced directly in the `pepe/` directory, including locally
+modified artwork/wrappers. Each file is replaced by rename, so reinstalling from the
+running installed executable also works. There is no release history or whole-update
+atomic switch: an interrupted upgrade can leave mixed versions; rerun `install` to
+finish replacing the files. Uninstall with the installed binary and the same
+HOME/XDG paths:
+
+```sh
+"$HOME/.local/bin/pepe" uninstall
+```
+
+Removal preserves configuration, modified/unknown installed files, the source icon,
+mpv and Steam shortcuts. `.pepe-managed` (`pepe-user-install-v1`) and `SHA256SUMS`
+record ownership of the installed files. Unrelated files already in the data directory
+are left alone; conflicting managed paths are refused.
+
+Older `pepe/app/...` installations are not migrated or removed by this installer.
+Uninstall them with their original installer first, then update any old wrapper paths
+in configuration manually. Existing configuration is never rewritten.
+
+Installed opt-in wrapper paths:
+
+- `${XDG_DATA_HOME:-$HOME/.local/share}/pepe/mpv-inhibit.sh`
+- `${XDG_DATA_HOME:-$HOME/.local/share}/pepe/mpv-keepawake.sh`
+
+Neither is enabled automatically. Use the expanded absolute path as `mpv_path`;
+YAML does not expand shell variables. `mpv-inhibit.sh` needs systemd-inhibit/logind
+and native mpv; inhibition failure prevents playback. See
+[sleep limitations and keepawake requirements](#automatic-sleep-during-playback).
+For customization, copy a wrapper outside the managed installation and configure
+that copy; reinstalling overwrites managed wrappers.
+
+**Compatibility:** the executable dynamically links Gio's Linux graphics/system
+libraries, so compatible shared libraries are required **even for install/uninstall**.
+Build on a defined SteamOS-compatible baseline and verify on the actual Deck;
+success on a newer host does not prove compatibility with older SteamOS libraries.
+No runtime library bundling or universal Linux compatibility is claimed. Linux is
+supported; macOS app/DMG packaging and graphical onboarding remain separate work.
+
+## Building and offline checks
+
+With Go **1.27.1** and the appropriate native Gio development libraries/toolchain
+for Linux amd64 or arm64, build with `./build.sh`, or keep the output separate:
+
+```sh
+mkdir -p dist
+./build.sh -o dist/pepe .
+(cd dist && sha256sum pepe > pepe.sha256)
+```
+
+In addition to pinned Roboto/Noto Sans Symbols fonts, `build.sh` fetches artwork
+with `scripts/fetch-assets.sh packaging/embed`. The platform-independent
+`packaging/assets.txt` pins the five artwork attachments from
+[issue #1](https://git.quimbo.fr/gregdel/pepe/issues/1). Downloads use HTTPS and
+SHA-256 verification; failures abort the build. `packaging/embed` and embedded
+fonts are gitignored, and verified cached files work offline. Original artwork
+bytes/resolutions are retained; no images are committed. These downloads happen
+only at build time, never during binary installation or launch. The shared
+manifest remains usable by future macOS packaging.
+
+Offline validation (with embedded inputs prepared by `./build.sh`; requires
+ShellCheck, `desktop-file-validate` and GLib's `gio` command):
+
+```sh
+shellcheck build.sh scripts/fetch-assets.sh scripts/test-assets.sh scripts/test-install.sh \
+  packaging/linux/mpv-auto.sh
+scripts/test-install.sh
+scripts/test-assets.sh
+go test ./internal/install ./packaging
+```
+
+Installation checks exercise the real binary with isolated HOME/XDG directories,
+no actual mpv or Polochon server; asset checks use mocked downloads. Source desktop
+registration retains its separate checks below.
+
 ## Desktop registration from source
 
 From the checkout, build the application:
@@ -79,7 +209,7 @@ icon-theme cache updates are unnecessary because the entry uses a local icon pat
 If the menu launch appears to do nothing, run `./pepe` from a terminal to see startup
 errors. Missing configuration or an unreachable server currently prevents the
 window from opening. For more logging, use `./pepe -logFile ./pepe.log`.
-There is no graphical setup screen. Existing copied Steam Deck bundles and Steam
+There is no graphical setup screen. Unmanaged copied Steam Deck setups and Steam
 shortcuts are not migrated or removed automatically. The old wrapper's
 `PEPE_CONFIG` variable is not used; the application supports `-config PATH` for
 manual launches instead.
@@ -98,10 +228,24 @@ Real Wayland/X11 menu appearance and window grouping still need desktop testing.
 
 ## Steam Deck (optional)
 
-Use the same source build, configuration, and registration in Desktop Mode. Add
-Pépé from the application menu, its installed `pepe.desktop`, or the checkout's
-`pepe` binary as a Non-Steam Game. Enable fullscreen in YAML before launching from
-Gaming Mode. Ensure the configured mpv executable is also available there.
+Run `./pepe install` in Desktop Mode, or use source registration as described
+above. Add Pépé from the application menu or its installed `pepe.desktop` as a
+Non-Steam Game. For a copied installation, use the stable `$HOME/.local/bin/pepe`
+launcher rather than a release-specific executable. Enable fullscreen in YAML
+before launching from Gaming Mode. Ensure the configured mpv executable is also
+available there.
+
+Installed artwork is in
+`${XDG_DATA_HOME:-$HOME/.local/share}/pepe/assets`; apply it manually
+in Steam:
+
+| File | Role | Actual original size |
+| --- | --- | --- |
+| `application_icon_1024.png` | Desktop/application icon | 1024×1024 |
+| `logo_1280x720.png` | Transparent pictorial logo | 1672×941 |
+| `background_1920x620.jpg` | Library hero | 1760×576 |
+| `wide_cover_920x430.jpg` | Wide cover | 1408×704 |
+| `cover_600x900.jpg` | Portrait cover | 832×1248 |
 
 Recommended Steam Input mapping:
 
@@ -152,10 +296,11 @@ the usual sleep timeout on the Deck above. The complete wrapper still needs
 on-device validation, including automatic sleep after exit and manual
 suspend/resume.
 
-To try it, set `mpv_path` to the wrapper's absolute path:
+To try it, set `mpv_path` to the installed wrapper's absolute path (adjust for
+your HOME/XDG data directory), or to a separately customized copy:
 
 ```yaml
-mpv_path: /absolute/path/to/pepe/packaging/linux/mpv-keepawake.sh
+mpv_path: /home/you/.local/share/pepe/mpv-keepawake.sh
 ```
 
 It launches `$HOME/.local/share/flatpak/exports/bin/io.mpv.Mpv`, matching a

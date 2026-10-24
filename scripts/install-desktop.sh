@@ -51,7 +51,8 @@ BINARY="$ROOT_DIR/pepe"
 # Do not replace or remove a launcher created outside this script.
 if [ -e "$DESKTOP_FILE" ] || [ -L "$DESKTOP_FILE" ]; then
 	if [ -L "$DESKTOP_FILE" ] || [ ! -f "$DESKTOP_FILE" ] ||
-		! grep -qx 'X-Pepe-Managed=true' "$DESKTOP_FILE"; then
+		! grep -qx 'X-Pepe-Managed=true' "$DESKTOP_FILE" ||
+		grep -qx 'X-Pepe-Bundle=true' "$DESKTOP_FILE"; then
 		fail "Refusing to overwrite or remove an unrelated launcher: $DESKTOP_FILE"
 	fi
 fi
