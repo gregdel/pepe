@@ -26,6 +26,11 @@
 - Constrain/clamp descriptions to roughly 55–70 characters/line with ~1.35–1.5 line spacing. On shows, prioritize the selected episode synopsis over repeated show copy. Order episode content: title/Play, air date/runtime, synopsis, then one subdued technical line (size, quality, codecs, container, release group); do not restore bright file badges.
 - For detail-page changes, inspect headless screenshots at 1080p and a smaller viewport with bright and dark fanart. References: [Android TV typography](https://developer.android.com/design/ui/tv/guides/styles/typography), [Android TV scrims](https://developer.android.com/design/ui/tv/guides/components/featured-carousel), [Fire TV UX](https://developer.amazon.com/docs/fire-tv/design-and-user-experience-guidelines.html), [WCAG contrast](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum).
 
+## Known platform limitations
+
+- Steam Deck Gaming Mode sleep inhibition is not solved by the generic `packaging/linux/mpv-inhibit.sh` wrapper. On SteamOS 3.8.28 stable, a confirmed idle/block lock did not prevent suspend; a sleep/block lock kept SSH usable but left the display black, unrecoverable by pointer activity. See [tested behavior and upstream issues](packaging/linux/README.md#automatic-sleep-during-playback). Do not recommend a stronger lock as a verified fix or add synthetic input/global power-setting changes unless explicitly requested. Preserve manual suspend requirements and verify behavior on the target SteamOS/client versions.
+- The user-requested, opt-in `packaging/linux/mpv-keepawake.sh` workaround uses host xdotool with unused raw keycode 97 for the entire launcher lifetime (including pause/background playback). Keep it separate from the inhibitor wrapper and from Pépé's Go/Lua code. A manual pulse test worked on the Deck; do not conflate that with full wrapper validation or proper inhibition support. The user validates this wrapper on-device; keep only the static `shellcheck packaging/linux/mpv-keepawake.sh` check.
+
 ## Checks and headless UI
 
 - For desktop packaging changes, run `shellcheck scripts/install-desktop.sh scripts/test-desktop.sh` and `scripts/test-desktop.sh`; these use isolated HOME/XDG fixtures and mocked downloads. The installed icon is downloaded and SHA-verified, never committed.

@@ -116,6 +116,75 @@ Recommended Steam Input mapping:
 The optional [web remote](../../README.md#web-remote-and-url-playback) works on
 trusted networks; it is disabled by default and has no authentication.
 
+### Automatic sleep during playback
+
+Gaming Mode can suspend the Deck during mpv playback despite an active systemd
+idle inhibitor. Tests on **SteamOS 3.8.28, stable channel** produced these results,
+with both locks confirmed in `systemd-inhibit --list`:
+
+| Inhibitor (`--mode=block`) | Observed result |
+| --- | --- |
+| `--what=idle` | The Deck still suspended and playback stopped. |
+| `--what=sleep` | SSH remained usable, but the display went black; pointer activity did not restore the picture. |
+
+A D-Bus trace captured an explicit `org.freedesktop.login1.Manager.Suspend()`
+request from `dbus-send` inside `steam-launcher.service`. A logind idle inhibitor
+inhibits logind's idle handling, not explicit suspend requests from another
+process. A sleep inhibitor can block those requests, including manual suspend,
+but did not keep Gaming Mode's display usable in this test.
+
+The generic [`mpv-inhibit.sh`](mpv-inhibit.sh) wrapper is useful where the Linux
+idle policy honors logind idle inhibitors; it is **not a Gaming Mode fix**.
+No proper inhibition solution preserving both automatic playback inhibition and
+manual suspend was verified on this setup. Do not assume a stronger lock solves
+the problem.
+See upstream [application inhibition support](https://github.com/ValveSoftware/SteamOS/issues/1881)
+and [black display when suspend is inhibited](https://github.com/ValveSoftware/SteamOS/issues/2619).
+Retest on the target SteamOS and Steam client versions before relying on a fix.
+
+#### Opt-in input workaround
+
+[`mpv-keepawake.sh`](mpv-keepawake.sh) is a separate, experimental workaround:
+it sends an unused raw X keycode (97) every 20 seconds for the entire mpv
+launcher lifetime, **including while paused, buffering, or playing in the
+background**. A manual pulse test kept playback and the display normal past
+the usual sleep timeout on the Deck above. The complete wrapper still needs
+on-device validation, including automatic sleep after exit and manual
+suspend/resume.
+
+To try it, set `mpv_path` to the wrapper's absolute path:
+
+```yaml
+mpv_path: /absolute/path/to/pepe/packaging/linux/mpv-keepawake.sh
+```
+
+It launches `$HOME/.local/share/flatpak/exports/bin/io.mpv.Mpv`, matching a
+per-user Flatpak installation; edit its `mpv_path` assignment for another
+launcher. All original playback arguments are forwarded unchanged. The input
+worker runs on the host, outside Flatpak, without extra sandbox permissions.
+
+The worker only activates when `XDG_CURRENT_DESKTOP` includes `gamescope`.
+It requires Linux `/proc`, host `xdotool`, `xmodmap`, `awk`, and GNU `timeout`,
+and a usable inherited `DISPLAY`/`XAUTHORITY`. It checks that keycode 97 remains
+unmapped and is not a modifier before each pulse; it never rewrites the keymap,
+clears modifiers, or moves the mouse. If validation or input fails, the worker
+stops with a warning on stderr while the player continues normally. Pépé currently
+discards player stderr, so diagnose warnings by running the wrapper directly
+from the Gaming Mode environment. The worker checks its parent before each
+pulse and exits at the next 20-second check after the launcher ends, including
+after forced termination.
+
+This simulates activity, not inhibition. It takes no systemd lock and changes
+no power settings. Do not chain it through the failed sleep-inhibitor approach.
+To undo it, restore your previous `mpv_path`. Static check:
+
+```sh
+shellcheck packaging/linux/mpv-keepawake.sh
+```
+
+Validate playback, pause/background behavior, automatic sleep after exit, and
+manual suspend/resume on the Deck.
+
 ## HDMI-CEC remote
 
 Use the kernel CEC/RC input path, not a libCEC daemon or synthetic global
