@@ -154,7 +154,7 @@ Edit `polochon_url` and `polochon_token` in that file. Keep the token private. P
 passes it to mpv through a private temporary configuration, not process arguments.
 Ensure `mpv` is available in the desktop session's PATH, or set `mpv_path` to an
 absolute executable/wrapper path. Managed mode stays off for ordinary mpv; see
-[managed launchers](../../README.md#managed-launchers) for worker/recovery wrappers.
+[managed launchers](#managed-launchers) for worker/recovery wrappers.
 The registration script does not install dependencies or write configuration.
 
 Register the built binary:
@@ -257,8 +257,8 @@ Recommended Steam Input mapping:
 - Menu: R
 - View: Q
 
-The optional [web remote](../../README.md#web-remote-and-url-playback) works on
-trusted networks; it is disabled by default and has no authentication.
+The optional web remote is disabled by default. Read its
+[security caveats](#web-remote-caveats) before enabling it.
 
 ### Automatic sleep during playback
 
@@ -417,10 +417,8 @@ Do not run a competing libCEC/cec-follower process that takes ownership.
 No mpv input.conf installation or special wrapper is required. Pépé loads its
 embedded playback script and installs the remote bindings only with
 `-controls=hdmi-cec`. `mpv-cec.conf` documents those bindings; do not load it
-unconditionally or merge it into global mpv configuration. Existing wrappers
-must forward Pépé's script/options/fonts along with its original arguments.
-See [playback help](../../README.md#controls-and-playback-help) for the shared
-panel, native/custom OSD opt-out, and mpv requirements.
+unconditionally or merge it into global mpv configuration. See
+[wrapper requirements](#playback-wrappers) when using a custom launcher.
 
 If your compositor ignores the device, it needs a CEC-specific udev rule
 setting `ID_INPUT_KEYBOARD=1`. Keep input access seat-scoped; do not add Pépé
@@ -439,3 +437,58 @@ keys do, check RC passthrough, the loaded map and compositor device access.
 Tests cover navigation/shortcut dispatch, not HDMI electrical signalling,
 TV interoperability, hotplug or actual Cage focus handoff. Those require
 a real adapter and TV.
+
+## Configuration caveats
+
+- Nonempty `POLOCHON_URL`, `POLOCHON_TOKEN` and `POLOCHON_MPV` environment variables
+  override `polochon_url`, `polochon_token` and `mpv_path`. Explicit command-line
+  options override the corresponding settings, including explicit `false` values.
+  Terminal-only environment variables may not reach menu or Steam launches.
+- Use the server's canonical HTTPS URL directly. Artwork redirects must preserve
+  scheme, hostname and port to protect the token; even HTTP-to-HTTPS redirects
+  are rejected.
+
+## Web remote caveats
+
+**There is no authentication or TLS. Use only on a trusted network; never expose
+it publicly.** Anyone who can reach the remote can control or quit Pépé and ask mpv
+to fetch HTTP/HTTPS resources accessible from the host. Browser cross-origin checks
+are not authentication. A listen address such as `:8081` binds all interfaces;
+`127.0.0.1:8081` restricts access to the local machine.
+
+- URL playback does not add the Polochon token, catalog subtitles or resume
+  positions. Signed URLs can still appear in local process arguments.
+- Website URLs depend on your existing mpv/resolver setup; Pépé installs no resolver.
+- The remote still requires normal Polochon configuration and a successful initial
+  library fetch. A successful HTTP command response means queued, not playing;
+  check the remote's status for playback failures.
+
+## Playback wrappers
+
+Forward all original mpv arguments unchanged, including authentication includes,
+subtitles, resume, IPC, and Pépé's script/options/font arguments. Pépé extracts its
+playback UI into a private per-session runtime; no global mpv config is installed.
+Third-party mpv UI scripts may conflict with the shared panel: `mpv_osd: native`
+disables Pépé's panel without disabling CEC bindings.
+
+### Managed launchers
+
+Enable `mpv_managed_launcher` only for launchers that control a separate worker or
+perform recovery after playback. Ordinary mpv and the bundled wrappers do not need it.
+
+A managed launcher must:
+
+1. Accept `--managed-runtime=DIR` before the original mpv arguments and forward
+   the original arguments unchanged to the player.
+2. Stay in the foreground until playback has stopped and recovery is complete,
+   including after TERM.
+3. Atomically rename a private temporary file to `DIR/launcher-complete`, containing
+   exactly `stopped-and-restored\n` (including the final newline), then exit with
+   the playback result.
+
+`mpv_startup_timeout` bounds IPC connection attempts, not recovery.
+`mpv_stop_timeout` is the grace period after TERM before killing the launcher.
+Missing or malformed completion retains the private runtime and blocks new playback;
+retry after the launcher writes a valid confirmation to clear the block. Pépé trusts
+that confirmation. The block is in-memory: launchers must handle parent disappearance
+and recovery across app restarts themselves.
