@@ -28,7 +28,7 @@ func TestWebPageControlsAndCopy(t *testing.T) {
 	response := webRequest(web.handler(), "GET", "/", "")
 	page := response.Body.String()
 	for _, removed := range []string{
-		`data-action="quit"`, `data-action="refresh"`, "Quit Pépé", "No authentication. Use only on a trusted network.",
+		`data-action="quit"`, `data-action="refresh"`, "Quit pépé", "No authentication. Use only on a trusted network.",
 		">Pause / Resume<", ">−10 seconds<", ">+10 seconds<",
 		"Right opens details. OK plays from details.",
 		"Replaces current playback. Website support depends on your existing mpv setup.",
@@ -39,6 +39,7 @@ func TestWebPageControlsAndCopy(t *testing.T) {
 		}
 	}
 	for _, retained := range []string{
+		`<title>pépé remote</title>`, `<p class="brand">pépé remote</p>`,
 		`aria-label="Video URL"`, `id="url-form"`, `data-action="right"`, `data-command="stop"`,
 		`id="now-playing"`, `class="playback-bar"`, `aria-label="Playback controls"`,
 		`aria-label="Seek back 10 seconds"`, `aria-label="Pause or resume"`,

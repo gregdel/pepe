@@ -150,7 +150,7 @@ fi
 chmod 600 "$config_dir/config.yaml"
 ```
 
-Edit `polochon_url` and `polochon_token` in that file. Keep the token private. Pépé
+Edit `polochon_url` and `polochon_token` in that file. Keep the token private. pépé
 passes it to mpv through a private temporary configuration, not process arguments.
 Ensure `mpv` is available in the desktop session's PATH, or set `mpv_path` to an
 absolute executable/wrapper path. Managed mode stays off for ordinary mpv; see
@@ -176,7 +176,7 @@ Registration installs per-user files under `$XDG_DATA_HOME`, defaulting to
 
 - `applications/pepe.desktop`: menu entry, with an absolute executable path.
 - `pepe/icon.png`: local copy of the
-  [hosted Pépé icon](https://git.quimbo.fr/attachments/ab9e56b5-bf62-4723-8f30-1438ab62a282).
+  [hosted pépé icon](https://git.quimbo.fr/attachments/ab9e56b5-bf62-4723-8f30-1438ab62a282).
 
 The PNG is downloaded with HTTPS-only redirects and a 20-second timeout, then
 checked against a pinned SHA-256 before installation. No image is committed or
@@ -191,7 +191,7 @@ Rebuilding `pepe` updates what the menu launches immediately. Moving or deleting
 the checkout breaks its shortcut; after moving, re-register from the new location.
 Checkout paths containing `=` or `%`, and checkout/data paths containing control
 characters, are rejected because desktop launchers cannot safely handle them.
-Only one checkout can own the per-user Pépé shortcut at a time. Registration refuses
+Only one checkout can own the per-user pépé shortcut at a time. Registration refuses
 to replace an unrelated existing `pepe.desktop` or a symlink at that path.
 
 Unregister with the same XDG data directory used for installation:
@@ -229,7 +229,7 @@ Real Wayland/X11 menu appearance and window grouping still need desktop testing.
 ## Steam Deck (optional)
 
 Run `./pepe install` in Desktop Mode, or use source registration as described
-above. Add Pépé from the application menu or its installed `pepe.desktop` as a
+above. Add pépé from the application menu or its installed `pepe.desktop` as a
 Non-Steam Game. For a copied installation, use the stable `$HOME/.local/bin/pepe`
 launcher rather than a release-specific executable. Enable fullscreen in YAML
 before launching from Gaming Mode. Ensure the configured mpv executable is also
@@ -313,7 +313,7 @@ It requires Linux `/proc`, host `xdotool`, `xmodmap`, `awk`, and GNU `timeout`,
 and a usable inherited `DISPLAY`/`XAUTHORITY`. It checks that keycode 97 remains
 unmapped and is not a modifier before each pulse; it never rewrites the keymap,
 clears modifiers, or moves the mouse. If validation or input fails, the worker
-stops with a warning on stderr while the player continues normally. Pépé currently
+stops with a warning on stderr while the player continues normally. pépé currently
 discards player stderr, so diagnose warnings by running the wrapper directly
 from the Gaming Mode environment. The worker checks its parent before each
 pulse and exits at the next 20-second check after the launcher ends, including
@@ -334,7 +334,7 @@ manual suspend/resume on the Deck.
 
 Use the kernel CEC/RC input path, not a libCEC daemon or synthetic global
 keyboard injection. The focused Wayland/X11 window receives the remote:
-Pépé while browsing, mpv during playback. This requires a CEC-capable HDMI
+pépé while browsing, mpv during playback. This requires a CEC-capable HDMI
 adapter/driver, kernel `CONFIG_MEDIA_CEC_RC`, v4l-utils (`cec-ctl` and
 `ir-keytable`), and a compositor that accepts the RC evdev device as a
 keyboard. Enable CEC on the TV and select this HDMI input. Some TVs do not
@@ -346,17 +346,17 @@ Select `controls: hdmi-cec` in YAML or launch with `-controls=hdmi-cec`.
 `help_bar: false` / `-help-bar=false` hides hints without disabling controls.
 The playback overrides below are only enabled by this control profile.
 
-| Remote | Pépé | mpv with HDMI-CEC controls |
+| Remote | pépé | mpv with HDMI-CEC controls |
 | --- | --- | --- |
 | Arrows | Navigate; **Right** opens a title's detail | Default mpv seek controls |
 | OK | Activate (does not open browse terminals) | Toggle pause |
-| Back/Exit | Close subtitles, leave details, or go back | Quit to Pépé |
-| Root/contents menu, red | Home (close subtitles first) | Quit to Pépé |
+| Back/Exit | Close subtitles, leave details, or go back | Quit to pépé |
+| Root/contents menu, red | Home (close subtitles first) | Quit to pépé |
 | Blue | Subtitle search | Cycle subtitles |
 | Green | Refresh library in browse | Toggle help |
 | Yellow | Movies/shows in browse | Select subtitle track |
 | Play, pause, play/pause | Ignored | Resume, pause, toggle |
-| Stop | Ignored | Quit to Pépé |
+| Stop | Ignored | Quit to pépé |
 | Rewind / fast forward | Ignored | Seek -10 / +10 seconds |
 | Previous / next | Ignored | Previous / next chapter |
 
@@ -367,7 +367,7 @@ Yellow sends Tab. Letter keys follow the seat's active keyboard layout; the
 layout must translate KEY_S/KEY_R to s/r (including lock/modifier state). Unlike
 the old F-key mapping, these shortcuts are not layout-independent. Transport
 buttons retain dedicated F5–F12 mappings because Play/Pause/Stop have distinct
-semantics and no Pépé browse shortcuts. Existing keyboard/vim navigation is
+semantics and no pépé browse shortcuts. Existing keyboard/vim navigation is
 unchanged. Home returns to browse home without changing the listing mode.
 
 During playback, Yellow opens mpv's native selection UI with an Off entry and
@@ -404,7 +404,7 @@ CEC RC device. Replace these placeholders; do not assume rc0/cec0:
 device=/dev/cecX
 rc=rcX
 sudo ir-keytable --sysdev "$rc" --clear --write "$PWD/packaging/linux/cec.toml"
-sudo cec-ctl --device "$device" --playback --cec-version-1.4 --osd-name=Pepe --rc-src-dev-root
+sudo cec-ctl --device "$device" --playback --cec-version-1.4 --osd-name=pepe --rc-src-dev-root
 sudo ir-keytable --sysdev "$rc" --read
 ```
 
@@ -414,14 +414,14 @@ the keymap must be reloaded when the RC device is recreated or after reboot.
 For persistent setup, use your distribution's udev/systemd configuration.
 Do not run a competing libCEC/cec-follower process that takes ownership.
 
-No mpv input.conf installation or special wrapper is required. Pépé loads its
+No mpv input.conf installation or special wrapper is required. pépé loads its
 embedded playback script and installs the remote bindings only with
 `-controls=hdmi-cec`. `mpv-cec.conf` documents those bindings; do not load it
 unconditionally or merge it into global mpv configuration. See
 [wrapper requirements](#playback-wrappers) when using a custom launcher.
 
 If your compositor ignores the device, it needs a CEC-specific udev rule
-setting `ID_INPUT_KEYBOARD=1`. Keep input access seat-scoped; do not add Pépé
+setting `ID_INPUT_KEYBOARD=1`. Keep input access seat-scoped; do not add pépé
 to the unrestricted `input` group or run it as root.
 
 ### Diagnostics
@@ -451,14 +451,14 @@ a real adapter and TV.
 ## Web remote caveats
 
 **There is no authentication or TLS. Use only on a trusted network; never expose
-it publicly.** Anyone who can reach the remote can control or quit Pépé and ask mpv
+it publicly.** Anyone who can reach the remote can control or quit pépé and ask mpv
 to fetch HTTP/HTTPS resources accessible from the host. Browser cross-origin checks
 are not authentication. A listen address such as `:8081` binds all interfaces;
 `127.0.0.1:8081` restricts access to the local machine.
 
 - URL playback does not add the Polochon token, catalog subtitles or resume
   positions. Signed URLs can still appear in local process arguments.
-- Website URLs depend on your existing mpv/resolver setup; Pépé installs no resolver.
+- Website URLs depend on your existing mpv/resolver setup; pépé installs no resolver.
 - The remote still requires normal Polochon configuration and a successful initial
   library fetch. A successful HTTP command response means queued, not playing;
   check the remote's status for playback failures.
@@ -466,10 +466,10 @@ are not authentication. A listen address such as `:8081` binds all interfaces;
 ## Playback wrappers
 
 Forward all original mpv arguments unchanged, including authentication includes,
-subtitles, resume, IPC, and Pépé's script/options/font arguments. Pépé extracts its
+subtitles, resume, IPC, and pépé's script/options/font arguments. pépé extracts its
 playback UI into a private per-session runtime; no global mpv config is installed.
 Third-party mpv UI scripts may conflict with the shared panel: `mpv_osd: native`
-disables Pépé's panel without disabling CEC bindings.
+disables pépé's panel without disabling CEC bindings.
 
 ### Managed launchers
 
@@ -489,6 +489,6 @@ A managed launcher must:
 `mpv_startup_timeout` bounds IPC connection attempts, not recovery.
 `mpv_stop_timeout` is the grace period after TERM before killing the launcher.
 Missing or malformed completion retains the private runtime and blocks new playback;
-retry after the launcher writes a valid confirmation to clear the block. Pépé trusts
+retry after the launcher writes a valid confirmation to clear the block. pépé trusts
 that confirmation. The block is in-memory: launchers must handle parent disappearance
 and recovery across app restarts themselves.

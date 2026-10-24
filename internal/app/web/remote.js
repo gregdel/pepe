@@ -61,7 +61,7 @@ async function poll() {
     const running = status.state === "Running";
     const title = running ? (status.title || "Untitled video") : "Nothing playing";
     if (nowPlaying.textContent !== title) nowPlaying.textContent = title;
-    document.title = running ? title + " · Pépé remote" : "Pépé remote";
+    document.title = running ? title + " · pépé remote" : "pépé remote";
     let text = status.state === "Idle" ? "Ready to play" : status.state;
     if (status.stopping) text = "Stopping playback";
     else if (running) text = status.source === "web" ? "Playing from Web UI" : "Now playing";
@@ -73,9 +73,9 @@ async function poll() {
       button.disabled = status.state !== "Running" || (status.stopping && button.dataset.command !== "stop");
     });
   } catch (_) {
-    nowPlaying.textContent = "Pépé remote";
-    document.title = "Pépé remote";
-    statusText.textContent = "Disconnected — check that Pépé is running.";
+    nowPlaying.textContent = "pépé remote";
+    document.title = "pépé remote";
+    statusText.textContent = "Disconnected — check that pépé is running.";
     document.querySelectorAll("[data-command]").forEach(button => { button.disabled = true; });
   } finally {
     window.setTimeout(poll, 1000);

@@ -5,7 +5,7 @@
 **pépé** (*Polochon Player* -> “PP” -> pépé, I know that's a stretch) is a Polochon player for TVs, remotes and Steam Deck, with playback through mpv.
 
 You need a Polochon server URL/token and mpv **0.41+ with Lua**.
-Pépé is **not a static binary**: [Gio's native dependencies](https://gioui.org/doc/install)
+pépé is **not a static binary**: [Gio's native dependencies](https://gioui.org/doc/install)
 are required, even to run `pepe install` or `pepe uninstall`.
 
 ## Install
@@ -17,7 +17,7 @@ Run these commands from the directory containing `pepe`:
 chmod +x ./pepe && ./pepe install
 ```
 
-This installs Pépé and its menu entry, preserving existing config.
+This installs pépé and its menu entry, preserving existing config.
 
 ## Configure
 

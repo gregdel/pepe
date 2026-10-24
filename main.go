@@ -97,7 +97,7 @@ func main() {
 
 	go func() {
 		w := new(gioapp.Window)
-		w.Option(gioapp.Title("Pépé"), gioapp.Size(unit.Dp(1200), unit.Dp(700)))
+		w.Option(gioapp.Title("pépé"), gioapp.Size(unit.Dp(1200), unit.Dp(700)))
 		if config.Fullscreen {
 			w.Option(gioapp.Decorated(false), gioapp.Fullscreen.Option())
 		}

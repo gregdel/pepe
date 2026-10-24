@@ -113,7 +113,7 @@ fetch_icon() {
 	fi
 	mkdir -p "$ICON_DIR"
 	ICON_TMP=$(mktemp "$ICON_DIR/.icon.XXXXXX")
-	printf 'Downloading Pépé icon...\n'
+	printf 'Downloading pépé icon...\n'
 	if ! curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
 		--connect-timeout 5 --max-time 20 --max-filesize 2097152 \
 		--output "$ICON_TMP" "$ICON_URL"; then

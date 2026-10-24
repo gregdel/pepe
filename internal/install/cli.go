@@ -33,7 +33,7 @@ func Run(args []string, stdout, stderr io.Writer) (handled bool, status int) {
 		return true, 2
 	}
 	if runtime.GOOS != "linux" {
-		_, _ = fmt.Fprintln(stderr, "Pépé installation currently supports Linux only.")
+		_, _ = fmt.Fprintln(stderr, "pépé installation currently supports Linux only.")
 		return true, 1
 	}
 	p, err := environmentPaths()
@@ -50,7 +50,7 @@ func Run(args []string, stdout, stderr io.Writer) (handled bool, status int) {
 		}
 	}
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "Pépé %s failed: %v\n", command, err)
+		_, _ = fmt.Fprintf(stderr, "pépé %s failed: %v\n", command, err)
 		return true, 1
 	}
 	return true, 0

@@ -128,6 +128,7 @@ rm "$XDG_DATA_HOME/applications/pepe.desktop"
 
 register
 assert_line "$XDG_DATA_HOME/pepe/icon.png" pepe-test-icon
+assert_line "$DESKTOP" 'Name=pépé'
 assert_line "$DESKTOP" 'X-Pepe-Managed=true'
 assert_line "$DESKTOP" 'Terminal=false'
 for argument in --fail --location --proto --proto-redir '=https' --connect-timeout --max-time --max-filesize; do

@@ -43,6 +43,7 @@ for path in app current releases; do [ ! -e "$APP/$path" ] || fail "Installation
 [ "$(stat -c %a "$CONFIG")" = 600 ] || fail 'Configuration is not private'
 player=$(printf '%s' "$APP/mpv-auto.sh" | sed "s/'/''/g")
 assert_line "$CONFIG" "mpv_path: '$player'"
+assert_line "$DESKTOP" 'Name=pépé'
 assert_line "$DESKTOP" 'X-Pepe-Bundle=true'
 desktop-file-validate "$DESKTOP"
 # All assets/wrappers must be independent copies, including after download removal.

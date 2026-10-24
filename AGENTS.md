@@ -29,7 +29,7 @@
 ## Known platform limitations
 
 - Steam Deck Gaming Mode sleep inhibition is not solved by the generic `packaging/linux/mpv-inhibit.sh` wrapper. On SteamOS 3.8.28 stable, a confirmed idle/block lock did not prevent suspend; a sleep/block lock kept SSH usable but left the display black, unrecoverable by pointer activity. See [tested behavior and upstream issues](packaging/linux/README.md#automatic-sleep-during-playback). Do not recommend a stronger lock as a verified fix or add synthetic input/global power-setting changes unless explicitly requested. Preserve manual suspend requirements and verify behavior on the target SteamOS/client versions.
-- The user-requested, opt-in `packaging/linux/mpv-keepawake.sh` workaround uses host xdotool with unused raw keycode 97 for the entire launcher lifetime (including pause/background playback). Keep it separate from the inhibitor wrapper and from Pépé's Go/Lua code. A manual pulse test worked on the Deck; do not conflate that with full wrapper validation or proper inhibition support. The user validates this wrapper on-device; keep only the static `shellcheck packaging/linux/mpv-keepawake.sh` check.
+- The user-requested, opt-in `packaging/linux/mpv-keepawake.sh` workaround uses host xdotool with unused raw keycode 97 for the entire launcher lifetime (including pause/background playback). Keep it separate from the inhibitor wrapper and from pépé's Go/Lua code. A manual pulse test worked on the Deck; do not conflate that with full wrapper validation or proper inhibition support. The user validates this wrapper on-device; keep only the static `shellcheck packaging/linux/mpv-keepawake.sh` check.
 
 ## Checks and headless UI
 

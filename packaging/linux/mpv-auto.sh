@@ -11,5 +11,5 @@ if command -v flatpak >/dev/null 2>&1; then
 		fi
 	done
 fi
-printf 'Pépé needs mpv 0.41+ with Lua support. Install mpv (or io.mpv.Mpv through Discover), or set mpv_path in your config.\n' >&2
+printf 'pépé needs mpv 0.41+ with Lua support. Install mpv (or io.mpv.Mpv through Discover), or set mpv_path in your config.\n' >&2
 exit 1

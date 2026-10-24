@@ -96,7 +96,7 @@ func (i installer) install(source string) error {
 		}
 	}
 	i.refreshDesktop()
-	_, _ = fmt.Fprintf(i.out, "Installed Pépé\nLauncher: %s\nConfiguration: %s\nArtwork and mpv wrappers: %s\n", p.bin, p.config, p.root)
+	_, _ = fmt.Fprintf(i.out, "Installed pépé\nLauncher: %s\nConfiguration: %s\nArtwork and mpv wrappers: %s\n", p.bin, p.config, p.root)
 	return nil
 }
 
@@ -279,7 +279,7 @@ func (i installer) uninstall() error {
 		return err
 	}
 	if !regularContents(filepath.Join(p.root, ".pepe-managed"), ownership) {
-		_, _ = fmt.Fprintln(i.out, "No installed Pépé found.")
+		_, _ = fmt.Fprintln(i.out, "No installed pépé found.")
 		return nil
 	}
 	unlock, err := acquireLock(p.root)
@@ -304,7 +304,7 @@ func (i installer) uninstall() error {
 		_, _ = fmt.Fprintf(i.out, "Leaving installed files for inspection: %s: %v\n", p.root, err)
 	}
 	i.refreshDesktop()
-	_, _ = fmt.Fprintln(i.out, "Removed installed Pépé. Configuration, mpv and Steam shortcuts are untouched.")
+	_, _ = fmt.Fprintln(i.out, "Removed installed pépé. Configuration, mpv and Steam shortcuts are untouched.")
 	return nil
 }
 

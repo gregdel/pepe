@@ -10,7 +10,7 @@ import (
 //go:embed mpv/pepe.lua
 var playerOSDScript []byte
 
-// playerInterfaceArgs only changes the player launched by Pépé. Assets share
+// playerInterfaceArgs only changes the player launched by pépé. Assets share
 // the authentication/IPC runtime's lifetime, including managed recovery.
 func (a *App) playerInterfaceArgs(runtimeDir string, fromWeb bool) ([]string, error) {
 	if a.nativeOSD && a.controls != ControlsHDMICEC {

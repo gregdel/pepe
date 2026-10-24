@@ -1,4 +1,4 @@
--- Pépé-owned playback UI. Keyboard mode yields to user input.conf bindings.
+-- pépé-owned playback UI. Keyboard mode yields to user input.conf bindings.
 local mp = require "mp"
 local input = require "mp.input"
 local opts = {controls = "keyboard", help = true, panel = true, web = false}

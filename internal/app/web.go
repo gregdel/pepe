@@ -312,7 +312,7 @@ func (a *App) publishWebStatus() {
 	}
 	if a.playerError != "" {
 		// Player errors can contain private URLs or runtime paths.
-		status.Error = "Playback failed; check Pépé on the display or its log."
+		status.Error = "Playback failed; check pépé on the display or its log."
 	}
 	a.webUI.mu.Lock()
 	a.webUI.status = status
