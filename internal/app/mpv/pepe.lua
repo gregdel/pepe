@@ -1,7 +1,7 @@
 -- pépé-owned playback UI. Keyboard mode yields to user input.conf bindings.
 local mp = require "mp"
 local input = require "mp.input"
-local opts = {controls = "keyboard", help = true, panel = true, web = false}
+local opts = {controls = "keyboard", help = true, panel = true, web = false, volume_keys = false}
 require("mp.options").read_options(opts, "pepe")
 local overlay = mp.create_osd_overlay("ass-events")
 local loaded, started_at = false, nil
@@ -269,11 +269,20 @@ end
 mp.add_key_binding(nil, "toggle-help", toggle_help)
 mp.add_key_binding(opts.controls == "keyboard" and "TAB" or nil, "subtitles", select_subtitles)
 if opts.controls == "hdmi-cec" then
+    if opts.volume_keys then
+        mp.set_property_native("volume-max", 100)
+        if mp.get_property_number("volume", 100) > 100 then
+            mp.set_property_native("volume", 100)
+        end
+    end
     -- Only this profile overrides native mpv shortcuts. Console/selector
     -- bindings activated later take priority until their menu is closed.
     local bindings = {
         {"s", "cycle sub"}, {"HOME", "quit"},
         {"ENTER", "cycle pause"}, {"ESC", "quit"},
+        -- Programme keys are inert unless this player explicitly opts in.
+        {"F3", opts.volume_keys and "osd-msg-bar add volume 5" or "ignore", {repeatable = opts.volume_keys}},
+        {"F4", opts.volume_keys and "osd-msg-bar add volume -5" or "ignore", {repeatable = opts.volume_keys}},
         {"F5", "set pause no"}, {"F6", "set pause yes"},
         {"F7", "cycle pause"}, {"F8", "quit"},
         {"F9", "seek -10", {repeatable = true}},

@@ -290,9 +290,17 @@ func TestCECKeymapSharesKeyboardBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, entry := range []string{`0x71 = "KEY_S"`, `0x72 = "KEY_HOME"`, `0x73 = "KEY_R"`, `0x74 = "KEY_TAB"`} {
+	for _, entry := range []string{
+		`0x30 = "KEY_F3"`, `0x31 = "KEY_F4"`,
+		`0x71 = "KEY_S"`, `0x72 = "KEY_HOME"`, `0x73 = "KEY_R"`, `0x74 = "KEY_TAB"`,
+	} {
 		if !strings.Contains(string(data), entry) {
 			t.Fatalf("missing CEC mapping %s", entry)
+		}
+	}
+	for _, code := range []string{"0x40", "0x41", "0x42", "0x43"} {
+		if strings.Contains(string(data), code+" =") {
+			t.Fatalf("TV power/volume/mute code %s must remain unmapped", code)
 		}
 	}
 }

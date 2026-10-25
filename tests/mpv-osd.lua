@@ -5,7 +5,7 @@ local now = real_time({year = 2026, month = 10, day = 6, hour = 22, min = 29, se
 local props = {
     pause = false, ["time-pos"] = 38 * 60, duration = 80 * 60, speed = 1,
     ["media-title"] = "Movie name (2024)", filename = "fallback.mkv",
-    ["osd-dimensions"] = {aspect = 16 / 9},
+    ["osd-dimensions"] = {aspect = 16 / 9}, ["volume-max"] = 130,
 }
 local observers, events, updates, removes = {}, {}, 0, 0
 local escaped = {}
@@ -342,6 +342,12 @@ forced.s()
 assert(commands[#commands] == "cycle sub")
 forced.ENTER()
 assert(commands[#commands] == "cycle pause")
+assert(props["volume-max"] == 130, "default CEC profile changed the volume limit")
+for _, key in ipairs({"F3", "F4"}) do
+    forced[key]()
+    assert(commands[#commands] == "ignore" and not repeatable[key],
+        "programme keys must be inert without the volume opt-in")
+end
 events["file-loaded"]()
 assert(overlay.data == "" and not timer.enabled)
 set("pause", true)
@@ -435,6 +441,30 @@ forced.r()
 remote_bars()
 forced.TAB()
 assert(selection and overlay.data == "")
+events.shutdown()
+
+-- Programme volume is opt-in, repeatable, capped, and independent of the panel.
+options = {controls = "hdmi-cec", volume_keys = true, help = false, panel = false}
+observers, events, bindings, forced = {}, {}, {}, {}
+props["volume-max"], props.volume = 130, 120
+dofile(script)
+assert(props["volume-max"] == 100 and props.volume == 100)
+for key in pairs(forced) do
+    assert(repeatable[key] == (key == "F3" or key == "F4" or key == "F9" or key == "F10"),
+        "only continuous volume/seek bindings should repeat: " .. key)
+end
+forced.F3()
+assert(commands[#commands] == "osd-msg-bar add volume 5")
+forced.F4()
+assert(commands[#commands] == "osd-msg-bar add volume -5")
+events.shutdown()
+
+-- Even an explicit volume opt-in must not override keyboard-mode shortcuts.
+options = {controls = "keyboard", volume_keys = true}
+observers, events, bindings, forced = {}, {}, {}, {}
+props["volume-max"], props.volume = 130, 120
+dofile(script)
+assert(next(forced) == nil and props["volume-max"] == 130 and props.volume == 120)
 events.shutdown()
 
 os.time, os.date = real_time, real_date

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -21,14 +22,27 @@ func TestMPVInterfaceIntegration(t *testing.T) {
 	if os.Getenv("PEPE_TEST_MPV") != "1" {
 		t.Skip("set PEPE_TEST_MPV=1 to exercise the installed mpv")
 	}
-	for _, profile := range []ControlProfile{ControlsKeyboard, ControlsHDMICEC} {
-		t.Run(string(profile), func(t *testing.T) {
+	for _, tc := range []struct {
+		profile    ControlProfile
+		volumeKeys bool
+	}{
+		{ControlsKeyboard, false}, {ControlsHDMICEC, false}, {ControlsHDMICEC, true},
+	} {
+		profile, volumeKeys := tc.profile, tc.volumeKeys
+		name := string(profile)
+		if volumeKeys {
+			name += "-volume"
+		}
+		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			a := New(nil, nil, nil, nil, nil)
 			a.controls = profile
 			args, err := a.playerInterfaceArgs(dir, false)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if volumeKeys {
+				args = append(args, "--volume=120", "--script-opts-append=pepe-volume_keys=yes")
 			}
 			socket := filepath.Join(dir, "mpv.sock")
 			args = append([]string{"--no-config", "--load-scripts=no", "--vo=null", "--ao=null", "--pause=yes", "--terminal=yes", "--input-terminal=no", "--term-status-msg=", "--input-ar-delay=100", "--input-ar-rate=10", "--input-ipc-server=" + socket}, args...)
@@ -160,13 +174,72 @@ func TestMPVInterfaceIntegration(t *testing.T) {
 			if strings.Contains(bindings, "pepe/cec-") != (profile == ControlsHDMICEC) {
 				t.Fatal("playback overrides are not profile-scoped")
 			}
-			capture := func(name string) {
+			if profile == ControlsHDMICEC {
+				waitKeyOwner("F3", "pepe")
+				waitKeyOwner("F4", "pepe")
+				limit := "130"
+				if volumeKeys {
+					limit = "100"
+				}
+				wait("volume-max", limit)
+				if volumeKeys {
+					wait("volume", "100") // Explicit startup amplification is clamped too.
+				}
+				for _, step := range []struct {
+					start, want int
+					key         string
+				}{
+					{50, 55, "F3"}, {50, 45, "F4"},
+					{98, 100, "F3"}, {2, 0, "F4"},
+					{100, 100, "F3"}, {0, 0, "F4"},
+				} {
+					request("set_property", "volume", step.start)
+					request("keypress", step.key)
+					want := step.start
+					if volumeKeys {
+						want = step.want
+					}
+					wait("volume", strconv.Itoa(want))
+				}
+				if volumeKeys {
+					holdVolume := func(key string, direction float64) {
+						t.Helper()
+						request("set_property", "volume", 50)
+						request("keydown", key)
+						defer request("keyup", key)
+						deadline := time.Now().Add(2 * time.Second)
+						repeated := false
+						for time.Now().Before(deadline) {
+							var volume float64
+							if err := json.Unmarshal(request("get_property", "volume"), &volume); err != nil {
+								t.Fatal(err)
+							}
+							if (volume-50)*direction >= 10 {
+								repeated = true
+								break
+							}
+							time.Sleep(20 * time.Millisecond)
+						}
+						request("keyup", key)
+						if !repeated {
+							t.Fatalf("holding %s did not repeat volume adjustment", key)
+						}
+						stopped := string(request("get_property", "volume"))
+						time.Sleep(200 * time.Millisecond)
+						wait("volume", stopped)
+					}
+					holdVolume("F3", 1)
+					holdVolume("F4", -1)
+				}
+				wait("pause", "true")
+			}
+			capture := func(label string) {
 				t.Helper()
 				if shotDir == "" {
 					return
 				}
 				time.Sleep(300 * time.Millisecond)
-				request("screenshot-to-file", filepath.Join(shotDir, "mpv-"+string(profile)+"-"+shotSize+"-"+name+".png"), "window")
+				request("screenshot-to-file", filepath.Join(shotDir, "mpv-"+name+"-"+shotSize+"-"+label+".png"), "window")
 			}
 			if shotDir != "" {
 				moveMouseToControls := func() (int, int) {

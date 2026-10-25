@@ -359,6 +359,7 @@ The playback overrides below are only enabled by this control profile.
 | Stop | Ignored | Quit to pépé |
 | Rewind / fast forward | Ignored | Seek -10 / +10 seconds |
 | Previous / next | Ignored | Previous / next chapter |
+| Programme/channel + / − | Ignored | Volume +5 / −5 points, only when opted in below |
 
 `cec.toml` maps CEC Select/Exit to Enter/Escape; the kernel defaults
 KEY_OK/KEY_EXIT are not understood by Gio's pinned XKB backend. Colour buttons
@@ -367,8 +368,10 @@ Yellow sends Tab. Letter keys follow the seat's active keyboard layout; the
 layout must translate KEY_S/KEY_R to s/r (including lock/modifier state). Unlike
 the old F-key mapping, these shortcuts are not layout-independent. Transport
 buttons retain dedicated F5–F12 mappings because Play/Pause/Stop have distinct
-semantics and no pépé browse shortcuts. Existing keyboard/vim navigation is
-unchanged. Home returns to browse home without changing the listing mode.
+semantics and no pépé browse shortcuts. Programme +/− send F3/F4, which are
+ignored unless playback volume control is explicitly enabled. Existing
+keyboard/vim navigation is unchanged. Home returns to browse home without
+changing the listing mode.
 
 During playback, Yellow opens mpv's native selection UI with an Off entry and
 all loaded subtitle tracks. Up/Down and OK choose a track; Back dismisses the
@@ -382,7 +385,28 @@ Do not mix an old installed keymap with the new help/bindings.
 Power, volume, mute, and unsupported buttons are deliberately absent.
 **Clear the default keymap** when loading this one, so forwarded CEC power
 keys cannot reach logind. No automatic TV wake, input switching, standby,
-system shutdown, ARC or volume control is implemented.
+system shutdown, ARC or TV volume control is implemented.
+
+### Optional programme-key volume
+
+For analogue speakers, programme/channel +/− can adjust mpv's software volume
+without taking over the TV's normal volume buttons. The TV must forward these
+keys to the playback device. After updating both pépé and `cec.toml`, opt in
+through the launched player's mpv configuration:
+
+```ini
+script-opts-append=pepe-volume_keys=yes
+```
+
+With `-controls=hdmi-cec`, this enables repeatable 5-point volume steps with
+mpv's native on-screen volume indicator and sets `volume-max=100` to prevent
+amplification. F3/F4 are no-ops by default; keyboard mode is unchanged even if
+the option is set. Leave it disabled on HDMI-audio devices. This controls the
+player, not ALSA mixer gain, TV volume, mute or ARC.
+
+Each new player starts at its configured volume (mpv defaults to 100). Add
+`volume=50`, for example, for a lower startup level. Changes are not remembered
+between player processes. Keep the analogue mixer/amplifier at a safe level.
 
 ### Manual setup
 

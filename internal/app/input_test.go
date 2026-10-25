@@ -29,6 +29,8 @@ func TestActionForKeyAliases(t *testing.T) {
 		{"remote green shares R", "R", actionRefresh},
 		{"remote yellow shares Tab", key.NameTab, actionToggleSection},
 		{"old remote F1 is unbound", key.NameF1, actionUnknown},
+		{"programme up is unbound in browse", key.NameF3, actionUnknown},
+		{"programme down is unbound in browse", key.NameF4, actionUnknown},
 		{"tab", key.NameTab, actionToggleSection},
 		{"refresh", "R", actionRefresh},
 		{"subtitles", "S", actionSubtitles},

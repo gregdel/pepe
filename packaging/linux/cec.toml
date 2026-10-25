@@ -15,6 +15,9 @@ protocol = "cec"
 0x0d = "KEY_ESC" # Exit/Back
 0x10 = "KEY_HOME" # Media top menu
 0x2b = "KEY_ENTER"
+# Programme keys: optional mpv volume control, ignored while browsing.
+0x30 = "KEY_F3" # Channel/programme up
+0x31 = "KEY_F4" # Channel/programme down
 0x44 = "KEY_F5" # Play
 0x45 = "KEY_F8" # Stop
 0x46 = "KEY_F6" # Pause
