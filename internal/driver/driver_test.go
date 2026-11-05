@@ -255,6 +255,59 @@ func TestClickTargetsRespectVisibleBounds(t *testing.T) {
 	}
 }
 
+func TestClickTargetsThroughNonSemanticClips(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		clip image.Rectangle
+	}{
+		{"original center", image.Rect(85, 0, 100, 100)},
+		{"clipped center", image.Rect(75, 0, 85, 100)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var button widget.Clickable
+			clicks := 0
+			d, err := New(Config{Width: 100, Height: 100, PxPerDp: 1, PxPerSp: 1}, func(gtx layout.Context) layout.Dimensions {
+				if button.Clicked(gtx) {
+					clicks++
+				}
+				outer := clip.Rect(image.Rect(0, 0, 100, 100)).Push(gtx.Ops)
+				semantic.LabelOp("Outer").Add(gtx.Ops)
+				inner := clip.Rect(tc.clip).Push(gtx.Ops)
+				offset := op.Offset(image.Pt(60, 20)).Push(gtx.Ops)
+				button.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					semantic.Button.Add(gtx.Ops)
+					semantic.LabelOp("Button").Add(gtx.Ops)
+					return layout.Dimensions{Size: image.Pt(60, 20)}
+				})
+				offset.Pop()
+				inner.Pop()
+				outer.Pop()
+				return layout.Dimensions{Size: gtx.Constraints.Max}
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+
+			for _, byID := range []bool{false, true} {
+				var matches []Node
+				findLabel(d.Tree(), "Button", &matches)
+				if len(matches) != 1 || matches[0].Bounds != (Bounds{MinX: 60, MinY: 20, MaxX: 120, MaxY: 40}) {
+					t.Fatalf("button semantics = %+v, want unclipped bounds", matches)
+				}
+				target := ClickTarget{Label: "Button"}
+				if byID {
+					target = ClickTarget{ID: &matches[0].ID}
+				}
+				before := clicks
+				if err := d.Click(target); err != nil || clicks != before+1 {
+					t.Fatalf("click = %v, clicks %d -> %d; want widget activation", err, before, clicks)
+				}
+			}
+		})
+	}
+}
+
 func TestSemanticEditorClickFocusesEditor(t *testing.T) {
 	var editor widget.Editor
 	editor.SingleLine = true

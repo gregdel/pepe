@@ -152,7 +152,9 @@ func (d *Driver) Tree() []Node {
 // ClickTarget selects a node by ID or label, or by explicit coordinates.
 // Occurrence is a 1-based depth-first label match; a button and its nested
 // label can both match, so use the button's ID when the label is ambiguous.
-// Semantic targets are clipped to the viewport and semantic ancestor bounds.
+// Semantic targets prefer a hit-tested center within the viewport and semantic
+// ancestor bounds. If neither the clipped nor original center can be confirmed,
+// they fall back to the clipped center; use coordinates for other clip layouts.
 type ClickTarget struct {
 	ID          *uint64
 	Label       string
@@ -231,7 +233,30 @@ func (d *Driver) clickPosition(target ClickTarget) (f32.Point, error) {
 	if visible.Empty() {
 		return f32.Point{}, fmt.Errorf("semantic node %d has no visible bounds", node.ID)
 	}
-	return f32.Pt(float32(visible.Min.X+visible.Dx()/2), float32(visible.Min.Y+visible.Dy()/2)), nil
+	clippedCenter := visible.Min.Add(visible.Size().Div(2))
+	for _, area := range []image.Rectangle{visible, {
+		Min: image.Pt(node.Bounds.MinX, node.Bounds.MinY),
+		Max: image.Pt(node.Bounds.MaxX, node.Bounds.MaxY),
+	}} {
+		center := area.Min.Add(area.Size().Div(2))
+		if !center.In(visible) {
+			continue
+		}
+		position := f32.Pt(float32(center.X), float32(center.Y))
+		hit, ok := d.router.SemanticAt(position)
+		if !ok {
+			continue
+		}
+		// A button's nested label can be the first semantic hit. Accept its
+		// descendants, but not an unrelated control or a clipping ancestor.
+		if _, _, ok := findNode([]Node{node}, uint64(hit), visible); ok {
+			return position, nil
+		}
+	}
+	// SemanticAt is not a complete pointer-target query: for example, an
+	// editor's decorative hint is a semantic sibling above its input handler.
+	// Preserve the existing best-effort center when neither hit is conclusive.
+	return f32.Pt(float32(clippedCenter.X), float32(clippedCenter.Y)), nil
 }
 
 func (d *Driver) Type(text string) error {

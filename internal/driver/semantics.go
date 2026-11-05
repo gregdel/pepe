@@ -83,7 +83,8 @@ func semanticClass(class semantic.ClassOp) string {
 
 // Semantic bounds are not clipped to ancestors. Keep their intersection with
 // the viewport so a nested label cannot target a point outside its container.
-// Non-semantic clips and occluding controls are not represented in this tree.
+// This is only a candidate area: non-semantic clips and occluding controls
+// require the router's hit testing.
 func findNode(nodes []Node, id uint64, visible image.Rectangle) (Node, image.Rectangle, bool) {
 	for _, node := range nodes {
 		bounds := image.Rectangle{
