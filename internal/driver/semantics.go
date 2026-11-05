@@ -28,11 +28,11 @@ type Bounds struct {
 }
 
 func normalizeTree(nodes []input.SemanticNode) []Node {
-	result := make([]Node, 0, len(nodes))
-	for _, node := range nodes {
-		result = append(result, normalizeNode(node))
+	if len(nodes) == 0 {
+		return []Node{}
 	}
-	return result
+	// Gio returns the root first, followed by its descendants as a flat list.
+	return []Node{normalizeNode(nodes[0])}
 }
 
 func normalizeNode(node input.SemanticNode) Node {

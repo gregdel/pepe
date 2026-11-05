@@ -218,23 +218,13 @@ func checkRemoteBars(t *testing.T, nodes []driver.Node) {
 }
 
 func countHelpLabel(nodes []driver.Node, label string) int {
-	// The driver exposes both the flat semantic list and nested children.
-	seen := make(map[uint64]bool)
 	count := 0
-	var visit func([]driver.Node)
-	visit = func(nodes []driver.Node) {
-		for _, node := range nodes {
-			if seen[node.ID] {
-				continue
-			}
-			seen[node.ID] = true
-			if node.Label == label {
-				count++
-			}
-			visit(node.Children)
+	for _, node := range nodes {
+		if node.Label == label {
+			count++
 		}
+		count += countHelpLabel(node.Children, label)
 	}
-	visit(nodes)
 	return count
 }
 

@@ -501,6 +501,64 @@ func TestHeadlessPrefixRowsHaveIndependentPointerTargets(t *testing.T) {
 	}
 }
 
+func TestHeadlessDuplicateTitlesHaveDistinctPointerTargets(t *testing.T) {
+	f := newHeadlessFixture(t)
+	first := newMovieListingItem(testMovie("twin-first", "Twin", 2020))
+	second := newMovieListingItem(testMovie("twin-second", "Twin", 2020))
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
+	first.movie.Movie.BaseVideo.VideoMetadata.DateAdded = time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC)
+	//nolint:staticcheck // Keep the fixture path aligned with the upstream API graph.
+	second.movie.Movie.BaseVideo.VideoMetadata.DateAdded = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	items := []*listingItem{first, second}
+	snapshot := buildLibrarySnapshot(radixListingBuilder{}, items, nil)
+	f.app.client.publishLibrary(map[string]*papi.Movie{first.media.ID: first.movie, second.media.ID: second.movie}, nil, items, nil, snapshot)
+	f.app.applyLibrarySnapshot(snapshot)
+	f.app.applyListingMode(ListingModeDateAdded)
+	headlessKey(t, f, "RightArrow")
+
+	matches := func() []driver.Node {
+		t.Helper()
+		var found []driver.Node
+		var visit func([]driver.Node)
+		visit = func(nodes []driver.Node) {
+			for _, node := range nodes {
+				if node.Label == "Twin (2020)" {
+					found = append(found, node)
+				}
+				visit(node.Children)
+			}
+		}
+		visit(f.driver.Tree())
+		if len(found) != 4 || found[0].Class != "button" || found[1].ParentID != found[0].ID || found[2].Class != "button" || found[3].ParentID != found[2].ID || found[0].ID == found[2].ID {
+			t.Fatalf("duplicate-title semantics = %+v, want two buttons and their nested labels", found)
+		}
+		return found
+	}
+	matches()
+	if err := f.driver.Click(driver.ClickTarget{Label: "Twin (2020)"}); err == nil || !strings.Contains(err.Error(), "matched 4 nodes") {
+		t.Fatalf("duplicate-title click error = %v, want four matches", err)
+	}
+	for _, tc := range []struct {
+		id         string
+		occurrence int
+		byID       bool
+	}{{"twin-first", 1, true}, {"twin-second", 3, true}, {"twin-first", 1, false}, {"twin-second", 3, false}} {
+		found := matches()
+		target := driver.ClickTarget{Label: "Twin (2020)", Occurrence: tc.occurrence}
+		if tc.byID {
+			id := found[tc.occurrence-1].ID
+			target = driver.ClickTarget{ID: &id}
+		}
+		if err := f.driver.Click(target); err != nil {
+			t.Fatal(err)
+		}
+		if detail := f.app.detail; detail == nil || detail.kind != detailMovie || detail.movieID != tc.id {
+			t.Fatalf("click occurrence %d (by ID %t) opened %+v, want %s", tc.occurrence, tc.byID, detail, tc.id)
+		}
+		headlessKey(t, f, "LeftArrow")
+	}
+}
+
 func TestHeadlessBrowseDoesNotExposeTextEditor(t *testing.T) {
 	f := newHeadlessFixture(t)
 	if headlessHasClass(f.driver.Tree(), "editor") {

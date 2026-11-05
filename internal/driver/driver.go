@@ -140,6 +140,8 @@ func (d *Driver) FrameNumber() uint64 { return d.frameNumber }
 
 func (d *Driver) Size() image.Point { return d.size }
 
+// Tree returns the semantic root and its descendants as a one-element slice.
+// It returns nil when the driver is closed.
 func (d *Driver) Tree() []Node {
 	if d.closed {
 		return nil
@@ -147,6 +149,9 @@ func (d *Driver) Tree() []Node {
 	return normalizeTree(d.router.AppendSemantics(nil))
 }
 
+// ClickTarget selects a node by ID or label, or by explicit coordinates.
+// Occurrence is a 1-based depth-first label match; a button and its nested
+// label can both match, so use the button's ID when the label is ambiguous.
 type ClickTarget struct {
 	ID          *uint64
 	Label       string

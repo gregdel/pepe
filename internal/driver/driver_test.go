@@ -1,7 +1,9 @@
 package driver
 
 import (
+	"image"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	"gioui.org/io/semantic"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/clip"
 	"gioui.org/widget"
 )
 
@@ -38,6 +41,103 @@ func TestHeadlessUI(t *testing.T) {
 	}
 	if !clicked {
 		t.Fatal("semantic click did not reach widget")
+	}
+}
+
+func TestSemanticTreeAndClickTargets(t *testing.T) {
+	var buttons [3]widget.Clickable
+	var clicks [3]int
+	d, err := New(Config{Width: 240, Height: 160, PxPerDp: 1, PxPerSp: 1}, func(gtx layout.Context) layout.Dimensions {
+		var rows []layout.FlexChild
+		for i := range buttons {
+			rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if buttons[i].Clicked(gtx) {
+					clicks[i]++
+				}
+				return buttons[i].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					semantic.Button.Add(gtx.Ops)
+					label := "Twin"
+					if i == 2 {
+						label = "Unique"
+					}
+					semantic.LabelOp(label).Add(gtx.Ops)
+					if i < 2 {
+						stack := clip.Rect(image.Rect(0, 0, 120, 30)).Push(gtx.Ops)
+						semantic.LabelOp(label).Add(gtx.Ops)
+						stack.Pop()
+					}
+					return layout.Dimensions{Size: image.Pt(160, 40)}
+				})
+			}))
+		}
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	tree := d.Tree()
+	if len(tree) != 1 {
+		t.Fatalf("tree has %d top-level nodes, want one root", len(tree))
+	}
+	seen := make(map[uint64]bool)
+	var check func(Node, uint64)
+	check = func(node Node, parent uint64) {
+		if seen[node.ID] || node.ParentID != parent {
+			t.Fatalf("repeated node or incorrect parent: %+v, want parent %d", node, parent)
+		}
+		seen[node.ID] = true
+		for _, child := range node.Children {
+			check(child, node.ID)
+		}
+	}
+	check(tree[0], 0)
+	flat := d.router.AppendSemantics(nil)
+	if len(seen) != len(flat) {
+		t.Fatalf("root subtree has %d unique IDs, Gio returned %d nodes", len(seen), len(flat))
+	}
+	for _, node := range flat {
+		if !seen[uint64(node.ID)] {
+			t.Fatalf("root subtree lost semantic node %d", node.ID)
+		}
+	}
+	var matches []Node
+	findLabel(tree, "Twin", &matches)
+	if len(matches) != 4 || matches[0].Class != "button" || matches[1].ParentID != matches[0].ID || matches[2].Class != "button" || matches[3].ParentID != matches[2].ID || matches[0].ID == matches[2].ID {
+		t.Fatalf("duplicate-label traversal = %+v, want two distinct buttons and their nested labels", matches)
+	}
+	if err := d.Click(ClickTarget{Label: "Twin"}); err == nil || !strings.Contains(err.Error(), "matched 4 nodes") {
+		t.Fatalf("ambiguous label error = %v, want four matches", err)
+	}
+	if err := d.Click(ClickTarget{Label: "Twin", Occurrence: 5}); err == nil || !strings.Contains(err.Error(), "out of range (1-4)") {
+		t.Fatalf("out-of-range occurrence error = %v", err)
+	}
+
+	for index := range 2 {
+		// IDs may change after a frame: resolve each from the current tree.
+		matches = nil
+		findLabel(d.Tree(), "Twin", &matches)
+		id := matches[index*2].ID
+		if err := d.Click(ClickTarget{ID: &id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if clicks != [3]int{1, 1, 0} {
+		t.Fatalf("button ID clicks = %v, want [1 1 0]", clicks)
+	}
+	for _, tc := range []struct{ occurrence, button int }{{1, 0}, {2, 0}, {3, 1}, {4, 1}} {
+		want := clicks
+		want[tc.button]++
+		if err := d.Click(ClickTarget{Label: "Twin", Occurrence: tc.occurrence}); err != nil {
+			t.Fatal(err)
+		}
+		if clicks != want {
+			t.Fatalf("occurrence %d clicks = %v, want %v", tc.occurrence, clicks, want)
+		}
+	}
+	if err := d.Click(ClickTarget{Label: "Unique"}); err != nil || clicks != [3]int{3, 3, 1} {
+		t.Fatalf("unique label click = %v, counts %v", err, clicks)
 	}
 }
 
