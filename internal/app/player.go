@@ -386,7 +386,6 @@ func (a *App) applyPlaybackSnapshot(tracker *playbackTracker) {
 	if tracker == nil {
 		return
 	}
-	tracker.wait(playbackTrackerWait)
 	mediaKey, pos, eof := tracker.snapshot()
 	if mediaKey == "" {
 		return

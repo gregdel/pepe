@@ -37,22 +37,13 @@ func NewRadixTree(strings []string) *RadixTree {
 	// Remove duplicates and empty strings
 	uniqueStrings := deduplicateStrings(strings)
 
-	if len(uniqueStrings) == 0 {
-		return &RadixTree{
-			root: &RadixNode{
-				Label:        "",
-				Children:     []*RadixNode{},
-				SubtreeCount: 0,
-			},
-		}
-	}
-
 	// Build uncompressed trie
 	trieRoot := buildUncompressedTrie(uniqueStrings)
 
 	// Convert to compressed radix tree
 	radixRoot := &RadixNode{
-		Label: "",
+		Label:    "",
+		Children: []*RadixNode{},
 	}
 
 	// Convert children

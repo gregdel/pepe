@@ -99,22 +99,3 @@ func formatSubtitleSummary(embeddedLangs []polochon.Language, externalSubs []*pa
 	}
 	return "Subtitles: " + strings.Join(languages, " · ")
 }
-
-func formatSubtitles(embeddedLangs []polochon.Language, externalSubs []*papi.Subtitle) string {
-	if len(embeddedLangs) == 0 && len(externalSubs) == 0 {
-		return "Subtitles: None"
-	}
-
-	var text strings.Builder
-	text.WriteString("Subtitles:\n")
-	for _, lang := range embeddedLangs {
-		fmt.Fprintf(&text, "  %s - embedded\n", formatLanguageName(lang))
-	}
-	for _, subtitle := range externalSubs {
-		if subtitle == nil || subtitle.Subtitle == nil {
-			continue
-		}
-		fmt.Fprintf(&text, "  %s - external\n", formatLanguageName(subtitle.Lang))
-	}
-	return strings.TrimRight(text.String(), "\n")
-}

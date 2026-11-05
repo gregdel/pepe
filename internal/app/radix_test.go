@@ -1,6 +1,7 @@
 package app
 
 import (
+	"reflect"
 	"sort"
 	"testing"
 	"unicode/utf8"
@@ -33,18 +34,21 @@ func TestRadixTreeUnicodeLabelsAreValidUTF8(t *testing.T) {
 }
 
 func TestRadixTreeEmpty(t *testing.T) {
-	tree := NewRadixTree([]string{})
-
-	if tree.root == nil {
-		t.Fatal("root should not be nil")
-	}
-
-	if tree.root.SubtreeCount != 0 {
-		t.Errorf("empty tree should have subtree count 0, got %d", tree.root.SubtreeCount)
-	}
-
-	if len(tree.root.Children) != 0 {
-		t.Errorf("empty tree should have no children, got %d", len(tree.root.Children))
+	for _, test := range []struct {
+		name   string
+		titles []string
+	}{
+		{"nil", nil},
+		{"empty", []string{}},
+		{"empty strings", []string{"", ""}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := NewRadixTree(test.titles).Root()
+			want := &RadixNode{Children: []*RadixNode{}}
+			if !reflect.DeepEqual(root, want) {
+				t.Errorf("empty tree root = %+v, want %+v", root, want)
+			}
+		})
 	}
 }
 

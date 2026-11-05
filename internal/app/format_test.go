@@ -1,7 +1,6 @@
 package app
 
 import (
-	"strings"
 	"testing"
 
 	polochon "github.com/odwrtw/polochon/lib"
@@ -45,6 +44,10 @@ func TestFormatSubtitleSummary(t *testing.T) {
 		{name: "none", want: "Subtitles: None"},
 		{name: "invalid tracks", external: []*papi.Subtitle{nil, {}}, want: "Subtitles: None"},
 		{name: "embedded", embedded: []polochon.Language{"en", "fr"}, want: "Subtitles: English (en) · French (fr)"},
+		{name: "external without file size", external: []*papi.Subtitle{
+			{Subtitle: &polochon.Subtitle{Lang: "fr", File: polochon.File{Size: 55000}}},
+		}, want: "Subtitles: French (fr)"},
+		{name: "unknown language", embedded: []polochon.Language{"de_DE"}, want: "Subtitles: de_DE (de_DE)"},
 		{name: "deduplicated", embedded: []polochon.Language{"en", "en"}, external: []*papi.Subtitle{
 			{Subtitle: &polochon.Subtitle{Lang: "en"}},
 			{Subtitle: &polochon.Subtitle{Lang: "fr"}},
@@ -54,36 +57,6 @@ func TestFormatSubtitleSummary(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if got := formatSubtitleSummary(test.embedded, test.external); got != test.want {
 				t.Fatalf("formatSubtitleSummary() = %q, want %q", got, test.want)
-			}
-		})
-	}
-}
-
-func TestFormatSubtitles(t *testing.T) {
-	tests := []struct {
-		name     string
-		embedded []polochon.Language
-		external []*papi.Subtitle
-		want     []string
-	}{
-		{"none", nil, nil, []string{"Subtitles: None"}},
-		{"embedded", []polochon.Language{"en"}, nil, []string{"English (en) - embedded"}},
-		{"external", nil, []*papi.Subtitle{{Subtitle: &polochon.Subtitle{Lang: "fr", File: polochon.File{Size: 55000}}}}, []string{"French (fr) - external"}},
-		{"embedded and external", []polochon.Language{"en"}, []*papi.Subtitle{{Subtitle: &polochon.Subtitle{Lang: "fr", File: polochon.File{Size: 42000}}}}, []string{"English (en) - embedded", "French (fr) - external"}},
-		{"unknown language", []polochon.Language{"de_DE"}, nil, []string{"de_DE (de_DE) - embedded"}},
-		{"multiple embedded", []polochon.Language{"en", "fr", "es"}, nil, []string{"English (en) - embedded", "French (fr) - embedded", "es (es) - embedded"}},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := formatSubtitles(test.embedded, test.external)
-			if strings.Contains(got, "kB") {
-				t.Fatalf("subtitle summary includes file sizes: %q", got)
-			}
-			for _, want := range test.want {
-				if !strings.Contains(got, want) {
-					t.Errorf("formatSubtitles() = %q, missing %q", got, want)
-				}
 			}
 		})
 	}
