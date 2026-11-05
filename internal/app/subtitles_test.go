@@ -6,6 +6,7 @@ import (
 	"image"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,6 +126,176 @@ func TestHeadlessSubtitleEmptyAndShortLists(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestHeadlessSubtitleHTTPFailures(t *testing.T) {
+	for _, operation := range []string{"search", "download"} {
+		t.Run(operation, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/movies/movie-new/subtitles/"+string(polochon.EN)+"/available" {
+					t.Errorf("unexpected subtitle path: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				if operation == "download" && r.Method == http.MethodGet {
+					_ = json.NewEncoder(w).Encode(subtitleEntries(1))
+					return
+				}
+				w.WriteHeader(http.StatusBadGateway)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": operation + " failed"})
+			}))
+			defer server.Close()
+			client, err := NewAPIClient(server.URL, "fixture-token", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := newHeadlessFixture(t)
+			f.app.client.client = client.client
+			f.app.pushMovieDetail(&MediaItem{ID: "movie-new", Type: mediaKindMovie})
+			detail := f.app.detail
+			headlessKey(t, f, "S")
+			p := f.app.subPopup
+			waitForCache(t, func() bool { return len(p.resultCh) == 1 })
+			if err := f.driver.Frame(); err != nil {
+				t.Fatal(err)
+			}
+			if operation == "download" {
+				if p.state != SubtitlePopupReady || len(p.entries) != 1 {
+					t.Fatalf("search state = %v, entries = %v", p.state, p.entries)
+				}
+				headlessKey(t, f, "Enter")
+				waitForCache(t, func() bool { return len(p.downloadDone) == 1 })
+			}
+			// Drain the failure, then verify that another frame retains it.
+			for range 2 {
+				if err := f.driver.Frame(); err != nil {
+					t.Fatal(err)
+				}
+				if f.app.subPopup != p || p.state != SubtitlePopupError ||
+					!strings.Contains(p.errMsg, operation+" failed") || p.downloadDone != nil ||
+					!headlessHasLabel(f.driver.Tree(), "Error: "+p.errMsg) {
+					t.Fatalf("subtitle failure state = %+v", p)
+				}
+			}
+			dismiss := "Enter"
+			if operation == "download" {
+				dismiss = "Escape"
+			}
+			headlessKey(t, f, dismiss)
+			if f.app.subPopup != nil || f.app.detail != detail || f.app.playerStatus != PlayerStatusIdle {
+				t.Fatal("dismissing subtitle failure changed detail or started playback")
+			}
+		})
+	}
+}
+
+func TestHeadlessSubtitleCloseReopenIgnoresStaleResults(t *testing.T) {
+	for _, operation := range []string{"search", "download"} {
+		for _, fail := range []bool{false, true} {
+			for _, oldFirst := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/fail=%t/old-first=%t", operation, fail, oldFirst), func(t *testing.T) {
+					oldRelease, newRelease := make(chan struct{}, 1), make(chan struct{}, 1)
+					oldStarted, newStarted := make(chan struct{}, 1), make(chan struct{}, 1)
+					oldEntries, newEntries := subtitleEntries(1), subtitleEntries(2)
+					oldEntries[0].Description = "Stale search result"
+					oldPath := "/movies/movie-old/subtitles/" + string(polochon.EN) + "/available"
+					newPath := "/movies/movie-new/subtitles/" + string(polochon.EN) + "/available"
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						switch {
+						case r.URL.Path == oldPath:
+							if operation == "search" || r.Method == http.MethodPost {
+								oldStarted <- struct{}{}
+								<-oldRelease
+								if fail {
+									w.WriteHeader(http.StatusBadGateway)
+									_, _ = fmt.Fprint(w, `{"error":"stale request failed"}`)
+									return
+								}
+							}
+							if r.Method == http.MethodGet {
+								_ = json.NewEncoder(w).Encode(oldEntries)
+							} else {
+								w.WriteHeader(http.StatusNoContent)
+							}
+						case r.URL.Path == newPath && r.Method == http.MethodGet:
+							newStarted <- struct{}{}
+							<-newRelease
+							_ = json.NewEncoder(w).Encode(newEntries)
+						default:
+							t.Errorf("unexpected subtitle request: %s %s", r.Method, r.URL.Path)
+							w.WriteHeader(http.StatusNotFound)
+						}
+					}))
+					t.Cleanup(server.Close)
+					// Unblock handlers even when an assertion fails before release.
+					t.Cleanup(func() { close(oldRelease); close(newRelease) })
+					client, err := NewAPIClient(server.URL, "fixture-token", nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					f := newHeadlessFixture(t)
+					f.app.client.client = client.client
+					f.app.pushMovieDetail(&MediaItem{ID: "movie-old", Type: mediaKindMovie})
+					headlessKey(t, f, "S")
+					old := f.app.subPopup
+					if operation == "download" {
+						waitForCache(t, func() bool { return len(old.resultCh) == 1 })
+						if err := f.driver.Frame(); err != nil {
+							t.Fatal(err)
+						}
+						headlessKey(t, f, "Enter")
+					}
+					waitForCache(t, func() bool { return len(oldStarted) == 1 })
+					headlessKey(t, f, "Escape")
+					if f.app.subPopup != nil {
+						t.Fatal("Escape did not close in-flight popup")
+					}
+					f.app.pushMovieDetail(&MediaItem{ID: "movie-new", Type: mediaKindMovie})
+					headlessKey(t, f, "S")
+					current := f.app.subPopup
+					if current == nil || current == old {
+						t.Fatal("reopen did not create a new popup")
+					}
+					waitForCache(t, func() bool { return len(newStarted) == 1 })
+					finishOld := func() {
+						t.Helper()
+						oldRelease <- struct{}{}
+						waitForCache(t, func() bool {
+							if operation == "download" {
+								return len(old.downloadDone) == 1
+							}
+							return len(old.resultCh) == 1
+						})
+						if err := f.driver.Frame(); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if oldFirst {
+						finishOld()
+						if f.app.subPopup != current || current.state != SubtitlePopupLoading ||
+							len(current.entries) != 0 || current.errMsg != "" {
+							t.Fatal("old result changed the loading replacement popup")
+						}
+					}
+					newRelease <- struct{}{}
+					waitForCache(t, func() bool { return len(current.resultCh) == 1 })
+					if err := f.driver.Frame(); err != nil {
+						t.Fatal(err)
+					}
+					if !oldFirst {
+						finishOld()
+					}
+					if f.app.subPopup != current || current.state != SubtitlePopupReady ||
+						current.errMsg != "" || current.downloadDone != nil || !current.doneAt.IsZero() ||
+						len(current.entries) != 2 || *current.entries[0] != *newEntries[0] ||
+						!headlessHasLabel(f.driver.Tree(), newEntries[1].Description) ||
+						headlessHasLabel(f.driver.Tree(), oldEntries[0].Description) {
+						t.Fatalf("replacement popup was changed by old %s result: %+v", operation, current)
+					}
+				})
+			}
+		}
 	}
 }
 

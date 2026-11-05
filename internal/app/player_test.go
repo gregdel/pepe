@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,7 +9,86 @@ import (
 	"time"
 
 	"gioui.org/op/paint"
+	polochon "github.com/odwrtw/polochon/lib"
+	"github.com/odwrtw/polochon/lib/papi"
 )
+
+func TestCatalogPlaybackURLFailures(t *testing.T) {
+	for _, kind := range []string{"movie", "episode"} {
+		for _, failure := range []string{"video", "subtitle"} {
+			t.Run(kind+"/"+failure, func(t *testing.T) {
+				client, err := NewAPIClient("https://catalog.example", "fixture-token", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				a := New(client, nil, &Config{MPVPath: filepath.Join(t.TempDir(), "must-not-launch")}, nil, nil)
+				defer a.Close()
+				movie := testMovie("movie-one", "Fixture Movie", 2026)
+				episode := headlessEpisode(1, 2, "Fixture Episode")
+				episode.ShowImdbID = "show-one"
+				source := playbackSource{mediaKey: movieMediaKey(movie.ImdbID), title: "Fixture Movie", video: movie}
+				if kind == "episode" {
+					source = playbackSource{mediaKey: episodeMediaKey(episode.ShowImdbID, 1, 2), title: "Fixture Episode", video: episode}
+				}
+				if failure == "video" {
+					wantErr := papi.ErrMissingMovieID
+					movie.ImdbID = ""
+					if kind == "episode" {
+						episode.ShowImdbID = ""
+						wantErr = papi.ErrMissingShowEpisodeInformations
+					}
+					command, err := a.buildPlayerCommand(source)
+					if !errors.Is(err, wantErr) || !strings.HasPrefix(err.Error(), "video URL: ") ||
+						len(command.args) != 0 || command.runtimeDir != "" {
+						t.Fatalf("invalid video command = %+v, error = %v", command, err)
+					}
+					a.launchPlayback(source)
+					if a.playerStatus != PlayerStatusError || !strings.HasPrefix(a.playerError, "video URL: ") ||
+						a.playerDone != nil || a.playerTracker != nil || a.playerStop != nil {
+						t.Fatalf("invalid video launch state = %s: %s", a.playerStatus, a.playerError)
+					}
+					return
+				}
+
+				bad := &papi.Subtitle{Subtitle: &polochon.Subtitle{Lang: polochon.EN}}
+				if _, err := client.getDownloadURL(bad); !errors.Is(err, papi.ErrMissingSubtitleVideo) {
+					t.Fatalf("fixture subtitle URL error = %v", err)
+				}
+				good := &papi.Subtitle{Subtitle: &polochon.Subtitle{
+					Video: source.video.(polochon.Video), Lang: polochon.EN,
+				}}
+				source.subtitles = []*papi.Subtitle{
+					nil, {Subtitle: &polochon.Subtitle{Embedded: true}}, bad, good, bad,
+				}
+				videoURL, err := client.getDownloadURL(source.video)
+				if err != nil {
+					t.Fatal(err)
+				}
+				subtitleURL, err := client.getDownloadURL(good)
+				if err != nil {
+					t.Fatal(err)
+				}
+				a.resumePos[source.mediaKey] = 47
+				command, err := a.buildPlayerCommand(source)
+				if err != nil {
+					t.Fatalf("subtitle URL failure prevented playback command: %v", err)
+				}
+				defer func() { _ = os.RemoveAll(command.runtimeDir) }()
+				var subtitleArgs []string
+				for _, arg := range command.args {
+					if strings.HasPrefix(arg, "--sub-file=") {
+						subtitleArgs = append(subtitleArgs, arg)
+					}
+				}
+				if command.mediaKey != source.mediaKey || command.args[len(command.args)-1] != videoURL ||
+					len(subtitleArgs) != 1 || subtitleArgs[0] != "--sub-file="+subtitleURL ||
+					!strings.Contains(strings.Join(command.args, "\n"), "--start=47\n") {
+					t.Fatalf("command after subtitle URL failure = %+v", command)
+				}
+			})
+		}
+	}
+}
 
 func TestPlayerRuntimeKeepsTokenOutOfArgumentsAndCleansUp(t *testing.T) {
 	dir := t.TempDir()
