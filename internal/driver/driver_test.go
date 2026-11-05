@@ -7,12 +7,15 @@ import (
 	"testing"
 	"time"
 
+	"gioui.org/font/gofont"
 	"gioui.org/io/key"
 	"gioui.org/io/semantic"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
+	"gioui.org/text"
 	"gioui.org/widget"
+	"gioui.org/widget/material"
 )
 
 func TestHeadlessUI(t *testing.T) {
@@ -138,6 +141,159 @@ func TestSemanticTreeAndClickTargets(t *testing.T) {
 	}
 	if err := d.Click(ClickTarget{Label: "Unique"}); err != nil || clicks != [3]int{3, 3, 1} {
 		t.Fatalf("unique label click = %v, counts %v", err, clicks)
+	}
+}
+
+func TestClickTargetsRespectVisibleBounds(t *testing.T) {
+	var partial, hidden, offscreen widget.Clickable
+	clicks := 0
+	d, err := New(Config{Width: 100, Height: 100, PxPerDp: 1, PxPerSp: 1}, func(gtx layout.Context) layout.Dimensions {
+		if partial.Clicked(gtx) {
+			clicks++
+		}
+		viewport := clip.Rect(image.Rect(0, 0, 100, 100)).Push(gtx.Ops)
+		semantic.LabelOp("Viewport").Add(gtx.Ops)
+		offset := op.Offset(image.Pt(80, 10)).Push(gtx.Ops)
+		partial.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			semantic.Button.Add(gtx.Ops)
+			semantic.LabelOp("Partial").Add(gtx.Ops)
+			child := clip.Rect(image.Rect(0, 0, 1000, 1000)).Push(gtx.Ops)
+			semantic.LabelOp("Oversized child").Add(gtx.Ops)
+			child.Pop()
+			return layout.Dimensions{Size: image.Pt(60, 30)}
+		})
+		offset.Pop()
+		viewport.Pop()
+
+		parent := clip.Rect(image.Rect(0, 50, 40, 90)).Push(gtx.Ops)
+		semantic.LabelOp("Clipping parent").Add(gtx.Ops)
+		offset = op.Offset(image.Pt(60, 60)).Push(gtx.Ops)
+		hidden.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			semantic.Button.Add(gtx.Ops)
+			semantic.LabelOp("Clipped").Add(gtx.Ops)
+			return layout.Dimensions{Size: image.Pt(20, 20)}
+		})
+		offset.Pop()
+		parent.Pop()
+
+		offset = op.Offset(image.Pt(120, 10)).Push(gtx.Ops)
+		offscreen.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			semantic.Button.Add(gtx.Ops)
+			semantic.LabelOp("Offscreen").Add(gtx.Ops)
+			return layout.Dimensions{Size: image.Pt(20, 20)}
+		})
+		offset.Pop()
+
+		disabled := clip.Rect(image.Rect(0, 0, 20, 20)).Push(gtx.Ops)
+		semantic.Button.Add(gtx.Ops)
+		semantic.LabelOp("Disabled").Add(gtx.Ops)
+		semantic.EnabledOp(false).Add(gtx.Ops)
+		disabled.Pop()
+
+		return layout.Dimensions{Size: image.Pt(100, 100)}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	idFor := func(label string) uint64 {
+		t.Helper()
+		var matches []Node
+		findLabel(d.Tree(), label, &matches)
+		if len(matches) != 1 {
+			t.Fatalf("semantic label %q has %d matches: %+v", label, len(matches), d.Tree())
+		}
+		return matches[0].ID
+	}
+	for _, label := range []string{"Partial", "Oversized child"} {
+		id := idFor(label)
+		if err := d.Click(ClickTarget{ID: &id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := d.Click(ClickTarget{Label: "Oversized child"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Click(ClickTarget{Coordinates: true, X: 90, Y: 25}); err != nil {
+		t.Fatal(err)
+	}
+	if clicks != 4 {
+		t.Fatalf("visible ID, label and coordinate clicks = %d, want 4", clicks)
+	}
+	for _, label := range []string{"Clipped", "Offscreen", "Disabled"} {
+		id := idFor(label)
+		frame := d.FrameNumber()
+		err := d.Click(ClickTarget{ID: &id})
+		want := "visible"
+		if label == "Disabled" {
+			want = "disabled"
+		}
+		if err == nil || !strings.Contains(err.Error(), want) || d.FrameNumber() != frame {
+			t.Fatalf("click %q = %v; want %s error and no frame", label, err, want)
+		}
+	}
+	disabledID := idFor("Disabled")
+	if err := d.Click(ClickTarget{ID: &disabledID, Coordinates: true, X: 90, Y: 25}); err != nil || clicks != 5 {
+		t.Fatalf("explicit coordinates did not take precedence: err=%v clicks=%d", err, clicks)
+	}
+	missingID := ^uint64(0)
+	for _, tc := range []struct {
+		target ClickTarget
+		want   string
+	}{
+		{ClickTarget{}, "requires id"},
+		{ClickTarget{ID: &missingID}, "does not exist"},
+		{ClickTarget{Label: "Missing"}, "does not exist"},
+		{ClickTarget{Label: "Oversized child", Occurrence: -1}, "out of range"},
+		{ClickTarget{Coordinates: true, X: 100, Y: 25}, "outside viewport"},
+	} {
+		frame := d.FrameNumber()
+		if err := d.Click(tc.target); err == nil || !strings.Contains(err.Error(), tc.want) || d.FrameNumber() != frame {
+			t.Fatalf("invalid click %+v = %v, want %s error and no frame", tc.target, err, tc.want)
+		}
+	}
+}
+
+func TestSemanticEditorClickFocusesEditor(t *testing.T) {
+	var editor widget.Editor
+	editor.SingleLine = true
+	theme := material.NewTheme()
+	theme.Shaper = text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
+	d, err := New(Config{Width: 240, Height: 40, PxPerDp: 1, PxPerSp: 1}, func(gtx layout.Context) layout.Dimensions {
+		return material.Editor(theme, &editor, "Search").Layout(gtx)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	var ids []uint64
+	var visit func([]Node)
+	visit = func(nodes []Node) {
+		for _, node := range nodes {
+			if node.Class == "editor" {
+				ids = append(ids, node.ID)
+			}
+			visit(node.Children)
+		}
+	}
+	visit(d.Tree())
+	if len(ids) != 1 {
+		t.Fatalf("editor semantic IDs = %v, want one", ids)
+	}
+	if err := d.Click(ClickTarget{ID: &ids[0]}); err != nil {
+		t.Fatal(err)
+	}
+	if !d.router.Source().Focused(&editor) {
+		t.Fatal("semantic click did not focus the editor")
+	}
+	d.router.Queue(key.EditEvent{Text: "search text"})
+	if err := d.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	if got := editor.Text(); got != "search text" {
+		t.Fatalf("editor text = %q, want search text", got)
 	}
 }
 

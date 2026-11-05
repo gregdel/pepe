@@ -116,6 +116,21 @@ func headlessHasLabel(nodes []driver.Node, label string) bool {
 	return false
 }
 
+func headlessLabelNodes(nodes []driver.Node, label string) []driver.Node {
+	var found []driver.Node
+	var visit func([]driver.Node)
+	visit = func(nodes []driver.Node) {
+		for _, node := range nodes {
+			if node.Label == label {
+				found = append(found, node)
+			}
+			visit(node.Children)
+		}
+	}
+	visit(nodes)
+	return found
+}
+
 func headlessButtonID(nodes []driver.Node, label string) (uint64, bool) {
 	for _, node := range nodes {
 		if node.Class == "button" && node.Label == label {
@@ -518,17 +533,7 @@ func TestHeadlessDuplicateTitlesHaveDistinctPointerTargets(t *testing.T) {
 
 	matches := func() []driver.Node {
 		t.Helper()
-		var found []driver.Node
-		var visit func([]driver.Node)
-		visit = func(nodes []driver.Node) {
-			for _, node := range nodes {
-				if node.Label == "Twin (2020)" {
-					found = append(found, node)
-				}
-				visit(node.Children)
-			}
-		}
-		visit(f.driver.Tree())
+		found := headlessLabelNodes(f.driver.Tree(), "Twin (2020)")
 		if len(found) != 4 || found[0].Class != "button" || found[1].ParentID != found[0].ID || found[2].Class != "button" || found[3].ParentID != found[2].ID || found[0].ID == found[2].ID {
 			t.Fatalf("duplicate-title semantics = %+v, want two buttons and their nested labels", found)
 		}
@@ -542,7 +547,12 @@ func TestHeadlessDuplicateTitlesHaveDistinctPointerTargets(t *testing.T) {
 		id         string
 		occurrence int
 		byID       bool
-	}{{"twin-first", 1, true}, {"twin-second", 3, true}, {"twin-first", 1, false}, {"twin-second", 3, false}} {
+	}{
+		{"twin-first", 1, true}, {"twin-second", 3, true},
+		{"twin-first", 2, true}, {"twin-second", 4, true},
+		{"twin-first", 1, false}, {"twin-second", 3, false},
+		{"twin-first", 2, false}, {"twin-second", 4, false},
+	} {
 		found := matches()
 		target := driver.ClickTarget{Label: "Twin (2020)", Occurrence: tc.occurrence}
 		if tc.byID {
@@ -556,6 +566,29 @@ func TestHeadlessDuplicateTitlesHaveDistinctPointerTargets(t *testing.T) {
 			t.Fatalf("click occurrence %d (by ID %t) opened %+v, want %s", tc.occurrence, tc.byID, detail, tc.id)
 		}
 		headlessKey(t, f, "LeftArrow")
+	}
+}
+
+func TestHeadlessRailNestedLabelClick(t *testing.T) {
+	f := newHeadlessFixture(t)
+	headlessKey(t, f, "LeftArrow")
+	for _, byID := range []bool{true, false} {
+		matches := headlessLabelNodes(f.driver.Tree(), "Last added")
+		if len(matches) != 2 || matches[0].Class != "button" || matches[1].ParentID != matches[0].ID {
+			t.Fatalf("rail semantics = %+v, want button and nested label", matches)
+		}
+		target := driver.ClickTarget{Label: "Last added", Occurrence: 2}
+		if byID {
+			id := matches[1].ID
+			target = driver.ClickTarget{ID: &id}
+		}
+		if err := f.driver.Click(target); err != nil {
+			t.Fatal(err)
+		}
+		if f.app.browse.library.mode != ListingModeDateAdded || f.app.browse.focus != browseFocusModeRail {
+			t.Fatalf("nested rail click (by ID %t) did not select Last added", byID)
+		}
+		headlessKey(t, f, "UpArrow")
 	}
 }
 

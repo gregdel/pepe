@@ -152,6 +152,7 @@ func (d *Driver) Tree() []Node {
 // ClickTarget selects a node by ID or label, or by explicit coordinates.
 // Occurrence is a 1-based depth-first label match; a button and its nested
 // label can both match, so use the button's ID when the label is ambiguous.
+// Semantic targets are clipped to the viewport and semantic ancestor bounds.
 type ClickTarget struct {
 	ID          *uint64
 	Label       string
@@ -188,15 +189,16 @@ func (d *Driver) clickPosition(target ClickTarget) (f32.Point, error) {
 		}
 		return f32.Pt(target.X, target.Y), nil
 	}
-	var matches []Node
+	if target.ID == nil && target.Label == "" {
+		return f32.Point{}, errors.New("click target requires id, label, or coordinates")
+	}
+	tree := d.Tree()
+	var id uint64
 	if target.ID != nil {
-		if node, ok := findNode(d.Tree(), *target.ID); ok {
-			matches = []Node{node}
-		} else {
-			return f32.Point{}, fmt.Errorf("semantic node %d does not exist", *target.ID)
-		}
-	} else if target.Label != "" {
-		findLabel(d.Tree(), target.Label, &matches)
+		id = *target.ID
+	} else {
+		var matches []Node
+		findLabel(tree, target.Label, &matches)
 		if len(matches) == 0 {
 			return f32.Point{}, fmt.Errorf("semantic label %q does not exist", target.Label)
 		}
@@ -210,11 +212,12 @@ func (d *Driver) clickPosition(target ClickTarget) (f32.Point, error) {
 		if occurrence < 1 || occurrence > len(matches) {
 			return f32.Point{}, fmt.Errorf("semantic label %q occurrence %d is out of range (1-%d)", target.Label, occurrence, len(matches))
 		}
-		matches = matches[occurrence-1 : occurrence]
-	} else {
-		return f32.Point{}, errors.New("click target requires id, label, or coordinates")
+		id = matches[occurrence-1].ID
 	}
-	node := matches[0]
+	node, visible, ok := findNode(tree, id, image.Rectangle{Max: d.size})
+	if !ok {
+		return f32.Point{}, fmt.Errorf("semantic node %d does not exist", id)
+	}
 	if node.Disabled {
 		name := node.Label
 		if name == "" {
@@ -225,7 +228,10 @@ func (d *Driver) clickPosition(target ClickTarget) (f32.Point, error) {
 	if node.Bounds.MinX >= node.Bounds.MaxX || node.Bounds.MinY >= node.Bounds.MaxY {
 		return f32.Point{}, fmt.Errorf("semantic node %d has empty bounds", node.ID)
 	}
-	return f32.Pt(float32((node.Bounds.MinX+node.Bounds.MaxX)/2), float32((node.Bounds.MinY+node.Bounds.MaxY)/2)), nil
+	if visible.Empty() {
+		return f32.Point{}, fmt.Errorf("semantic node %d has no visible bounds", node.ID)
+	}
+	return f32.Pt(float32(visible.Min.X+visible.Dx()/2), float32(visible.Min.Y+visible.Dy()/2)), nil
 }
 
 func (d *Driver) Type(text string) error {

@@ -81,16 +81,24 @@ func semanticClass(class semantic.ClassOp) string {
 	}
 }
 
-func findNode(nodes []Node, id uint64) (Node, bool) {
+// Semantic bounds are not clipped to ancestors. Keep their intersection with
+// the viewport so a nested label cannot target a point outside its container.
+// Non-semantic clips and occluding controls are not represented in this tree.
+func findNode(nodes []Node, id uint64, visible image.Rectangle) (Node, image.Rectangle, bool) {
 	for _, node := range nodes {
-		if node.ID == id {
-			return node, true
+		bounds := image.Rectangle{
+			Min: image.Pt(node.Bounds.MinX, node.Bounds.MinY),
+			Max: image.Pt(node.Bounds.MaxX, node.Bounds.MaxY),
 		}
-		if found, ok := findNode(node.Children, id); ok {
-			return found, true
+		clipped := visible.Intersect(bounds)
+		if node.ID == id {
+			return node, clipped, true
+		}
+		if found, area, ok := findNode(node.Children, id, clipped); ok {
+			return found, area, true
 		}
 	}
-	return Node{}, false
+	return Node{}, image.Rectangle{}, false
 }
 
 func findLabel(nodes []Node, label string, matches *[]Node) {
