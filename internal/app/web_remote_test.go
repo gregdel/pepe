@@ -106,25 +106,14 @@ func TestHeadlessWebRemoteListingClicks(t *testing.T) {
 				if err := f.driver.Frame(); err != nil {
 					t.Fatal(err)
 				}
-				var clickButton func([]driver.Node, string) bool
-				clickButton = func(nodes []driver.Node, label string) bool {
-					for _, node := range nodes {
-						if node.Class == "button" && node.Label == label {
-							if err := f.driver.Click(driver.ClickTarget{ID: &node.ID}); err != nil {
-								t.Fatal(err)
-							}
-							return true
-						}
-						if clickButton(node.Children, label) {
-							return true
-						}
-					}
-					return false
-				}
 				var remoteMessage string
 				for _, label := range []string{"Web remote", listingModeLabel(mode)} {
-					if !clickButton(f.driver.Tree(), label) {
+					id, ok := headlessButtonID(f.driver.Tree(), label)
+					if !ok {
 						t.Fatalf("missing rail button %q", label)
+					}
+					if err := f.driver.Click(driver.ClickTarget{ID: &id}); err != nil {
+						t.Fatal(err)
 					}
 					if label == "Web remote" {
 						if f.app.browse.remote == nil {

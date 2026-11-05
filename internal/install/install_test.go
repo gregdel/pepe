@@ -313,6 +313,35 @@ func TestOwnershipConflicts(t *testing.T) {
 	}
 }
 
+func TestCheckoutDesktopEntryRefused(t *testing.T) {
+	for _, installed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("installed=%t", installed), func(t *testing.T) {
+			i, source := newTestInstaller(t)
+			if installed {
+				installTestSource(t, i, source)
+			}
+			const checkoutEntry = "[Desktop Entry]\nName=pépé\nX-Pepe-Managed=true\nExec=/old/checkout/pepe\n"
+			writeTestFile(t, i.paths.desktop, checkoutEntry, 0o644)
+			for _, err := range []error{i.install(source), i.uninstall()} {
+				if err == nil || !strings.Contains(err.Error(), "unregister the checkout first") {
+					t.Fatalf("want checkout entry refusal with guidance, got %v", err)
+				}
+			}
+			checkTestFile(t, i.paths.desktop, checkoutEntry, 0o644)
+			if installed {
+				checkTestFile(t, filepath.Join(i.paths.root, "pepe"), fakeExecutable, 0o755)
+				if got := testLink(t, i.paths.bin); got != filepath.Join(i.paths.root, "pepe") {
+					t.Fatalf("installed launcher changed: %s", got)
+				}
+			} else {
+				checkAbsent(t, i.paths.root)
+				checkAbsent(t, i.paths.bin)
+			}
+			checkAbsent(t, i.paths.root+".lock")
+		})
+	}
+}
+
 func TestSymlinkParentsRefused(t *testing.T) {
 	for _, kind := range []string{"root", "bin", "desktop", "config"} {
 		t.Run(kind, func(t *testing.T) {

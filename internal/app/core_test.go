@@ -30,11 +30,20 @@ func TestAPIClientConstructorsInitializeEmptyRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clients := []*APIClient{configured, NewEmptyAPIClient(nil)}
-	for _, client := range clients {
+	empty := NewEmptyAPIClient(nil)
+	if configured.client == nil || configured.token != "token" || empty.client != nil || empty.token != "" {
+		t.Fatal("configured and empty clients do not have their expected network state")
+	}
+	if err := empty.FetchLibrary(); err == nil {
+		t.Fatal("empty client accepted a library fetch")
+	}
+	for _, client := range []*APIClient{configured, empty} {
 		snapshot := client.getSnapshot()
 		if snapshot.movieRadix == nil || snapshot.showRadix == nil || snapshot.movieRadix.Root() == nil || snapshot.showRadix.Root() == nil {
 			t.Fatal("client constructor did not initialize empty movie and show roots")
+		}
+		if client.movies == nil || client.shows == nil || client.log == nil || client.artworkClient == nil || client.artworkClient.Timeout != artworkRequestTimeout {
+			t.Fatal("client constructor did not initialize shared defaults")
 		}
 	}
 }

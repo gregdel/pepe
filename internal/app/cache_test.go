@@ -10,6 +10,10 @@ import (
 	"gioui.org/op/paint"
 )
 
+func newAsyncCache[T any](maxActive, maxPending int) *asyncCache[T] {
+	return newWeightedAsyncCache(maxActive, maxPending, 1, func(T) int64 { return 0 })
+}
+
 func waitForCache(t *testing.T, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
@@ -215,6 +219,41 @@ func TestWeightedCacheEvictsLeastRecentlyUsedAndRefetches(t *testing.T) {
 	}
 }
 
+func TestWeightedCacheRecencyOversizedAndFailureSentinel(t *testing.T) {
+	c := newWeightedAsyncCache[int](1, 0, 5, func(value int) int64 { return int64(value) })
+	c.store("a", 2)
+	c.store("b", 2)
+	if _, ok := c.get("a"); !ok {
+		t.Fatal("could not touch the first cache entry")
+	}
+	c.store("c", 2)
+	if _, ok := c.get("b"); ok {
+		t.Fatal("cache did not evict the least recently used entry")
+	}
+	c.fetch("failed", func() (int, error) { return 7, errors.New("failed") })
+	waitForCache(t, func() bool { return len(c.done) == 1 })
+	c.drain()
+	c.store("oversized", 6)
+	if _, ok := c.get("oversized"); ok {
+		t.Fatal("oversized value was cached")
+	}
+	if value, ok := c.get("failed"); !ok || value != 0 {
+		t.Fatalf("failure sentinel = (%d, %v), want (0, true)", value, ok)
+	}
+	if c.cacheWeight != 4 {
+		t.Fatalf("cache weight = %d, want 4", c.cacheWeight)
+	}
+	for _, key := range []string{"a", "c"} {
+		if _, ok := c.get(key); !ok {
+			t.Fatalf("oversized/failure result evicted %q", key)
+		}
+	}
+	c.reset()
+	if c.cacheWeight != 0 || c.lru.Len() != 0 || len(c.cache) != 0 || len(c.lruEntries) != 0 {
+		t.Fatal("reset retained weighted cache state")
+	}
+}
+
 func TestPosterImagesStayCachedAcrossListFrames(t *testing.T) {
 	// Three decoded posters exceed this budget; three display-sized posters fit.
 	c := newWeightedAsyncCache[paint.ImageOp](1, 0, 16<<20, imageOpWeight)
@@ -286,19 +325,31 @@ func TestWeightedCacheResetIgnoresStaleInFlightResult(t *testing.T) {
 }
 
 func TestAsyncCacheNotifiesOnSuccessAndFailure(t *testing.T) {
-	c := newAsyncCache[int](2, 0)
-	completed := make(chan struct{}, 2)
+	c := newAsyncCache[int](3, 0)
+	completed := make(chan struct{}, 3)
 	c.onDone = func() { completed <- struct{}{} }
+	var calls atomic.Int32
+	partialFailure := func() (int, error) {
+		calls.Add(1)
+		return 7, errors.New("failed after partial result")
+	}
 
 	c.fetch("success", func() (int, error) { return 3, nil })
 	c.fetch("failure", func() (int, error) { return 0, errors.New("failed") })
+	c.fetch("partial", partialFailure)
 
-	waitForCache(t, func() bool { return len(completed) == 2 })
+	waitForCache(t, func() bool { return len(completed) == 3 })
 	c.drain()
-	if _, ok := c.get("success"); !ok {
-		t.Fatal("successful request was not resolved")
+	if value, ok := c.get("success"); !ok || value != 3 {
+		t.Fatalf("successful request = (%d, %v), want (3, true)", value, ok)
 	}
-	if value, ok := c.get("failure"); !ok || value != 0 {
-		t.Fatalf("failed request = (%d, %v), want (0, true)", value, ok)
+	for _, key := range []string{"failure", "partial"} {
+		if value, ok := c.get(key); !ok || value != 0 {
+			t.Fatalf("failed request %q = (%d, %v), want (0, true)", key, value, ok)
+		}
+	}
+	c.fetch("partial", partialFailure)
+	if calls.Load() != 1 || c.active != 0 {
+		t.Fatal("failure sentinel did not prevent a retry")
 	}
 }

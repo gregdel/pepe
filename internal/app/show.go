@@ -78,18 +78,7 @@ func showCounts(show *papi.Show) (seasons, episodes int) {
 
 // showTabs renders the horizontal season selector.
 func (a *App) showTabs(gtx C, s *showPage) D {
-	pos := s.tabsList.Position
-	last := pos.First + pos.Count - 1
-	if s.tabsSize != gtx.Constraints.Max || pos.Count == 0 || s.seasonCursor < pos.First || (s.seasonCursor == pos.First && pos.Offset > 0) {
-		s.tabsList.ScrollTo(s.seasonCursor)
-	} else if s.seasonCursor > last || (s.seasonCursor == last && pos.OffsetLast < 0) {
-		first := s.seasonCursor - pos.Count + 1
-		if pos.OffsetLast < 0 {
-			first++
-		}
-		s.tabsList.ScrollTo(first)
-	}
-	s.tabsSize = gtx.Constraints.Max
+	keepSelectedVisible(&s.tabsList, s.seasonCursor, gtx.Constraints.Max, &s.tabsSize)
 
 	return layout.Inset{Top: dp4, Bottom: dp4}.Layout(gtx, func(gtx C) D {
 		return s.tabsList.Layout(gtx, len(s.seasons), func(gtx C, i int) D {
@@ -138,18 +127,7 @@ func (a *App) showEpisodeList(gtx C, s *showPage) D {
 			})
 		}
 
-		pos := s.epList.Position
-		last := pos.First + pos.Count - 1
-		if s.epListSize != gtx.Constraints.Max || pos.Count == 0 || s.epCursor < pos.First || (s.epCursor == pos.First && pos.Offset > 0) {
-			s.epList.ScrollTo(s.epCursor)
-		} else if s.epCursor > last || (s.epCursor == last && pos.OffsetLast < 0) {
-			first := s.epCursor - pos.Count + 1
-			if pos.OffsetLast < 0 {
-				first++
-			}
-			s.epList.ScrollTo(first)
-		}
-		s.epListSize = gtx.Constraints.Max
+		keepSelectedVisible(&s.epList, s.epCursor, gtx.Constraints.Max, &s.epListSize)
 
 		episodes := season.Children
 		return s.epList.Layout(gtx, len(episodes), func(gtx C, i int) D {

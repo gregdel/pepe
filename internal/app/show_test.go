@@ -1,12 +1,127 @@
 package app
 
 import (
+	"fmt"
+	"image"
 	"testing"
 	"time"
 
+	"gioui.org/layout"
 	polochon "github.com/odwrtw/polochon/lib"
 	"github.com/odwrtw/polochon/lib/papi"
 )
+
+func TestHeadlessShowListVisibility(t *testing.T) {
+	f := newHeadlessFixture(t)
+	show := f.app.client.shows["show-one"]
+	show.Seasons = make(map[int]*papi.Season)
+	for season := 1; season <= 20; season++ {
+		episodes := make(map[int]*papi.Episode)
+		if season < 20 {
+			for ep := 1; ep <= 30; ep++ {
+				episodes[ep] = headlessEpisode(season, ep, fmt.Sprintf("Episode %02d", ep))
+			}
+		}
+		show.Seasons[season] = &papi.Season{Episodes: episodes}
+	}
+	f.app.pushShowDetail(&MediaItem{ID: "show-one", Title: "Fixture Show", Type: mediaKindShow})
+	f.app.detail.enteredAt = time.Now().Add(-detailFadeDuration)
+	if err := f.driver.Resize(1280, 720); err != nil {
+		t.Fatal(err)
+	}
+	s := f.app.detail.show
+	frame := func(t *testing.T) {
+		t.Helper()
+		if err := f.driver.Frame(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	visible := func(t *testing.T, name string, list *layout.List, cursor int) {
+		t.Helper()
+		pos := list.Position
+		last := pos.First + pos.Count - 1
+		if pos.Count == 0 || cursor < pos.First || cursor > last ||
+			(cursor == pos.First && pos.Offset > 0) || (cursor == last && pos.OffsetLast < 0) {
+			t.Fatalf("%s cursor %d not fully visible: %+v", name, cursor, pos)
+		}
+	}
+	for range 12 {
+		headlessKey(t, f, "RightArrow")
+	}
+	headlessKey(t, f, "DownArrow")
+	for range 18 {
+		headlessKey(t, f, "DownArrow")
+	}
+	for _, size := range []image.Point{image.Pt(900, 600), image.Pt(1280, 720)} {
+		if err := f.driver.Resize(size.X, size.Y); err != nil {
+			t.Fatal(err)
+		}
+		visible(t, "tabs after resize", &s.tabsList, s.seasonCursor)
+		visible(t, "episodes after resize", &s.epList, s.epCursor)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		list   *layout.List
+		cursor *int
+	}{
+		{"tabs", &s.tabsList, &s.seasonCursor},
+		{"episodes", &s.epList, &s.epCursor},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Put a non-selected row partly beyond the leading edge, then select it.
+			tc.list.Position.First, tc.list.Position.Offset = 4, 5
+			*tc.cursor = 5
+			frame(t)
+			pos := tc.list.Position
+			if pos.First != 4 || pos.Offset <= 0 || pos.OffsetLast >= 0 || pos.Count < 3 {
+				t.Fatalf("fixture needs clipped first and last rows: %+v", pos)
+			}
+			*tc.cursor = pos.First
+			frame(t)
+			visible(t, tc.name+" first", tc.list, *tc.cursor)
+
+			// Recreate a trailing partial row and select it without resizing.
+			tc.list.Position.First, tc.list.Position.Offset = 4, 5
+			*tc.cursor = 5
+			frame(t)
+			pos = tc.list.Position
+			if pos.OffsetLast >= 0 {
+				t.Fatalf("fixture needs a clipped last row: %+v", pos)
+			}
+			*tc.cursor = pos.First + pos.Count - 1
+			frame(t)
+			visible(t, tc.name+" last", tc.list, *tc.cursor)
+		})
+	}
+
+	// Switching from a scrolled episode list to an empty season and back must
+	// restore a valid first-episode selection without scrolling the empty list.
+	s.focus = focusTabs
+	s.seasonCursor = 18
+	frame(t)
+	headlessKey(t, f, "RightArrow")
+	if s.seasonCursor != 19 || s.epCursor != 0 || !headlessHasLabel(f.driver.Tree(), "No episodes") {
+		t.Fatal("empty season did not render with the episode cursor reset")
+	}
+	headlessKey(t, f, "DownArrow")
+	headlessKey(t, f, "DownArrow")
+	if s.epCursor != 0 || s.currentEpisode() != nil {
+		t.Fatal("navigation moved the cursor in an empty season")
+	}
+	s.focus = focusTabs
+	headlessKey(t, f, "LeftArrow")
+	visible(t, "episodes after empty season", &s.epList, s.epCursor)
+}
+
+func TestHeadlessShowWithoutSeasons(t *testing.T) {
+	f := newHeadlessFixture(t)
+	f.app.client.shows["show-one"].Seasons = nil
+	f.app.pushShowDetail(&MediaItem{ID: "show-one", Type: mediaKindShow})
+	if f.app.detail != nil {
+		t.Fatal("opened a show with no seasons")
+	}
+}
 
 func TestEpisodeDisplayParts(t *testing.T) {
 	node := &DynamicNode{

@@ -116,6 +116,18 @@ func headlessHasLabel(nodes []driver.Node, label string) bool {
 	return false
 }
 
+func headlessButtonID(nodes []driver.Node, label string) (uint64, bool) {
+	for _, node := range nodes {
+		if node.Class == "button" && node.Label == label {
+			return node.ID, true
+		}
+		if id, ok := headlessButtonID(node.Children, label); ok {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
 func headlessHasClass(nodes []driver.Node, class string) bool {
 	for _, node := range nodes {
 		if node.Class == class || headlessHasClass(node.Children, class) {
@@ -474,20 +486,8 @@ func TestHeadlessPrefixRowsHaveIndependentPointerTargets(t *testing.T) {
 		t.Fatal("prefix rows did not get distinct clickables")
 	}
 
-	var buttonID func([]driver.Node, string) (uint64, bool)
-	buttonID = func(nodes []driver.Node, label string) (uint64, bool) {
-		for _, node := range nodes {
-			if node.Class == "button" && node.Label == label {
-				return node.ID, true
-			}
-			if id, ok := buttonID(node.Children, label); ok {
-				return id, true
-			}
-		}
-		return 0, false
-	}
 	for _, label := range []string{"A", "B"} {
-		id, ok := buttonID(f.driver.Tree(), label)
+		id, ok := headlessButtonID(f.driver.Tree(), label)
 		if !ok {
 			t.Fatalf("no button for prefix %q", label)
 		}

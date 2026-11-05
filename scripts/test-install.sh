@@ -37,6 +37,15 @@ expect_failure "$DOWNLOAD" install --unknown
 expect_failure "$DOWNLOAD" install extra
 expect_failure "$DOWNLOAD" unknown-command
 [ ! -e "$APP" ] || fail 'Help/invalid arguments created an installation'
+# A legacy checkout registration must be explicitly removed before installing.
+mkdir -p "$(dirname "$DESKTOP")"
+printf '[Desktop Entry]\nName=pépé\nX-Pepe-Managed=true\nExec=/old/checkout/pepe\n' > "$DESKTOP"
+cp "$DESKTOP" "$TEST/checkout.desktop"
+expect_failure "$DOWNLOAD" install
+grep -F 'unregister the checkout first' "$TEST/output" >/dev/null || fail 'Missing checkout unregistration guidance'
+cmp "$TEST/checkout.desktop" "$DESKTOP" || fail 'Install changed the checkout entry'
+[ ! -e "$APP" ] && [ ! -e "$BIN" ] || fail 'Refused install created payload or launcher'
+rm "$DESKTOP" # Simulate manual unregistration using the old checkout script.
 "$DOWNLOAD" install > "$TEST/output"
 [ -d "$APP" ] && [ ! -L "$APP" ] || fail 'Installation is not a real directory'
 for path in app current releases; do [ ! -e "$APP/$path" ] || fail "Installation created $path nesting"; done
@@ -80,7 +89,6 @@ assert_line "$TEST/output" "Configuration already exists; keeping $CONFIG"
 for path in app current releases; do [ ! -e "$APP/$path" ] || fail "Reinstall created $path nesting"; done
 assert_line "$CONFIG" 'mpv_path: /my/custom/player'
 [ "$(stat -c %a "$CONFIG")" = 640 ] || fail 'Existing config permissions changed'
-expect_failure "$ROOT/scripts/install-desktop.sh" --uninstall
 "$BIN" uninstall > "$TEST/output"
 [ ! -e "$APP" ] && [ ! -e "$DESKTOP" ] && [ ! -L "$BIN" ] || fail 'Clean uninstall left installed files'
 assert_line "$CONFIG" 'mpv_path: /my/custom/player'

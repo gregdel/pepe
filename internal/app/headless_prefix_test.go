@@ -36,18 +36,6 @@ func newHeadlessPrefixFixture(t *testing.T, kind MediaKind) *headlessFixture {
 	return f
 }
 
-func prefixButtonID(nodes []driver.Node, label string) (uint64, bool) {
-	for _, node := range nodes {
-		if node.Class == "button" && node.Label == label {
-			return node.ID, true
-		}
-		if id, ok := prefixButtonID(node.Children, label); ok {
-			return id, true
-		}
-	}
-	return 0, false
-}
-
 func TestHeadlessPrefixTitlesReachable(t *testing.T) {
 	for _, kind := range []MediaKind{mediaKindMovie, mediaKindShow} {
 		for _, viewport := range []image.Point{image.Pt(1920, 1080), image.Pt(1024, 768)} {
@@ -68,8 +56,8 @@ func TestHeadlessPrefixTitlesReachable(t *testing.T) {
 				if f.app.detail != nil || f.app.browse.nav.getCurrentNode() != group {
 					t.Fatal("Right opened details instead of entering the prefix group")
 				}
-				firstID, firstOK := prefixButtonID(f.driver.Tree(), "Up")
-				secondID, secondOK := prefixButtonID(f.driver.Tree(), "Up in the Air (2009)")
+				firstID, firstOK := headlessButtonID(f.driver.Tree(), "Up")
+				secondID, secondOK := headlessButtonID(f.driver.Tree(), "Up in the Air (2009)")
 				if !firstOK || !secondOK || firstID == secondID {
 					t.Fatal("prefix terminals do not have distinct labeled pointer targets")
 				}
@@ -123,7 +111,7 @@ func TestHeadlessPrefixTitlesReachable(t *testing.T) {
 					t.Fatal("Up did not return to the prefix terminal")
 				}
 				for _, entry := range []struct{ label, id string }{{"Up", "prefix"}, {"Up in the Air (2009)", "descendant"}} {
-					buttonID, ok := prefixButtonID(f.driver.Tree(), entry.label)
+					buttonID, ok := headlessButtonID(f.driver.Tree(), entry.label)
 					if !ok {
 						t.Fatalf("missing pointer target %q", entry.label)
 					}

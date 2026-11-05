@@ -9,9 +9,17 @@ not a tar archive. Optionally verify it alongside the supplied `pepe.sha256`:
 sha256sum -c pepe.sha256
 ```
 
-If a checkout owns the desktop entry, first unregister it with
-`scripts/install-desktop.sh --uninstall`. Source registration stays separate and
-likewise refuses to replace a copied installation's desktop entry.
+Checkout desktop registration is no longer supported. If an older checkout owns
+the desktop entry, unregister it **before updating the checkout** using its old
+script, with the same HOME/XDG data directory used to register it:
+
+```sh
+scripts/install-desktop.sh --uninstall
+```
+
+If you have already updated, use the script from the older checkout or revision.
+The copied installer refuses to overwrite the old entry; it does not migrate or
+remove it automatically. The old script preserves unverified icons.
 
 Install for the current user:
 
@@ -37,7 +45,9 @@ configuration lookup. Symlink installation parents and unrelated existing files
 are refused. The download and source checkout can be deleted after installation.
 
 Edit `polochon_url` and `polochon_token` in
-`${XDG_CONFIG_HOME:-$HOME/.config}/pepe/config.yaml` before launching:
+`${XDG_CONFIG_HOME:-$HOME/.config}/pepe/config.yaml` before launching. Keep the
+token private; pépé passes it to mpv through a private temporary configuration,
+not process arguments:
 
 ```sh
 "$HOME/.local/bin/pepe"
@@ -127,113 +137,22 @@ go test ./internal/install ./packaging
 ```
 
 Installation checks exercise the real binary with isolated HOME/XDG directories,
-no actual mpv or Polochon server; asset checks use mocked downloads. Source desktop
-registration retains its separate checks below.
+no actual mpv or Polochon server; asset checks use mocked downloads.
 
-## Desktop registration from source
-
-From the checkout, build the application:
-
-```sh
-./build.sh
-```
-
-Configure Polochon before launching from the desktop menu. For a new configuration,
-copy the example without overwriting an existing file:
-
-```sh
-config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/pepe"
-mkdir -p "$config_dir"
-if [ ! -e "$config_dir/config.yaml" ]; then
-    (umask 077; cp packaging/linux/config.example.yaml "$config_dir/config.yaml")
-fi
-chmod 600 "$config_dir/config.yaml"
-```
-
-Edit `polochon_url` and `polochon_token` in that file. Keep the token private. pépé
-passes it to mpv through a private temporary configuration, not process arguments.
-Ensure `mpv` is available in the desktop session's PATH, or set `mpv_path` to an
-absolute executable/wrapper path. Managed mode stays off for ordinary mpv; see
-[managed launchers](#managed-launchers) for worker/recovery wrappers.
-The registration script does not install dependencies or write configuration.
-
-Register the built binary:
-
-```sh
-scripts/install-desktop.sh
-```
-
-The script can be called from any working directory. It points directly to the
-`pepe` executable beside `build.sh`; it neither builds nor copies the binary.
-The menu entry respects your existing configuration and does not force fullscreen,
-change PATH, enable logging, or put credentials in the desktop file. Set
-`fullscreen: true` and `player_fullscreen: true` in YAML for a TV/fullscreen setup.
-Environment overrides still work, but variables exported only in a terminal may
-not be available to the desktop session.
-
-Registration installs per-user files under `$XDG_DATA_HOME`, defaulting to
-`$HOME/.local/share`. Relative XDG data paths are ignored:
-
-- `applications/pepe.desktop`: menu entry, with an absolute executable path.
-- `pepe/icon.png`: local copy of the
-  [hosted pépé icon](https://git.quimbo.fr/attachments/ab9e56b5-bf62-4723-8f30-1438ab62a282).
-
-The PNG is downloaded with HTTPS-only redirects and a 20-second timeout, then
-checked against a pinned SHA-256 before installation. No image is committed or
-fetched during application launch. Subsequent registrations reuse a verified
-local copy. If `curl`/`sha256sum` are unavailable or downloading/checking fails,
-registration still works with the desktop theme's generic video icon. Run the
-script again to retry. An unrecognized existing icon is left untouched; remove it
-manually and re-register if you want a fresh download. Changes to the hosted image
-require updating the checksum in the script deliberately.
-
-Rebuilding `pepe` updates what the menu launches immediately. Moving or deleting
-the checkout breaks its shortcut; after moving, re-register from the new location.
-Checkout paths containing `=` or `%`, and checkout/data paths containing control
-characters, are rejected because desktop launchers cannot safely handle them.
-Only one checkout can own the per-user pépé shortcut at a time. Registration refuses
-to replace an unrelated existing `pepe.desktop` or a symlink at that path.
-
-Unregister with the same XDG data directory used for installation:
-
-```sh
-scripts/install-desktop.sh --uninstall
-```
-
-This leaves the checkout binary, configuration, and unrelated files intact. It
-removes only the managed desktop entry and an icon matching the pinned hash;
-modified/unverified icons are preserved with a warning. No network or built binary
-is needed to uninstall. Desktop database refresh is optional when its tool exists;
-icon-theme cache updates are unnecessary because the entry uses a local icon path.
-
-If the menu launch appears to do nothing, run `./pepe` from a terminal to see startup
-errors. Missing configuration or an unreachable server currently prevents the
-window from opening. For more logging, use `./pepe -logFile ./pepe.log`.
-There is no graphical setup screen. Unmanaged copied Steam Deck setups and Steam
-shortcuts are not migrated or removed automatically. The old wrapper's
-`PEPE_CONFIG` variable is not used; the application supports `-config PATH` for
-manual launches instead.
-
-Offline packaging checks (requires ShellCheck, `desktop-file-validate`, and GLib's
-`gio` command):
-
-```sh
-shellcheck scripts/install-desktop.sh scripts/test-desktop.sh
-scripts/test-desktop.sh
-```
-
-The tests use temporary HOME/XDG directories, mocked icon downloads, and a fake
-application; they do not require a Polochon server or change your desktop menu.
-Real Wayland/X11 menu appearance and window grouping still need desktop testing.
+If the menu launch appears to do nothing, run `"$HOME/.local/bin/pepe"` from a
+terminal to see startup errors. Missing configuration or an unreachable server
+prevents the window from opening. Use `-logFile PATH` for more logging; there is
+no graphical setup screen. The old wrapper's `PEPE_CONFIG` variable is not used;
+use `-config PATH` for manual launches instead. Real Wayland/X11 menu appearance
+and window grouping still need desktop testing.
 
 ## Steam Deck (optional)
 
-Run `./pepe install` in Desktop Mode, or use source registration as described
-above. Add pépé from the application menu or its installed `pepe.desktop` as a
-Non-Steam Game. For a copied installation, use the stable `$HOME/.local/bin/pepe`
-launcher rather than a release-specific executable. Enable fullscreen in YAML
-before launching from Gaming Mode. Ensure the configured mpv executable is also
-available there.
+Run `./pepe install` in Desktop Mode. Add pépé from the application menu or its
+installed `pepe.desktop` as a Non-Steam Game. Use the stable
+`$HOME/.local/bin/pepe` launcher rather than a release-specific executable.
+Set `fullscreen: true` and `player_fullscreen: true` in YAML before launching
+from Gaming Mode. Ensure the configured mpv executable is also available there.
 
 Installed artwork is in
 `${XDG_DATA_HOME:-$HOME/.local/share}/pepe/assets`; apply it manually

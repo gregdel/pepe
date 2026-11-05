@@ -75,22 +75,11 @@ func NewAPIClient(endpoint, token string, log *slog.Logger) (*APIClient, error) 
 	papiClient.SetToken(token)
 	papiClient.SetTimeout(apiRequestTimeout)
 
-	if log == nil {
-		log = slog.Default()
-	}
+	c := NewEmptyAPIClient(log)
+	c.client, c.token = papiClient, token
 	if endpointURL, err := url.Parse(endpoint); err == nil && strings.EqualFold(endpointURL.Scheme, "http") {
-		log.Warn("polochon_url uses unencrypted HTTP; use the canonical HTTPS URL if available: HTTP-to-HTTPS artwork redirects are blocked")
+		c.log.Warn("polochon_url uses unencrypted HTTP; use the canonical HTTPS URL if available: HTTP-to-HTTPS artwork redirects are blocked")
 	}
-	c := &APIClient{
-		client:        papiClient,
-		token:         token,
-		artworkClient: &http.Client{Timeout: artworkRequestTimeout},
-		movies:        make(map[string]*papi.Movie),
-		shows:         make(map[string]*papi.Show),
-		snapshot:      emptyLibrarySnapshot(),
-		log:           log,
-	}
-
 	return c, nil
 }
 

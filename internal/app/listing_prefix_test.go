@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"reflect"
 	"sort"
 	"testing"
@@ -75,11 +76,49 @@ func TestRadixListingPrefixTerminals(t *testing.T) {
 				t.Fatal("builder mutated the source item")
 			}
 			// Normalization is safe to repeat and does not duplicate terminals.
-			separateListingTerminals(listing.tree.Root())
+			normalizeListingTree(listing.tree.Root(), listing.titleToMedia)
 			if count := check(listing.tree.Root()); count != len(want) {
 				t.Fatal("normalizing twice changed the tree")
 			}
 		})
+	}
+}
+
+func TestRadixListingAliasCollisions(t *testing.T) {
+	for _, kind := range []MediaKind{mediaKindMovie, mediaKindShow} {
+		for _, aliasLast := range []bool{false, true} {
+			t.Run(string(kind)+"/aliasLast="+fmt.Sprint(aliasLast), func(t *testing.T) {
+				makeItem := func(id, title string) *listingItem {
+					if kind == mediaKindMovie {
+						return newMovieListingItem(testMovie(id, title, 0))
+					}
+					return newShowListingItem(testShow(id, title, 0))
+				}
+				canonical, alias := makeItem("canonical", "Up"), makeItem("alias", "The Up")
+				items := []*listingItem{alias, canonical, makeItem("longer", "The Up in the Air")}
+				winner := canonical
+				if aliasLast {
+					items[0], items[1] = items[1], items[0]
+					winner = alias
+				}
+				listing := (radixListingBuilder{}).build(items)
+				for range 2 {
+					for title, want := range map[string]*MediaItem{
+						"Up": winner.media, "The Up": alias.media,
+						"Up in the Air": items[2].media, "The Up in the Air": items[2].media,
+					} {
+						node := listing.tree.Lookup(title)
+						if node == nil || !node.IsTerminal || len(node.Children) != 0 || node.Media != want || listing.titleToMedia[title] != want {
+							t.Fatalf("Lookup(%q) = %+v, map = %p, want leaf with media %p", title, node, listing.titleToMedia[title], want)
+						}
+					}
+					if got := listing.tree.Root().SubtreeCount; got != 4 {
+						t.Fatalf("root count = %d, want 4", got)
+					}
+					normalizeListingTree(listing.tree.Root(), listing.titleToMedia)
+				}
+			})
+		}
 	}
 }
 

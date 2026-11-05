@@ -27,6 +27,23 @@ type (
 	D = layout.Dimensions
 )
 
+// keepSelectedVisible adjusts a list before layout, including partially clipped
+// first and last rows. The caller supplies the constraints at its layout point.
+func keepSelectedVisible(list *layout.List, cursor int, size image.Point, previousSize *image.Point) {
+	pos := list.Position
+	last := pos.First + pos.Count - 1
+	if *previousSize != size || pos.Count == 0 || cursor < pos.First || (cursor == pos.First && pos.Offset > 0) {
+		list.ScrollTo(cursor)
+	} else if cursor > last || (cursor == last && pos.OffsetLast < 0) {
+		first := cursor - pos.Count + 1
+		if pos.OffsetLast < 0 {
+			first++
+		}
+		list.ScrollTo(first)
+	}
+	*previousSize = size
+}
+
 // clickableLayout adds a semantic button and routes pointer activation into
 // the same application actions used by keyboard navigation.
 func (a *App) clickableLayout(gtx C, id, label string, content layout.Widget, action func()) D {

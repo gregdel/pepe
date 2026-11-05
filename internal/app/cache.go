@@ -19,14 +19,14 @@ type cacheRequest[T any] struct {
 	generation uint64
 }
 
-// asyncCache is a generic on-demand cache with async fetching.
-// Keys are caller-defined strings (e.g. "thumb:tt0133093", "fanart:tt0133093").
-// A zero-value T stored in the cache is a permanent-failure sentinel — no retry.
 type cacheWeightEntry struct {
 	key    string
 	weight int64
 }
 
+// asyncCache is a generic on-demand cache with async fetching.
+// Keys are caller-defined strings (e.g. "thumb:tt0133093", "fanart:tt0133093").
+// A zero-value T stored in the cache is a permanent-failure sentinel — no retry.
 type asyncCache[T any] struct {
 	cache       map[string]T
 	loading     map[string]uint64
@@ -44,7 +44,8 @@ type asyncCache[T any] struct {
 	lruEntries  map[string]*list.Element
 }
 
-func newAsyncCache[T any](maxActive, maxPending int) *asyncCache[T] {
+// The budget must be positive; weight must be non-nil and zero for failures.
+func newWeightedAsyncCache[T any](maxActive, maxPending int, maxWeight int64, weight func(T) int64) *asyncCache[T] {
 	if maxActive < 1 {
 		maxActive = 1
 	}
@@ -57,16 +58,11 @@ func newAsyncCache[T any](maxActive, maxPending int) *asyncCache[T] {
 		maxActive:  maxActive,
 		maxPending: maxPending,
 		done:       make(chan cacheResult[T], maxActive),
+		weight:     weight,
+		maxWeight:  maxWeight,
+		lru:        list.New(),
+		lruEntries: make(map[string]*list.Element),
 	}
-}
-
-func newWeightedAsyncCache[T any](maxActive, maxPending int, maxWeight int64, weight func(T) int64) *asyncCache[T] {
-	cache := newAsyncCache[T](maxActive, maxPending)
-	cache.weight = weight
-	cache.maxWeight = maxWeight
-	cache.lru = list.New()
-	cache.lruEntries = make(map[string]*list.Element)
-	return cache
 }
 
 // reset discards cached and queued entries. In-flight requests are allowed to
@@ -77,20 +73,16 @@ func (c *asyncCache[T]) reset() {
 	c.loading = make(map[string]uint64)
 	c.pending = nil
 	c.cacheWeight = 0
-	if c.lru != nil {
-		c.lru.Init()
-		c.lruEntries = make(map[string]*list.Element)
-	}
+	c.lru.Init()
+	c.lruEntries = make(map[string]*list.Element)
 }
 
 // get returns (val, true) if key has been resolved.
 // val may be zero/nil if the fetch failed permanently.
 func (c *asyncCache[T]) get(key string) (T, bool) {
 	val, ok := c.cache[key]
-	if ok && c.lru != nil {
-		if entry := c.lruEntries[key]; entry != nil {
-			c.lru.MoveToFront(entry)
-		}
+	if entry := c.lruEntries[key]; ok && entry != nil {
+		c.lru.MoveToFront(entry)
 	}
 	return val, ok
 }
@@ -131,7 +123,11 @@ func (c *asyncCache[T]) fetch(key string, fetchFn func() (T, error)) {
 func (c *asyncCache[T]) start(request cacheRequest[T]) {
 	c.active++
 	go func() {
-		val, _ := request.fetchFn()
+		val, err := request.fetchFn()
+		if err != nil {
+			var zero T
+			val = zero
+		}
 		c.done <- cacheResult[T]{
 			key:        request.key,
 			val:        val,
@@ -157,9 +153,6 @@ func (c *asyncCache[T]) startPending() {
 
 func (c *asyncCache[T]) store(key string, value T) {
 	c.cache[key] = value
-	if c.weight == nil || c.maxWeight <= 0 {
-		return
-	}
 	weight := c.weight(value)
 	if weight <= 0 {
 		return
