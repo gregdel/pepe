@@ -1,11 +1,21 @@
 package app
 
 import (
+	"bytes"
 	"errors"
+	"image"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"gioui.org/op/paint"
+	"gioui.org/widget"
+	"github.com/gregdel/pepe/internal/driver"
 	"github.com/odwrtw/polochon/lib/papi"
 )
 
@@ -153,6 +163,223 @@ func TestSSEDuringRefreshCoalescesAndFollowsUpAfterFailure(t *testing.T) {
 			}
 			if got := calls.Load(); got != 2 {
 				t.Fatalf("refresh count after completion = %d, want exactly 2", got)
+			}
+		})
+	}
+}
+
+func TestHTTPRefreshFailurePreservesCatalogAndUI(t *testing.T) {
+	const initialMovies = `{"tt001":{"title":"Up","date_added":"2024-01-01T00:00:00Z"},"tt002":{"title":"Up in the Air","year":2009,"date_added":"2025-01-01T00:00:00Z"}}`
+	const changedMovies = `{"tt001":{"title":"Revised","date_added":"2026-01-01T00:00:00Z"},"tt999":{"title":"New Movie"}}`
+	const initialShows = `{"tt101":{"title":"Fixture Show","year":2022,"seasons":{"1":{"1":{"title":"Pilot","date_added":"2025-01-01T00:00:00Z"}}}}}`
+	const changedShows = `{"tt201":{"title":"New Show","seasons":{"1":{"1":{"title":"New Pilot"}}}}}`
+
+	for _, mode := range []ListingMode{ListingModeTitle, ListingModeDateAdded} {
+		t.Run(listingModeLabel(mode), func(t *testing.T) {
+			requests := make(chan string, 6)
+			var movies, shows atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				select {
+				case requests <- r.URL.Path:
+				default:
+					t.Error("too many catalog requests")
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				if r.Header.Get("X-Auth-Token") != "fixture-token" {
+					t.Error("catalog request did not receive the token")
+				}
+				switch r.URL.Path {
+				case "/movies":
+					if movies.Add(1) == 1 {
+						_, _ = w.Write([]byte(initialMovies))
+					} else {
+						_, _ = w.Write([]byte(changedMovies))
+					}
+				case "/shows":
+					switch shows.Add(1) {
+					case 1:
+						_, _ = w.Write([]byte(initialShows))
+					case 2:
+						http.Error(w, `{"error":"fixture unavailable"}`, http.StatusServiceUnavailable)
+					default:
+						_, _ = w.Write([]byte(changedShows))
+					}
+				default:
+					t.Errorf("unexpected catalog request: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+
+			var logs bytes.Buffer
+			client, err := NewAPIClient(server.URL, "fixture-token", slog.New(slog.NewTextHandler(&logs, nil)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := client.FetchLibrary(); err != nil {
+				t.Fatal(err)
+			}
+			oldMovie, movieOK := client.getMovie("tt001")
+			oldShow, showOK := client.getShow("tt101")
+			if !movieOK || !showOK || oldMovie.Title != "Up" || oldShow.Title != "Fixture Show" || len(oldShow.Seasons) != 1 {
+				t.Fatal("initial HTTP catalog was not populated")
+			}
+			if newMovieListingItem(oldMovie).dateAdded().IsZero() || newShowListingItem(oldShow).dateAdded().IsZero() {
+				t.Fatal("initial HTTP catalog did not decode movie and episode dates")
+			}
+			originalSnapshot := client.getSnapshot()
+			client.mu.RLock()
+			originalMovies := append([]*listingItem(nil), client.movieItems...)
+			originalShows := append([]*listingItem(nil), client.showItems...)
+			client.mu.RUnlock()
+			invalidated := make(chan struct{}, 2)
+			a := New(client, nil, nil, func() { invalidated <- struct{}{} }, nil)
+			defer a.Close()
+			// Populate the alternate snapshot even when Smart list is active.
+			a.applyListingMode(ListingModeDateAdded)
+			if mode == ListingModeTitle {
+				a.applyListingMode(mode)
+			}
+			if !a.browse.nav.navigateToMedia(a.sectionRoot(SectionMovies), mediaKindMovie, "tt001") {
+				t.Fatal("could not select the original movie")
+			}
+			nav := a.browse.nav
+			navigation := *nav
+			navigation.path = append([]*RadixNode(nil), nav.path...)
+			view, selected, dateSnapshot := a.browse.library, a.selectedBrowseMedia(), a.dateAddedSnapshot
+			if selected == nil || dateSnapshot == nil {
+				t.Fatal("fixture did not retain the selected movie and date-added cache")
+			}
+			detail := &detailScreen{kind: detailMovie, movieID: "tt001"}
+			a.detail = detail
+			a.images.store("fixture:image", paint.NewImageOp(image.NewNRGBA(image.Rect(0, 0, 2, 3))))
+			a.images.store("fixture:failed", paint.ImageOp{})
+			imageGeneration, imageWeight := a.images.generation, a.images.cacheWeight
+			clickable := new(widget.Clickable)
+			a.clickables["fixture"] = clickable
+			logs.Reset()
+
+			waitResult := func() refreshResult {
+				t.Helper()
+				select {
+				case result := <-a.refreshDone:
+					select {
+					case <-invalidated:
+					case <-time.After(5 * time.Second):
+						t.Fatal("refresh did not invalidate the UI")
+					}
+					return result
+				case <-time.After(5 * time.Second):
+					t.Fatal("refresh did not finish")
+					return refreshResult{}
+				}
+			}
+			checkRequests := func() {
+				t.Helper()
+				for _, want := range []string{"/movies", "/shows"} {
+					select {
+					case got := <-requests:
+						if got != want {
+							t.Fatalf("request = %q, want %q", got, want)
+						}
+					case <-time.After(5 * time.Second):
+						t.Fatalf("missing request %q", want)
+					}
+				}
+			}
+			checkRequests() // Initial nonempty catalog.
+			a.startRefresh()
+			result := waitResult()
+			checkRequests() // Changed movies succeeded; the following shows request failed.
+			if result.err == nil || !strings.Contains(result.err.Error(), "failed to fetch shows") || !strings.Contains(result.err.Error(), "503") {
+				t.Fatalf("refresh error = %v, want shows HTTP 503", result.err)
+			}
+			if result.snapshot.movieRadix != nil || result.snapshot.showRadix != nil || result.snapshot.titleToMedia != nil || result.snapshot.movieCount != 0 || result.snapshot.showCount != 0 {
+				t.Fatal("failed refresh published a snapshot")
+			}
+			a.refreshDone <- result
+			a.drainRefresh()
+			if a.refreshing || a.refreshDone != nil || a.refreshError == nil || !strings.Contains(logs.String(), "failed to refresh library") {
+				t.Fatal("failed refresh did not retain and log its error")
+			}
+			if a.browse.nav != nav || !reflect.DeepEqual(*a.browse.nav, navigation) || a.selectedBrowseMedia() != selected || a.detail != detail {
+				t.Fatal("failed refresh changed navigation, selection or detail")
+			}
+			if !reflect.DeepEqual(a.browse.library, view) || a.dateAddedSnapshot != dateSnapshot || a.clickables["fixture"] != clickable {
+				t.Fatal("failed refresh changed the displayed catalog or its UI caches")
+			}
+			if cached, ok := a.images.get("fixture:image"); !ok || cached.Size() != image.Pt(2, 3) {
+				t.Fatal("failed refresh discarded the cached image")
+			}
+			if cached, ok := a.images.get("fixture:failed"); !ok || cached.Size() != (image.Point{}) || len(a.images.cache) != 2 || a.images.generation != imageGeneration || a.images.cacheWeight != imageWeight {
+				t.Fatal("failed refresh changed the image failure sentinel or cache state")
+			}
+			if movie, ok := client.getMovie("tt001"); !ok || movie != oldMovie || movie.Title != "Up" {
+				t.Fatal("failed refresh replaced the original movie")
+			}
+			if show, ok := client.getShow("tt101"); !ok || show != oldShow || show.Title != "Fixture Show" {
+				t.Fatal("failed refresh replaced the original show")
+			}
+			if _, ok := client.getMovie("tt999"); ok {
+				t.Fatal("failed refresh published the partially fetched movies")
+			}
+			client.mu.RLock()
+			itemsUnchanged := reflect.DeepEqual(client.movieItems, originalMovies) && reflect.DeepEqual(client.showItems, originalShows)
+			client.mu.RUnlock()
+			if snapshot := client.getSnapshot(); !itemsUnchanged || snapshot.movieRadix != originalSnapshot.movieRadix || snapshot.showRadix != originalSnapshot.showRadix || !reflect.DeepEqual(snapshot, originalSnapshot) {
+				t.Fatal("failed refresh changed the client catalog or default snapshot")
+			}
+
+			d, err := driver.New(driver.Config{Width: 800, Height: 80, PxPerDp: 1, PxPerSp: 1}, a.layoutHeaderStatus)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			a.drainRefresh()
+			if err := d.Frame(); err != nil {
+				t.Fatal(err)
+			}
+			if !headlessHasLabel(d.Tree(), "Refresh failed") || !headlessHasLabel(d.Tree(), "2 movies · 1 shows") {
+				t.Fatal("failure status did not persist alongside the original counts")
+			}
+
+			a.startRefresh()
+			if !a.refreshing || a.refreshError != nil {
+				t.Fatal("retry did not clear the failure state")
+			}
+			if err := d.Frame(); err != nil {
+				t.Fatal(err)
+			}
+			if !headlessHasLabel(d.Tree(), "Refreshing…") || headlessHasLabel(d.Tree(), "Refresh failed") {
+				t.Fatal("retry did not replace the failure status")
+			}
+			result = waitResult()
+			checkRequests()
+			select {
+			case path := <-requests:
+				t.Fatalf("unexpected extra request: %s", path)
+			default:
+			}
+			if result.err != nil {
+				t.Fatalf("retry failed: %v", result.err)
+			}
+			a.refreshDone <- result
+			a.drainRefresh()
+			if a.refreshing || a.refreshError != nil || a.detail != nil || a.selectedBrowseMedia() == nil || a.selectedBrowseMedia().Title != "Revised" {
+				t.Fatal("successful retry did not apply the new catalog and restore selection")
+			}
+			if show, ok := client.getShow("tt201"); !ok || show.Title != "New Show" {
+				t.Fatal("successful retry did not publish the new shows")
+			}
+			if _, ok := a.images.get("fixture:image"); ok {
+				t.Fatal("successful retry did not reset stale artwork")
+			}
+			if err := d.Frame(); err != nil {
+				t.Fatal(err)
+			}
+			if headlessHasLabel(d.Tree(), "Refresh failed") || headlessHasLabel(d.Tree(), "Refreshing…") {
+				t.Fatal("successful retry left a refresh status in the header")
 			}
 		})
 	}

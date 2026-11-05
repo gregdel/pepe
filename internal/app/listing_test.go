@@ -434,50 +434,139 @@ func TestSnapshotForConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
-// TestSnapshotForRaceConditionWithSSEEvents tests behavior when snapshots are created while
-// other operations modify data (simulating SSE events)
-func TestSnapshotForRaceConditionWithSSEEvents(t *testing.T) {
-	movieItems := []*listingItem{
-		newMovieListingItem(testMovie("tt001", "First", 2001)),
-		newMovieListingItem(testMovie("tt002", "Second", 2002)),
-	}
-	showItems := []*listingItem{
-		newShowListingItem(testShow("tt003", "Third", 2003)),
-	}
-	client := &APIClient{
-		movieItems: movieItems,
-		showItems:  showItems,
-		snapshot:   LibrarySnapshot{movieCount: len(movieItems), showCount: len(showItems)},
-	}
+type pausedListingBuilder struct {
+	started chan struct{}
+	resume  <-chan struct{}
+	once    sync.Once
+}
 
-	// Test that data consistency is maintained across concurrent accesses
-	var wg sync.WaitGroup
+func (b *pausedListingBuilder) build(items []*listingItem) mediaListing {
+	b.once.Do(func() {
+		close(b.started)
+		<-b.resume
+	})
+	return (radixListingBuilder{}).build(items)
+}
 
-	// Goroutine 1: Create snapshots concurrently
-	wg.Add(1)
+func TestSnapshotForConcurrentPublication(t *testing.T) {
+	type version struct {
+		movies     map[string]*papi.Movie
+		shows      map[string]*papi.Show
+		movieItems []*listingItem
+		showItems  []*listingItem
+		snapshot   LibrarySnapshot
+	}
+	makeVersion := func(prefix string) version {
+		v := version{movies: make(map[string]*papi.Movie), shows: make(map[string]*papi.Show)}
+		for _, suffix := range []string{"First", "Second"} {
+			movie := newMovieListingItem(testMovie(prefix+"-movie-"+suffix, prefix+" Movie "+suffix, 2001))
+			show := newShowListingItem(testShow(prefix+"-show-"+suffix, prefix+" Show "+suffix, 2002))
+			v.movies[movie.media.ID], v.shows[show.media.ID] = movie.movie, show.show
+			v.movieItems = append(v.movieItems, movie)
+			v.showItems = append(v.showItems, show)
+		}
+		v.snapshot = buildLibrarySnapshot(radixListingBuilder{}, v.movieItems, v.showItems)
+		return v
+	}
+	versions := []version{makeVersion("Alpha"), makeVersion("Beta")}
+	client := NewEmptyAPIClient(nil)
+	publish := func(v version) {
+		client.publishLibrary(v.movies, v.shows, v.movieItems, v.showItems, v.snapshot)
+	}
+	check := func(got LibrarySnapshot, want version) error {
+		if got.movieRadix == nil || got.showRadix == nil || got.movieRadix.Root() == nil || got.showRadix.Root() == nil ||
+			got.movieCount != len(want.movieItems) || got.showCount != len(want.showItems) ||
+			got.movieRadix.Root().SubtreeCount != len(want.movieItems) || got.showRadix.Root().SubtreeCount != len(want.showItems) ||
+			len(got.titleToMedia) != len(want.movieItems)+len(want.showItems) {
+			return fmt.Errorf("invalid roots, counts or title map: %+v", got)
+		}
+		for _, section := range []struct {
+			tree  *RadixTree
+			items []*listingItem
+		}{{got.movieRadix, want.movieItems}, {got.showRadix, want.showItems}} {
+			for _, item := range section.items {
+				title := formatTitle(item.media.Title, item.media.Year)
+				node := section.tree.Lookup(title)
+				if node == nil || !node.IsTerminal || node.FullString != title || node.Media != item.media || got.titleToMedia[title] != item.media {
+					return fmt.Errorf("inconsistent identity for %q: node=%+v map=%+v", title, node, got.titleToMedia[title])
+				}
+			}
+		}
+		return nil
+	}
+	publish(versions[0])
+
+	// Stop a custom build after it copied both sections. Publishing the next
+	// catalog must finish before that build resumes, without mixing generations.
+	resume := make(chan struct{})
+	release := sync.OnceFunc(func() { close(resume) })
+	defer release()
+	builder := &pausedListingBuilder{started: make(chan struct{}), resume: resume}
+	oldSnapshot := make(chan LibrarySnapshot, 1)
+	go func() { oldSnapshot <- client.snapshotFor(builder) }()
+	select {
+	case <-builder.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("snapshot builder did not start")
+	}
+	published := make(chan struct{})
 	go func() {
-		defer wg.Done()
-		for i := 0; i < 5; i++ {
-			builder := radixListingBuilder{}
-			snapshot := client.snapshotFor(builder)
+		publish(versions[1])
+		close(published)
+	}()
+	select {
+	case <-published:
+	case <-time.After(5 * time.Second):
+		t.Fatal("publication blocked while a snapshot was being built")
+	}
+	if err := check(client.getSnapshot(), versions[1]); err != nil {
+		t.Fatalf("published snapshot: %v", err)
+	}
+	release()
+	select {
+	case snapshot := <-oldSnapshot:
+		if err := check(snapshot, versions[0]); err != nil {
+			t.Fatalf("in-flight snapshot: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("snapshot builder did not finish")
+	}
+	if err := check(client.getSnapshot(), versions[1]); err != nil {
+		t.Fatalf("in-flight custom build changed the published snapshot: %v", err)
+	}
 
-			// Verify snapshot content is reasonable
-			if snapshot.movieCount != len(movieItems) || snapshot.showCount != len(showItems) {
-				t.Errorf("snapshot count mismatch")
+	// Race readers against repeated publication; each independent snapshot must
+	// describe one complete catalog, even if consecutive reads see different ones.
+	stop, writing, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; ; i++ {
+			publish(versions[i%len(versions)])
+			if i == 0 {
+				close(writing)
+			}
+			select {
+			case <-stop:
+				return
+			default:
 			}
 		}
 	}()
-
-	// Goroutine 2: Simulate data modifications (this would be like SSE events)
-	// In real scenario, this might modify client.movieItems or client.showItems
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 5; i++ {
-			// This simulates the kind of concurrent access that could happen during SSE updates
-			time.Sleep(time.Microsecond * 100) // Small delay to increase chance of race conditions
-		}
-	}()
-
-	wg.Wait()
+	<-writing
+	var readers sync.WaitGroup
+	for range 4 {
+		readers.Go(func() {
+			for range 100 {
+				for _, snapshot := range []LibrarySnapshot{client.getSnapshot(), client.snapshotFor(radixListingBuilder{})} {
+					if errA, errB := check(snapshot, versions[0]), check(snapshot, versions[1]); errA != nil && errB != nil {
+						t.Errorf("snapshot matches neither published catalog: %v; %v", errA, errB)
+						return
+					}
+				}
+			}
+		})
+	}
+	readers.Wait()
+	close(stop)
+	<-done
 }
