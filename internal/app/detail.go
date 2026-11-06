@@ -25,47 +25,47 @@ const (
 	detailColumnGap    = dp32
 )
 
-// layoutDetail renders the pushed detail page with a short fade-in transition.
+// layoutDetail fades in artwork without fading the text or its reading surface.
 func (a *App) layoutDetail(gtx C) D {
 	d := a.detail
 	if d == nil {
 		return D{}
 	}
 
-	content := func(gtx C) D {
-		if d.kind == detailShow {
-			return a.layoutShowDetail(gtx, d.show)
+	alpha := float32(1)
+	if a.playerStatus != PlayerStatusRunning {
+		now := gtx.Now
+		if now.IsZero() {
+			now = time.Now()
 		}
-		return a.layoutMovieDetail(gtx, d)
+		since := now.Sub(d.enteredAt)
+		if since < detailFadeDuration {
+			alpha = max(0, float32(since)/float32(detailFadeDuration))
+			gtx.Execute(op.InvalidateCmd{})
+		}
 	}
+	if d.kind == detailShow {
+		return a.layoutShowDetail(gtx, d.show, alpha)
+	}
+	return a.layoutMovieDetail(gtx, d, alpha)
+}
 
-	// Fade-in on push (skipped during playback to keep the UI quiet).
-	if a.playerStatus == PlayerStatusRunning {
-		return content(gtx)
+func detailArtwork(gtx C, alpha float32, artwork layout.Widget) D {
+	if alpha >= 1 {
+		return artwork(gtx)
 	}
-	since := time.Since(d.enteredAt)
-	if since >= detailFadeDuration {
-		return content(gtx)
-	}
-	alpha := float32(since) / float32(detailFadeDuration)
-	gtx.Execute(op.InvalidateCmd{})
-
-	macro := op.Record(gtx.Ops)
-	dims := content(gtx)
-	call := macro.Stop()
 	stack := paint.PushOpacity(gtx.Ops, alpha)
-	call.Add(gtx.Ops)
+	dims := artwork(gtx)
 	stack.Pop()
 	return dims
 }
 
-// detailShell protects the entire reading area, fading into exposed fanart
-// beyond it rather than drawing individual cards around the content.
-func (a *App) detailShell(gtx C, readingWidth unit.Dp, fanart layout.Widget, content layout.Widget) D {
+// detailShell protects the full-height reading area for both detail layouts.
+func (a *App) detailShell(gtx C, alpha float32, readingWidth unit.Dp, fanart, content layout.Widget) D {
 	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(fanart),
+		layout.Expanded(func(gtx C) D { return detailArtwork(gtx, alpha, fanart) }),
 		layout.Expanded(func(gtx C) D {
-			edge := min(gtx.Dp(a.viewportInsets.Left+readingWidth+dp12), gtx.Constraints.Max.X)
+			edge := gtx.Dp(a.viewportInsets.Left + readingWidth + dp12)
 			detailScrim(gtx, edge)
 			return D{Size: gtx.Constraints.Max}
 		}),
@@ -85,7 +85,7 @@ func (a *App) detailShell(gtx C, readingWidth unit.Dp, fanart layout.Widget, con
 
 // ── Movie detail page ─────────────────────────────────────────────────────────
 
-func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
+func (a *App) layoutMovieDetail(gtx C, d *detailScreen, alpha float32) D {
 	movie, ok := a.client.getMovie(d.movieID)
 	if !ok {
 		return a.detailMessage(gtx, "Movie details not available")
@@ -163,14 +163,16 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen) D {
 		sections = append(sections, spacerFn(dp16), a.renderPlayerStatus)
 	}
 
-	return a.detailShell(gtx, moviePosterWidth+detailColumnGap+movieDetailWidth, func(gtx C) D {
+	return a.detailShell(gtx, alpha, moviePosterWidth+detailColumnGap+movieDetailWidth, func(gtx C) D {
 		return a.movieFanart(gtx, movieID)
 	}, func(gtx C) D {
 		panelWidth := min(gtx.Dp(movieDetailWidth), max(0, gtx.Constraints.Max.X-gtx.Dp(moviePosterWidth+detailColumnGap)))
 
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
-				return a.movieThumb(gtx, id, moviePosterWidth, radiusPoster)
+				return detailArtwork(gtx, alpha, func(gtx C) D {
+					return a.movieThumb(gtx, id, moviePosterWidth, radiusPoster)
+				})
 			}),
 			layout.Rigid(layout.Spacer{Width: detailColumnGap}.Layout),
 			layout.Rigid(func(gtx C) D {

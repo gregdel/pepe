@@ -16,20 +16,21 @@ import (
 // A persistent poster column anchors the show identity beside the season and
 // episode controls. Focus and playback remain owned by showPage.
 
-func (a *App) layoutShowDetail(gtx C, s *showPage) D {
+func (a *App) layoutShowDetail(gtx C, s *showPage, alpha float32) D {
 	show, ok := a.client.getShow(s.showID)
 	if !ok {
 		return a.detailMessage(gtx, "Show details not available")
 	}
 	showID := show.ImdbID
-
-	return a.detailShell(gtx, showPosterWidth+detailColumnGap+showDetailWidth, func(gtx C) D {
+	return a.detailShell(gtx, alpha, showPosterWidth+detailColumnGap+showDetailWidth, func(gtx C) D {
 		return a.showFanart(gtx, showID)
 	}, func(gtx C) D {
 		contentWidth := min(gtx.Dp(showDetailWidth), max(0, gtx.Constraints.Max.X-gtx.Dp(showPosterWidth+detailColumnGap)))
 		return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
-				return a.showPoster(gtx, showID, showPosterWidth, radiusPoster)
+				return detailArtwork(gtx, alpha, func(gtx C) D {
+					return a.showPoster(gtx, showID, showPosterWidth, radiusPoster)
+				})
 			}),
 			layout.Rigid(layout.Spacer{Width: detailColumnGap}.Layout),
 			layout.Rigid(func(gtx C) D {

@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"gioui.org/layout"
 	"gioui.org/op/paint"
+	"gioui.org/unit"
 	"github.com/gregdel/pepe/internal/driver"
 )
 
@@ -82,46 +84,155 @@ func relativeLuminance(c color.NRGBA) float64 {
 	return 0.2126*linearChannel(c.R) + 0.7152*linearChannel(c.G) + 0.0722*linearChannel(c.B)
 }
 
-// Exercise the actual compositor, including the gradient's plateau and fade.
-// This renders only the surface over white, not a mock catalog/detail page.
+// Render the actual compositor over worst-case white artwork without text.
+func renderDetailScrim(t *testing.T, size image.Point, scrim func(C)) image.Image {
+	t.Helper()
+	d, err := driver.New(driver.Config{Width: size.X, Height: size.Y, PxPerDp: 1, PxPerSp: 1}, func(gtx C) D {
+		paint.Fill(gtx.Ops, color.NRGBA{R: 255, G: 255, B: 255, A: 255})
+		gtx = scaleContext(gtx)
+		scrim(gtx)
+		return D{Size: gtx.Constraints.Max}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	path := filepath.Join(t.TempDir(), "scrim.png")
+	if err := d.Screenshot(path); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	img, err := png.Decode(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return img
+}
+
+func assertDetailContrast(t *testing.T, img image.Image, p image.Point) {
+	t.Helper()
+	bg := color.NRGBAModel.Convert(img.At(p.X, p.Y)).(color.NRGBA)
+	for _, fg := range []color.NRGBA{colorFg, colorSubtle, colorPrimary, colorTerminal} {
+		if got := contrastRatio(fg, bg); got < 4.5 {
+			t.Fatalf("pixel %v: %v on %v = %.2f:1, want 4.5:1", p, fg, bg, got)
+		}
+	}
+}
+
 func TestDetailReadingScrimRenderedContrast(t *testing.T) {
-	for _, width := range []int{1920, 1280} {
-		edge := width * 1248 / 1920
-		d, err := driver.New(driver.Config{Width: width, Height: width * 9 / 16, PxPerDp: 1, PxPerSp: 1}, func(gtx C) D {
-			paint.Fill(gtx.Ops, color.NRGBA{R: 255, G: 255, B: 255, A: 255})
-			gtx = scaleContext(gtx)
-			detailScrim(gtx, edge)
-			return D{Size: gtx.Constraints.Max}
+	for _, size := range []image.Point{image.Pt(1920, 1080), image.Pt(1280, 800), image.Pt(900, 600), image.Pt(640, 480)} {
+		t.Run(size.String(), func(t *testing.T) {
+			for _, tc := range []struct {
+				name  string
+				width unit.Dp
+			}{
+				{"movie", moviePosterWidth + detailColumnGap + movieDetailWidth},
+				{"show", showPosterWidth + detailColumnGap + showDetailWidth},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					a := &App{viewportInsets: layout.UniformInset(dp24)}
+					var edge int
+					img := renderDetailScrim(t, size, func(gtx C) {
+						edge = min(gtx.Dp(dp24+tc.width+dp12), size.X)
+						empty := func(gtx C) D { return D{Size: gtx.Constraints.Max} }
+						a.detailShell(gtx, 1, tc.width, empty, empty)
+					})
+					// The entire reading width is protected to the bottom,
+					// including the last pixels before the feather begins.
+					for _, p := range []image.Point{
+						image.Pt(1, 1), image.Pt(edge-1, 1), image.Pt(edge-1, size.Y/2), image.Pt(edge-1, size.Y-1),
+					} {
+						assertDetailContrast(t, img, p)
+					}
+					for y := 1; y < size.Y; y += 37 {
+						for x := 1; x < edge; x += 43 {
+							assertDetailContrast(t, img, image.Pt(x, y))
+						}
+					}
+					if edge < size.X {
+						protected := color.NRGBAModel.Convert(img.At(edge-1, 1)).(color.NRGBA)
+						exposed := color.NRGBAModel.Convert(img.At(size.X-1, 1)).(color.NRGBA)
+						if relativeLuminance(exposed) <= relativeLuminance(protected) {
+							t.Fatal("scrim does not fade into the exposed artwork")
+						}
+					}
+				})
+			}
 		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(d.Close)
-		path := filepath.Join(t.TempDir(), "scrim.png")
-		if err := d.Screenshot(path); err != nil {
-			t.Fatal(err)
-		}
-		file, err := os.Open(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		img, err := png.Decode(file)
-		_ = file.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, p := range []image.Point{image.Pt(1, 1), image.Pt(edge/2, 1), image.Pt(edge-1, 1), image.Pt(edge-1, img.Bounds().Dy()/2)} {
-			bg := color.NRGBAModel.Convert(img.At(p.X, p.Y)).(color.NRGBA)
-			for _, fg := range []color.NRGBA{colorFg, colorSubtle, colorPrimary} {
-				if got := contrastRatio(fg, bg); got < 4.5 {
-					t.Fatalf("width %d, pixel %v: %v on %v = %.2f:1, want 4.5:1", width, p, fg, bg, got)
-				}
+	}
+}
+
+func TestDetailScrimClampedEdges(t *testing.T) {
+	size := image.Pt(1280, 800)
+	for _, edge := range []int{-100, 0, size.X, size.X * 2} {
+		img := renderDetailScrim(t, size, func(gtx C) { detailScrim(gtx, edge) })
+		reference := renderDetailScrim(t, size, func(gtx C) { detailScrim(gtx, min(max(edge, 0), size.X)) })
+		for _, p := range []image.Point{image.Pt(1, 1), image.Pt(size.X/2, size.Y/2), image.Pt(size.X-1, size.Y-1)} {
+			if img.At(p.X, p.Y) != reference.At(p.X, p.Y) {
+				t.Fatalf("reading edge %d was not clamped at %v", edge, p)
+			}
+			if edge >= size.X {
+				assertDetailContrast(t, img, p)
 			}
 		}
-		protected := color.NRGBAModel.Convert(img.At(edge-1, 1)).(color.NRGBA)
-		exposed := color.NRGBAModel.Convert(img.At(width-1, 1)).(color.NRGBA)
-		if relativeLuminance(exposed) <= relativeLuminance(protected) {
-			t.Fatal("scrim does not fade into the exposed artwork")
+	}
+}
+
+func TestDetailScrimFeatherSmoothness(t *testing.T) {
+	for _, size := range []image.Point{image.Pt(1920, 1080), image.Pt(1280, 800)} {
+		t.Run(size.String(), func(t *testing.T) {
+			edge := size.X / 3
+			var fade int
+			img := renderDetailScrim(t, size, func(gtx C) {
+				fade = gtx.Dp(unit.Dp(720))
+				detailScrim(gtx, edge)
+			})
+			backdrop := renderDetailScrim(t, size, detailBackdrop)
+			y := size.Y / 3
+			previous := color.RGBAModel.Convert(img.At(edge-1, y)).(color.RGBA)
+			for x := edge; x <= edge+fade; x++ {
+				current := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
+				if current.R < previous.R || current.G < previous.G || current.B < previous.B {
+					t.Fatalf("feather darkened at x=%d: %v to %v", x, previous, current)
+				}
+				if !detailFadePixelNear(current, previous, 2) {
+					t.Fatalf("abrupt feather transition at x=%d: %v to %v", x, previous, current)
+				}
+				previous = current
+			}
+			end := color.RGBAModel.Convert(backdrop.At(edge+fade, y)).(color.RGBA)
+			if !detailFadePixelNear(previous, end, 1) {
+				t.Fatalf("feather did not reach the backdrop: %v / %v", previous, end)
+			}
+			// The feather must still be visible at 480dp, not end there.
+			x := edge + fade*2/3
+			actual := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
+			base := color.NRGBAModel.Convert(backdrop.At(x, y)).(color.NRGBA)
+			if relativeLuminance(base)-relativeLuminance(actual) < 0.05 {
+				t.Fatal("feather ended before the wider 720dp transition")
+			}
+		})
+	}
+}
+
+func TestDetailScrimFeatherClipping(t *testing.T) {
+	// Hold the pixel metric and height constant to isolate viewport clipping
+	// from the application's proportional UI scaling.
+	draw := func(gtx C) {
+		gtx.Metric = unit.Metric{PxPerDp: 1, PxPerSp: 1}
+		detailScrim(gtx, 1000)
+	}
+	full := renderDetailScrim(t, image.Pt(1920, 800), draw)
+	cropped := renderDetailScrim(t, image.Pt(1280, 800), draw)
+	for _, p := range []image.Point{image.Pt(999, 1), image.Pt(1100, 400), image.Pt(1279, 799)} {
+		a := color.RGBAModel.Convert(full.At(p.X, p.Y)).(color.RGBA)
+		b := color.RGBAModel.Convert(cropped.At(p.X, p.Y)).(color.RGBA)
+		if !detailFadePixelNear(a, b, 1) {
+			t.Errorf("viewport compressed the feather at %v: %v / %v", p, a, b)
 		}
 	}
 }

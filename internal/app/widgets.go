@@ -104,22 +104,48 @@ func scrim(gtx C) {
 	)
 }
 
-// detailScrim keeps a constant, contrast-safe surface under all text. The
-// gradient starts beyond the reading edge, leaving exposed fanart on the right.
-func detailScrim(gtx C, readingEdge int) {
-	defer clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops).Pop()
+func detailBackdrop(gtx C) {
 	paint.Fill(gtx.Ops, color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x40})
-	clear := colorDetailPanel
-	clear.A = 0
-	paintGradient(gtx,
-		f32.Pt(float32(readingEdge), 0), f32.Pt(float32(readingEdge+gtx.Dp(unit.Dp(320))), 0),
-		colorDetailPanel, clear,
-	)
 	paintGradient(gtx,
 		f32.Pt(0, 0), f32.Pt(0, float32(gtx.Constraints.Max.Y)),
 		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x00},
-		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x90},
+		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x60},
 	)
+}
+
+// detailScrim protects the full-height reading area and eases into the fanart
+// only beyond its edge. Keep the feather wide even when the viewport clips it.
+func detailScrim(gtx C, readingEdge int) {
+	size := gtx.Constraints.Max
+	readingEdge = min(max(readingEdge, 0), size.X)
+	defer clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops).Pop()
+	detailBackdrop(gtx)
+	paint.FillShape(gtx.Ops, colorDetailPanel, clip.Rect(image.Rect(0, 0, readingEdge, size.Y)).Op())
+	fade := gtx.Dp(unit.Dp(720))
+	if fade > 0 {
+		paintDetailFeather(gtx, image.Rect(readingEdge, 0, readingEdge+fade, size.Y),
+			f32.Pt(float32(readingEdge), 0), f32.Pt(float32(readingEdge+fade), 0))
+	}
+}
+
+// Two identical feather layers give the opaque edge a gentler perceptual
+// slope in linear-light compositing. Together their initial alpha matches the
+// reading surface; neither layer extends into the text area by itself.
+func paintDetailFeather(gtx C, bounds image.Rectangle, from, to f32.Point) {
+	start := colorDetailPanel
+	start.A = 0xdb
+	clear := start
+	clear.A = 0
+	for range 2 {
+		paintDetailGradient(gtx, bounds, from, to, start, clear)
+	}
+}
+
+func paintDetailGradient(gtx C, bounds image.Rectangle, from, to f32.Point, fromColor, toColor color.NRGBA) {
+	paint.LinearGradientOp{Stop1: from, Stop2: to, Color1: fromColor, Color2: toColor}.Add(gtx.Ops)
+	stack := clip.Rect(bounds).Push(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	stack.Pop()
 }
 
 func paintGradient(gtx C, from, to f32.Point, fromColor, toColor color.NRGBA) {
