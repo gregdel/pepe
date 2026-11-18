@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"fmt"
 	"image"
 
 	"gioui.org/io/input"
@@ -109,4 +110,63 @@ func findLabel(nodes []Node, label string, matches *[]Node) {
 		}
 		findLabel(node.Children, label, matches)
 	}
+}
+
+// coveringControl returns the control that owns semantic node hit when it is
+// unrelated to target: the nearest control at or above hit that is neither
+// target, inside target, nor one of target's ancestors. Plain labels, such as
+// an editor's hint, have no owning control and return nil.
+func coveringControl(tree []Node, target Node, hit uint64) *Node {
+	path := pathTo(tree, hit)
+	for i := len(path) - 1; i >= 0; i-- {
+		n := path[i]
+		if n.ID == target.ID {
+			return nil
+		}
+		if !isControl(n) {
+			continue
+		}
+		if _, _, ok := findNode([]Node{n}, target.ID, image.Rectangle{}); ok {
+			return nil
+		}
+		return &n
+	}
+	return nil
+}
+
+// pathTo returns the nodes from a root down to the node with id, or nil.
+func pathTo(nodes []Node, id uint64) []Node {
+	for _, node := range nodes {
+		if node.ID == id {
+			return []Node{node}
+		}
+		if path := pathTo(node.Children, id); path != nil {
+			return append([]Node{node}, path...)
+		}
+	}
+	return nil
+}
+
+// HasClass reports whether the node has a known semantic class.
+func (n Node) HasClass() bool {
+	return n.Class != "" && n.Class != "unknown"
+}
+
+func isControl(node Node) bool {
+	if node.HasClass() {
+		return true
+	}
+	for _, gesture := range node.Gestures {
+		if gesture == "click" {
+			return true
+		}
+	}
+	return false
+}
+
+func describeNode(node Node) string {
+	if node.Label != "" {
+		return fmt.Sprintf("#%d %q", node.ID, node.Label)
+	}
+	return fmt.Sprintf("#%d", node.ID)
 }

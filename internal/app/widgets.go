@@ -97,7 +97,7 @@ func focusRing(gtx C, size image.Point, radius unit.Dp) {
 // scrim paints the browse preview gradient. Full-screen details use the
 // stronger, independently tuned detailScrim.
 func scrim(gtx C) {
-	paintGradient(gtx,
+	paintGradient(gtx, image.Rectangle{Max: gtx.Constraints.Max},
 		f32.Pt(0, 0), f32.Pt(0, float32(gtx.Constraints.Max.Y)),
 		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x40},
 		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0xee},
@@ -106,7 +106,7 @@ func scrim(gtx C) {
 
 func detailBackdrop(gtx C) {
 	paint.Fill(gtx.Ops, color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x40})
-	paintGradient(gtx,
+	paintGradient(gtx, image.Rectangle{Max: gtx.Constraints.Max},
 		f32.Pt(0, 0), f32.Pt(0, float32(gtx.Constraints.Max.Y)),
 		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x00},
 		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x60},
@@ -137,23 +137,14 @@ func paintDetailFeather(gtx C, bounds image.Rectangle, from, to f32.Point) {
 	clear := start
 	clear.A = 0
 	for range 2 {
-		paintDetailGradient(gtx, bounds, from, to, start, clear)
+		paintGradient(gtx, bounds, from, to, start, clear)
 	}
 }
 
-func paintDetailGradient(gtx C, bounds image.Rectangle, from, to f32.Point, fromColor, toColor color.NRGBA) {
+// paintGradient fills bounds with a linear gradient between from and to.
+func paintGradient(gtx C, bounds image.Rectangle, from, to f32.Point, fromColor, toColor color.NRGBA) {
 	paint.LinearGradientOp{Stop1: from, Stop2: to, Color1: fromColor, Color2: toColor}.Add(gtx.Ops)
 	stack := clip.Rect(bounds).Push(gtx.Ops)
-	paint.PaintOp{}.Add(gtx.Ops)
-	stack.Pop()
-}
-
-func paintGradient(gtx C, from, to f32.Point, fromColor, toColor color.NRGBA) {
-	paint.LinearGradientOp{
-		Stop1: from, Stop2: to,
-		Color1: fromColor, Color2: toColor,
-	}.Add(gtx.Ops)
-	stack := clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	stack.Pop()
 }

@@ -308,6 +308,52 @@ func TestClickTargetsThroughNonSemanticClips(t *testing.T) {
 	}
 }
 
+func TestClickRejectsTargetCoveredByAnotherControl(t *testing.T) {
+	var below, popup widget.Clickable
+	belowClicks, popupClicks := 0, 0
+	popupWidth := 100
+	d, err := New(Config{Width: 100, Height: 100, PxPerDp: 1, PxPerSp: 1}, func(gtx layout.Context) layout.Dimensions {
+		if below.Clicked(gtx) {
+			belowClicks++
+		}
+		if popup.Clicked(gtx) {
+			popupClicks++
+		}
+		below.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			semantic.Button.Add(gtx.Ops)
+			semantic.LabelOp("Play").Add(gtx.Ops)
+			return layout.Dimensions{Size: image.Pt(100, 100)}
+		})
+		popup.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			semantic.Button.Add(gtx.Ops)
+			semantic.LabelOp("Subtitles").Add(gtx.Ops)
+			return layout.Dimensions{Size: image.Pt(popupWidth, 100)}
+		})
+		return layout.Dimensions{Size: gtx.Constraints.Max}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	err = d.Click(ClickTarget{Label: "Play"})
+	if err == nil || !strings.Contains(err.Error(), `covered by`) || !strings.Contains(err.Error(), `"Subtitles"`) {
+		t.Fatalf("click covered target = %v, want covered error", err)
+	}
+	if belowClicks != 0 || popupClicks != 0 {
+		t.Fatalf("clicks below=%d popup=%d, want none", belowClicks, popupClicks)
+	}
+
+	// Once the popup only covers the left half, the target's center is free.
+	popupWidth = 40
+	if err := d.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Click(ClickTarget{Label: "Play"}); err != nil || belowClicks != 1 || popupClicks != 0 {
+		t.Fatalf("click = %v, clicks below=%d popup=%d; want only the target", err, belowClicks, popupClicks)
+	}
+}
+
 func TestSemanticEditorClickFocusesEditor(t *testing.T) {
 	var editor widget.Editor
 	editor.SingleLine = true

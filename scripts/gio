@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# Drive the headless pépé UI from a shell, through a gio-control socket server.
+#
+#   scripts/gio start [--mock]   build and start the server (--mock: offline
+#                                catalog and stub mpv, never plays media)
+#   scripts/gio restart [--mock] rebuild, then restart, e.g. after UI edits
+#                                (a failed build keeps the old server)
+#                                (start and restart clear old screenshots)
+#   scripts/gio stop             stop the server
+#   scripts/gio log [LINES]      show the end of the server log
+#   scripts/gio <command> ...    send a request; see `scripts/gio help`
+#                                (tree [--compact], key, click, type, resize,
+#                                screenshot, raw)
+set -euo pipefail
+
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+dir=${GIO_DIR:-$repo/tmp/gio}
+bin=$dir/gio-control
+log=$dir/server.log
+# Server and client both run from $repo; a repo-relative socket path stays
+# under the ~108-byte Unix socket limit however deep the checkout is.
+case $dir in
+"$repo"/*) sock=${dir#"$repo"/}/control.sock ;;
+*) sock=$dir/control.sock ;;
+esac
+pidfile=$dir/control.sock.pid
+
+call() {
+	(cd "$repo" && "$bin" call --socket "$sock" "$@")
+}
+
+# server_pid prints the pid of the live server recorded in the pid file.
+server_pid() {
+	local pid
+	pid=$(cat "$pidfile" 2>/dev/null) || return 1
+	[[ $pid =~ ^[0-9]+$ ]] || return 1
+	kill -0 "$pid" 2>/dev/null || return 1
+	[[ $(cat "/proc/$pid/comm" 2>/dev/null) == gio-control ]] || return 1
+	echo "$pid"
+}
+
+# wait_exit waits up to $2 tenths of a second for process $1 to exit.
+wait_exit() {
+	local _
+	for _ in $(seq 1 "$2"); do
+		kill -0 "$1" 2>/dev/null || return 0
+		sleep 0.1
+	done
+	! kill -0 "$1" 2>/dev/null
+}
+
+# server_running succeeds when a server owns the socket, even one whose pid
+# file went missing or that is busy with another client.
+server_running() {
+	server_pid >/dev/null && return 0
+	local probe=$bin
+	[[ -x $probe ]] || probe=$bin.new
+	[[ -x $probe ]] || return 1
+	(cd "$repo" && "$probe" probe --socket "$sock")
+}
+
+parse_start_args() {
+	case ${1:-} in
+	--mock) mock=1 ;;
+	"") mock=0 ;;
+	*)
+		echo "usage: scripts/gio $command [--mock]" >&2
+		exit 2
+		;;
+	esac
+}
+
+# build compiles beside the current binary, so a failed build leaves a running
+# server and its executable untouched.
+build() {
+	mkdir -p "$dir"
+	(cd "$repo" && go build -o "$bin.new" ./cmd/gio-control)
+}
+
+# launch installs the new binary and starts the server; nothing may own the
+# socket by then.
+launch() {
+	mv -f "$bin.new" "$bin"
+	: >"$log"
+	# Screenshots are never overwritten, so drop the previous server's to keep
+	# the default directory bounded; a custom GIO_CONTROL_SCREENSHOT_DIR is kept.
+	if [[ -z ${GIO_CONTROL_SCREENSHOT_DIR:-} ]]; then
+		rm -f "$dir"/shots/frame-*.png
+	fi
+
+	# The server still replaces a stale socket itself and refuses a live one.
+	local pid
+	pid=$(
+		cd "$repo"
+		export EGL_PLATFORM=surfaceless LIBGL_ALWAYS_SOFTWARE=1
+		export GIO_CONTROL_SCREENSHOT_DIR=${GIO_CONTROL_SCREENSHOT_DIR:-$dir/shots}
+		if ((mock)); then
+			export GIO_CONTROL_MOCK_MPV=1
+		else
+			unset GIO_CONTROL_MOCK_MPV
+		fi
+		setsid "$bin" serve --socket "$sock" >"$log" 2>&1 </dev/null &
+		echo $!
+	)
+
+	# The ready event is written after the socket and pid file exist.
+	local _
+	for _ in $(seq 1 600); do
+		if grep -m 1 '"event":"ready"' "$log" 2>/dev/null; then
+			return
+		fi
+		if ! kill -0 "$pid" 2>/dev/null; then
+			echo "gio-control exited during startup:" >&2
+			tail -n 20 "$log" >&2
+			exit 1
+		fi
+		sleep 0.1
+	done
+	echo "gio-control did not start within 60s:" >&2
+	tail -n 20 "$log" >&2
+	exit 1
+}
+
+start() {
+	parse_start_args "$@"
+	build
+	# Check only after building: a missing pid file leaves the probe needing
+	# a binary. The log and binary are untouched until nothing is running.
+	if server_running; then
+		rm -f "$bin.new"
+		echo "gio-control is already running on $sock (use scripts/gio restart)" >&2
+		exit 1
+	fi
+	launch
+}
+
+restart() {
+	parse_start_args "$@"
+	build
+	stop
+	launch
+}
+
+stop() {
+	local pid _
+	pid=$(server_pid) || pid=""
+	if [[ -x $bin ]]; then
+		call --timeout 5s shutdown >/dev/null 2>&1 || true
+	fi
+	if [[ -z $pid ]]; then
+		# Without a pid, wait for the socket to stop accepting connections so a
+		# following start does not find the old server still listening.
+		for _ in $(seq 1 50); do
+			server_running || return 0
+			sleep 0.1
+		done
+		echo "gio-control on $sock did not stop and its pid is unknown" >&2
+		exit 1
+	fi
+	if ! wait_exit "$pid" 50; then
+		kill "$pid" 2>/dev/null || true
+		if ! wait_exit "$pid" 50; then
+			kill -KILL "$pid" 2>/dev/null || true
+			wait_exit "$pid" 20 || {
+				echo "gio-control (pid $pid) did not exit" >&2
+				exit 1
+			}
+		fi
+	fi
+	# A clean exit removes these; a killed server leaves them behind.
+	rm -f "$dir/control.sock" "$pidfile"
+}
+
+command=${1:-help}
+[[ $# -gt 0 ]] && shift
+case $command in
+start) start "$@" ;;
+stop) stop ;;
+restart) restart "$@" ;;
+log) tail -n "${1:-50}" "$log" ;;
+help | -h | --help)
+	sed -n '2,13s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"
+	if [[ -x $bin ]]; then
+		echo
+		"$bin" call --help 2>&1 || true
+	fi
+	;;
+*)
+	if [[ ! -x $bin ]]; then
+		echo "gio-control is not built; run scripts/gio start first" >&2
+		exit 1
+	fi
+	call "$command" "$@"
+	;;
+esac

@@ -7,3 +7,4 @@ dist/
 internal/app/embed/*.ttf
 packaging/embed/
 .pi/tmp/
+/tmp/

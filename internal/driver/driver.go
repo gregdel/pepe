@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -153,8 +154,10 @@ func (d *Driver) Tree() []Node {
 // Occurrence is a 1-based depth-first label match; a button and its nested
 // label can both match, so use the button's ID when the label is ambiguous.
 // Semantic targets prefer a hit-tested center within the viewport and semantic
-// ancestor bounds. If neither the clipped nor original center can be confirmed,
-// they fall back to the clipped center; use coordinates for other clip layouts.
+// ancestor bounds. A click fails when another control covers the clipped
+// center and the original center is not the target either. If neither center
+// can be confirmed otherwise, they fall back to the clipped center; use
+// coordinates for other clip layouts.
 type ClickTarget struct {
 	ID          *uint64
 	Label       string
@@ -221,11 +224,7 @@ func (d *Driver) clickPosition(target ClickTarget) (f32.Point, error) {
 		return f32.Point{}, fmt.Errorf("semantic node %d does not exist", id)
 	}
 	if node.Disabled {
-		name := node.Label
-		if name == "" {
-			name = fmt.Sprintf("%d", node.ID)
-		}
-		return f32.Point{}, fmt.Errorf("semantic node %q is disabled", name)
+		return f32.Point{}, fmt.Errorf("semantic node %s is disabled", describeNode(node))
 	}
 	if node.Bounds.MinX >= node.Bounds.MaxX || node.Bounds.MinY >= node.Bounds.MaxY {
 		return f32.Point{}, fmt.Errorf("semantic node %d has empty bounds", node.ID)
@@ -233,16 +232,17 @@ func (d *Driver) clickPosition(target ClickTarget) (f32.Point, error) {
 	if visible.Empty() {
 		return f32.Point{}, fmt.Errorf("semantic node %d has no visible bounds", node.ID)
 	}
+	// Try the visible center first, then the full center when clipping moved
+	// it; the visible center is always inside visible.
 	clippedCenter := visible.Min.Add(visible.Size().Div(2))
-	for _, area := range []image.Rectangle{visible, {
-		Min: image.Pt(node.Bounds.MinX, node.Bounds.MinY),
-		Max: image.Pt(node.Bounds.MaxX, node.Bounds.MaxY),
-	}} {
-		center := area.Min.Add(area.Size().Div(2))
-		if !center.In(visible) {
-			continue
-		}
-		position := f32.Pt(float32(center.X), float32(center.Y))
+	points := []image.Point{clippedCenter}
+	full := image.Rect(node.Bounds.MinX, node.Bounds.MinY, node.Bounds.MaxX, node.Bounds.MaxY)
+	if center := full.Min.Add(full.Size().Div(2)); center != clippedCenter && center.In(visible) {
+		points = append(points, center)
+	}
+	var cover *Node
+	for i, point := range points {
+		position := f32.Pt(float32(point.X), float32(point.Y))
 		hit, ok := d.router.SemanticAt(position)
 		if !ok {
 			continue
@@ -252,6 +252,16 @@ func (d *Driver) clickPosition(target ClickTarget) (f32.Point, error) {
 		if _, _, ok := findNode([]Node{node}, uint64(hit), visible); ok {
 			return position, nil
 		}
+		// Only the clipped center matters for cover: it is what the fallback
+		// below presses.
+		if i == 0 {
+			cover = coveringControl(tree, node, uint64(hit))
+		}
+	}
+	// The fallback below would press whatever covers the clipped center, and
+	// report success; fail instead when that is another control.
+	if cover != nil {
+		return f32.Point{}, fmt.Errorf("semantic node %d is covered by %s", node.ID, describeNode(*cover))
 	}
 	// SemanticAt is not a complete pointer-target query: for example, an
 	// editor's decorative hint is a semantic sibling above its input handler.
@@ -343,32 +353,57 @@ func (d *Driver) Resize(width, height int) error {
 }
 
 func (d *Driver) Screenshot(path string) error {
+	return d.saveScreenshot(path, os.O_TRUNC)
+}
+
+// CreateScreenshot is like Screenshot but never replaces an existing name,
+// including a symlink; it then returns an error matching os.ErrExist.
+func (d *Driver) CreateScreenshot(path string) error {
+	return d.saveScreenshot(path, os.O_EXCL)
+}
+
+// saveScreenshot writes a PNG to path, opened with os.O_WRONLY|os.O_CREATE|mode,
+// and removes the file again if writing fails.
+func (d *Driver) saveScreenshot(path string, mode int) error {
 	if d.closed || d.window == nil {
 		return errors.New("UI driver is closed")
 	}
 	if path == "" {
 		return errors.New("screenshot path is required")
 	}
-	if err := d.Refresh(); err != nil {
-		return err
-	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create screenshot directory: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|mode, 0o644)
+	if err != nil {
+		return fmt.Errorf("create screenshot: %w", err)
+	}
+	if err := d.WriteScreenshot(file); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("close screenshot: %w", err)
+	}
+	return nil
+}
+
+// WriteScreenshot renders the current frame and writes it to w as a PNG.
+func (d *Driver) WriteScreenshot(w io.Writer) error {
+	if d.closed || d.window == nil {
+		return errors.New("UI driver is closed")
+	}
+	if err := d.Refresh(); err != nil {
+		return err
 	}
 	img := image.NewRGBA(image.Rectangle{Max: d.size})
 	if err := d.window.Screenshot(img); err != nil {
 		return fmt.Errorf("capture screenshot: %w", err)
 	}
-	file, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("create screenshot: %w", err)
-	}
-	if err := png.Encode(file, img); err != nil {
-		_ = file.Close()
+	if err := png.Encode(w, img); err != nil {
 		return fmt.Errorf("encode screenshot: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close screenshot: %w", err)
 	}
 	return nil
 }
