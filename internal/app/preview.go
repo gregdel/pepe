@@ -106,7 +106,7 @@ func (a *App) previewGroup(gtx C, node *RadixNode) D {
 					}
 					lines = append(lines, labelLine{text: label, color: colorFg, size: spBrowse})
 				}
-				return a.renderLines(gtx, &a.rightList, lines)
+				return a.renderLines(gtx, lines)
 			}),
 		)
 	})

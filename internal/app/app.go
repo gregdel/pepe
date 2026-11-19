@@ -143,12 +143,10 @@ type App struct {
 	subPopup *SubtitlePopup
 
 	// Gio persistent list state (must survive between frames)
-	clickables      map[string]*widget.Clickable
-	pendingClick    func() // pointer action from the last frame, see clickableLayout
-	leftList        layout.List
-	rightList       layout.List
-	playerLinesList layout.List
-	detailList      layout.List
+	clickables   map[string]*widget.Clickable
+	pendingClick func() // pointer action from the last frame, see clickableLayout
+	leftList     layout.List
+	detailList   layout.List
 
 	// metric is the scaled metric of the last frame, for input handled
 	// outside layout.
@@ -304,8 +302,6 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		clickables:       make(map[string]*widget.Clickable),
 		th:               th,
 		leftList:         layout.List{Axis: layout.Vertical},
-		rightList:        layout.List{Axis: layout.Vertical},
-		playerLinesList:  layout.List{Axis: layout.Vertical},
 		detailList:       layout.List{Axis: layout.Vertical},
 		images:           newWeightedAsyncCache[paint.ImageOp](3, 24, imageCacheBudget, imageOpWeight),
 		sseCh:            sseCh,

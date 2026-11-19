@@ -577,21 +577,26 @@ type labelLine struct {
 	weight font.Weight
 }
 
-// renderLines lays out a vertical list of label lines using the given list.
-func (a *App) renderLines(gtx C, list *layout.List, lines []labelLine) D {
-	return list.Layout(gtx, len(lines), func(gtx C, i int) D {
-		l := lines[i]
-		return layout.Inset{Bottom: dp2}.Layout(gtx, func(gtx C) D {
-			lbl := material.Label(a.th, l.size, l.text)
-			lbl.Color = l.color
-			if l.weight != 0 {
-				lbl.Font.Weight = l.weight
-			}
-			lbl.MaxLines = 0
-			lbl.Alignment = text.Start
-			return lbl.Layout(gtx)
+// renderLines stacks a short, fixed set of label lines. It is not a scrollable
+// list: inside another list it would get unbounded height and still capture
+// wheel events. Lines past a bounded height are clipped by their labels.
+func (a *App) renderLines(gtx C, lines []labelLine) D {
+	children := make([]layout.FlexChild, len(lines))
+	for i, l := range lines {
+		children[i] = layout.Rigid(func(gtx C) D {
+			return layout.Inset{Bottom: dp2}.Layout(gtx, func(gtx C) D {
+				lbl := material.Label(a.th, l.size, l.text)
+				lbl.Color = l.color
+				if l.weight != 0 {
+					lbl.Font.Weight = l.weight
+				}
+				lbl.MaxLines = 0
+				lbl.Alignment = text.Start
+				return lbl.Layout(gtx)
+			})
 		})
-	})
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
 // spacerFn returns a widget function that draws a vertical spacer.

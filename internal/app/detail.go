@@ -242,5 +242,5 @@ func (a *App) renderPlayerStatus(gtx C) D {
 		lines = append(lines, labelLine{text: "Error:", color: colorFg, size: sp})
 		lines = append(lines, labelLine{text: a.playerError, color: colorTerminal, size: sp})
 	}
-	return a.renderLines(gtx, &a.playerLinesList, lines)
+	return a.renderLines(gtx, lines)
 }
