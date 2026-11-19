@@ -110,14 +110,39 @@ func focusRing(gtx C, size image.Point, radius unit.Dp) {
 	paint.Fill(gtx.Ops, colorSelectFg)
 }
 
-// scrim paints the browse preview gradient. Full-screen details use the
-// stronger, independently tuned detailScrim.
-func scrim(gtx C) {
-	paintGradient(gtx, image.Rectangle{Max: gtx.Constraints.Max},
-		f32.Pt(0, 0), f32.Pt(0, float32(gtx.Constraints.Max.Y)),
-		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x40},
-		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0xee},
-	)
+const (
+	// Gio blends in linear light: 0xe2 keeps colorFg at 4.5:1 even over white
+	// artwork. Darker values hide the fanart without improving readability.
+	scrimTextAlpha = 0xe2
+	scrimTopAlpha  = 0x40
+	scrimSegments  = 8
+)
+
+// scrim paints the browse preview gradient: an even band from just above
+// textTop to the bottom, eased into the lightly tinted fanart above.
+// Full-screen details use the independently tuned detailScrim.
+func scrim(gtx C, textTop int) {
+	size := gtx.Constraints.Max
+	band := min(max(textTop-gtx.Dp(dp16), 0), size.Y)
+	tint := func(a float32) color.NRGBA {
+		return color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: uint8(a + 0.5)}
+	}
+	paint.FillShape(gtx.Ops, tint(scrimTextAlpha), clip.Rect(image.Rect(0, band, size.X, size.Y)).Op())
+	// 2t²−t⁴ keeps the upper fanart light and flattens out before the band,
+	// so its edge does not show as a line.
+	alpha := func(i int) float32 {
+		t := float32(i) / scrimSegments
+		return scrimTopAlpha + (scrimTextAlpha-scrimTopAlpha)*t*t*(2-t*t)
+	}
+	for i := range scrimSegments {
+		y0, y1 := band*i/scrimSegments, band*(i+1)/scrimSegments
+		if y1 <= y0 {
+			continue
+		}
+		paintGradient(gtx, image.Rect(0, y0, size.X, y1),
+			f32.Pt(0, float32(y0)), f32.Pt(0, float32(y1)),
+			tint(alpha(i)), tint(alpha(i+1)))
+	}
 }
 
 func detailBackdrop(gtx C) {

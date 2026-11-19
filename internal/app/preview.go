@@ -7,6 +7,7 @@ import (
 
 	"gioui.org/font"
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/unit"
 )
 
@@ -120,23 +121,25 @@ func (a *App) previewTerminal(gtx C, media *MediaItem) D {
 	return a.previewMovie(gtx, media)
 }
 
-// previewShell draws fanart + scrim behind bottom-left anchored content.
+// previewShell draws fanart + scrim behind bottom-left anchored content. The
+// content is measured first so the scrim protects exactly the text block.
 func (a *App) previewShell(gtx C, fanart layout.Widget, content layout.Widget) D {
-	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(fanart),
-		layout.Expanded(func(gtx C) D {
-			scrim(gtx)
-			return D{Size: gtx.Constraints.Max}
-		}),
-		layout.Stacked(func(gtx C) D {
-			return layout.UniformInset(dp32).Layout(gtx, func(gtx C) D {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Flexed(1, func(gtx C) D { return D{Size: image.Pt(0, gtx.Constraints.Max.Y)} }),
-					layout.Rigid(content),
-				)
-			})
-		}),
-	)
+	size := gtx.Constraints.Max
+	inset := gtx.Dp(dp32)
+	cgtx := gtx
+	cgtx.Constraints = layout.Constraints{Max: image.Pt(max(size.X-2*inset, 0), max(size.Y-2*inset, 0))}
+	macro := op.Record(gtx.Ops)
+	dims := content(cgtx)
+	call := macro.Stop()
+	top := size.Y - inset - dims.Size.Y
+
+	fgtx := gtx
+	fgtx.Constraints = layout.Exact(size)
+	fanart(fgtx)
+	scrim(gtx, top)
+	defer op.Offset(image.Pt(inset, top)).Push(gtx.Ops).Pop()
+	call.Add(gtx.Ops)
+	return D{Size: size}
 }
 
 func (a *App) previewMovie(gtx C, media *MediaItem) D {
@@ -188,7 +191,7 @@ func (a *App) previewMediaContent(gtx C, media *MediaItem, meta string, poster l
 					if meta == "" {
 						return D{}
 					}
-					return a.body(gtx, spMeta, meta, colorSubtle, 2)
+					return a.body(gtx, spMeta, meta, colorFg, 2)
 				}),
 			)
 		}),

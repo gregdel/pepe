@@ -236,3 +236,33 @@ func TestDetailScrimFeatherClipping(t *testing.T) {
 		}
 	}
 }
+
+// The browse preview text must stay readable over white artwork, without the
+// scrim hiding the fanart above the text block.
+func TestPreviewScrimRenderedContrast(t *testing.T) {
+	for _, size := range []image.Point{image.Pt(1920, 1080), image.Pt(1280, 800)} {
+		t.Run(size.String(), func(t *testing.T) {
+			textTop := size.Y * 7 / 10
+			img := renderDetailScrim(t, size, func(gtx C) { scrim(gtx, textTop) })
+			at := func(x, y int) color.NRGBA { return color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA) }
+			for y := textTop; y < size.Y; y += 7 {
+				for _, x := range []int{1, size.X / 2, size.X - 1} {
+					if got := contrastRatio(colorFg, at(x, y)); got < 4.5 {
+						t.Fatalf("pixel %d,%d: %.2f:1, want 4.5:1", x, y, got)
+					}
+				}
+			}
+			if l := relativeLuminance(at(size.X/2, 1)); l < 0.7 {
+				t.Fatalf("top of the fanart darkened to luminance %.2f", l)
+			}
+			previous := color.RGBAModel.Convert(img.At(size.X/2, 0)).(color.RGBA)
+			for y := 1; y < textTop; y++ {
+				current := color.RGBAModel.Convert(img.At(size.X/2, y)).(color.RGBA)
+				if current.R > previous.R || !detailFadePixelNear(current, previous, 3) {
+					t.Fatalf("uneven fade at y=%d: %v to %v", y, previous, current)
+				}
+				previous = current
+			}
+		})
+	}
+}
