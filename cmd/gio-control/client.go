@@ -35,9 +35,13 @@ commands:
   type TEXT                          insert text into the focused editor
   resize WIDTH HEIGHT                resize the viewport
   size                               viewport size
-  screenshot [--crop X Y W H] [--scale F]
+  screenshot [--crop X Y W H] [--scale F] [--no-wait]
                                      render a PNG and print its absolute path;
-                                     crop to a viewport area, shrink by F<1
+                                     crop to a viewport area, shrink by F<1;
+                                     first waits up to 8s for the library and
+                                     artwork to load (warns if still loading)
+  wait [SECONDS]                     wait up to SECONDS (default 8, max 25)
+                                     for loading to finish; prints idle
   shutdown                           stop the server
   raw JSON                           send {"method":...,"params":...} as-is
 
@@ -120,7 +124,7 @@ func runCall(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "gio-control call: %v\n", err)
 		return 1
 	}
-	if err := printCallResult(stdout, output, result, viewport); err != nil {
+	if err := printCallResult(stdout, stderr, output, result, viewport); err != nil {
 		_, _ = fmt.Fprintf(stderr, "gio-control call: %v\n", err)
 		var applied appliedWarning
 		if errors.As(err, &applied) {
@@ -204,6 +208,22 @@ func buildCallRequest(command string, args []string) (callRequest, callOutput, e
 		return callRequest{Method: "resize", Params: resizeParams{Width: width, Height: height}}, outputJSON, nil
 	case "screenshot":
 		return buildScreenshotRequest(args)
+	case "wait":
+		if len(args) > 1 {
+			return callRequest{}, callOutput{}, errors.New("usage: wait [SECONDS]")
+		}
+		req := callRequest{Method: "wait"}
+		if len(args) == 1 {
+			seconds, err := strconv.ParseFloat(args[0], 64)
+			if err != nil {
+				return callRequest{}, callOutput{}, fmt.Errorf("wait seconds: %w", err)
+			}
+			if !(seconds > 0 && seconds <= maxWait.Seconds()) { // also rejects NaN
+				return callRequest{}, callOutput{}, fmt.Errorf("wait seconds %g is outside (0, %g]", seconds, maxWait.Seconds())
+			}
+			req.Params = waitParams{Seconds: seconds}
+		}
+		return req, outputJSON, nil
 	case "shutdown", "size":
 		if err := exactly(0, command); err != nil {
 			return callRequest{}, callOutput{}, err
@@ -263,7 +283,7 @@ func buildTreeRequest(args []string) (callRequest, callOutput, error) {
 
 // buildScreenshotRequest parses "[--crop X Y W H] [--scale F]".
 func buildScreenshotRequest(args []string) (callRequest, callOutput, error) {
-	usage := errors.New("usage: screenshot [--crop X Y W H] [--scale F]")
+	usage := errors.New("usage: screenshot [--crop X Y W H] [--scale F] [--no-wait]")
 	var params screenshotParams
 	for len(args) > 0 {
 		switch {
@@ -291,12 +311,15 @@ func buildScreenshotRequest(args []string) (callRequest, callOutput, error) {
 			}
 			params.Scale = scale
 			args = args[2:]
+		case isOption(args[0], "no-wait") && !params.NoWait:
+			params.NoWait = true
+			args = args[1:]
 		default:
 			return callRequest{}, callOutput{}, usage
 		}
 	}
 	req := callRequest{Method: "screenshot"}
-	if params.Crop != nil || params.Scale != 0 {
+	if params.Crop != nil || params.Scale != 0 || params.NoWait {
 		req.Params = params
 	}
 	return req, outputScreenshotPath, nil
@@ -423,8 +446,9 @@ func fetchViewport(socketPath string, timeout time.Duration) (image.Rectangle, e
 	return image.Rect(0, 0, size.Width, size.Height), nil
 }
 
-// printCallResult prints result; viewport clips compact tree bounds.
-func printCallResult(w io.Writer, output callOutput, result json.RawMessage, viewport image.Rectangle) error {
+// printCallResult prints result; viewport clips compact tree bounds. Notes
+// that need no action go to stderr.
+func printCallResult(w, stderr io.Writer, output callOutput, result json.RawMessage, viewport image.Rectangle) error {
 	switch output.kind {
 	case kindCompactTree:
 		var nodes []driver.Node
@@ -436,12 +460,16 @@ func printCallResult(w io.Writer, output callOutput, result json.RawMessage, vie
 	case kindScreenshotPath:
 		var shot struct {
 			AbsolutePath string `json:"absolutePath"`
+			Loading      bool   `json:"loading"`
 		}
 		if err := json.Unmarshal(result, &shot); err != nil {
 			return fmt.Errorf("decode screenshot: %w", err)
 		}
 		if shot.AbsolutePath == "" {
 			return errors.New("screenshot response has no absolutePath")
+		}
+		if shot.Loading {
+			_, _ = fmt.Fprintln(stderr, "gio-control call: note: artwork was still loading; run wait, then screenshot again")
 		}
 		_, err := fmt.Fprintln(w, shot.AbsolutePath)
 		return err

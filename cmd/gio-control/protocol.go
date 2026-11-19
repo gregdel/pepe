@@ -55,9 +55,22 @@ type typeParams struct {
 }
 
 type screenshotParams struct {
-	Crop  *cropParams `json:"crop,omitempty"`
-	Scale float64     `json:"scale,omitempty"`
+	Crop   *cropParams `json:"crop,omitempty"`
+	Scale  float64     `json:"scale,omitempty"`
+	NoWait bool        `json:"noWait,omitempty"`
 }
+
+type waitParams struct {
+	Seconds float64 `json:"seconds,omitempty"`
+}
+
+// screenshotWait bounds how long a screenshot waits for loading artwork. It
+// stays below the Pi extension's default 10s request timeout; use wait for
+// longer. maxWait stays below the CLI's default 30s call timeout.
+const (
+	screenshotWait = 8 * time.Second
+	maxWait        = 25 * time.Second
+)
 
 type cropParams struct {
 	X      int `json:"x"`
@@ -187,6 +200,14 @@ func dispatch(req request, drv *driver.Driver, repoRoot string, shotNumber *uint
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, false, fmt.Errorf("decode screenshot params: %w", err)
 		}
+		loading := false
+		if !p.NoWait {
+			idle, err := drv.WaitIdle(screenshotWait)
+			if err != nil {
+				return nil, false, err
+			}
+			loading = !idle
+		}
 		opts := driver.ScreenshotOptions{Scale: p.Scale}
 		if p.Crop != nil {
 			if p.Crop.Width <= 0 || p.Crop.Height <= 0 {
@@ -212,7 +233,24 @@ func dispatch(req request, drv *driver.Driver, repoRoot string, shotNumber *uint
 		if err != nil {
 			rel = path
 		}
-		return map[string]any{"path": rel, "absolutePath": path, "width": size.X, "height": size.Y}, false, nil
+		return map[string]any{"path": rel, "absolutePath": path, "width": size.X, "height": size.Y, "loading": loading}, false, nil
+	case "wait":
+		var p waitParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, false, fmt.Errorf("decode wait params: %w", err)
+		}
+		timeout := screenshotWait
+		if p.Seconds != 0 {
+			if !(p.Seconds > 0) || p.Seconds > maxWait.Seconds() {
+				return nil, false, fmt.Errorf("wait seconds %g is outside (0, %g]", p.Seconds, maxWait.Seconds())
+			}
+			timeout = time.Duration(p.Seconds * float64(time.Second))
+		}
+		idle, err := drv.WaitIdle(timeout)
+		if err != nil {
+			return nil, false, err
+		}
+		return map[string]any{"idle": idle, "frame": drv.FrameNumber()}, false, nil
 	case "size":
 		size := drv.Size()
 		return map[string]any{"width": size.X, "height": size.Y, "frame": drv.FrameNumber()}, false, nil

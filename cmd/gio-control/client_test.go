@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"image"
+	"io"
 	"strings"
 	"testing"
 
@@ -35,6 +36,9 @@ func TestBuildCallRequest(t *testing.T) {
 		{[]string{"type", "hello world"}, `{"method":"type","params":{"text":"hello world"}}`, outputSelection},
 		{[]string{"resize", "1920", "1080"}, `{"method":"resize","params":{"width":1920,"height":1080}}`, outputJSON},
 		{[]string{"screenshot"}, `{"method":"screenshot"}`, outputScreenshotPath},
+		{[]string{"screenshot", "--no-wait", "--scale", "0.5"}, `{"method":"screenshot","params":{"scale":0.5,"noWait":true}}`, outputScreenshotPath},
+		{[]string{"wait"}, `{"method":"wait"}`, outputJSON},
+		{[]string{"wait", "2.5"}, `{"method":"wait","params":{"seconds":2.5}}`, outputJSON},
 		{[]string{"shutdown"}, `{"method":"shutdown"}`, outputJSON},
 		{[]string{"size"}, `{"method":"size"}`, outputJSON},
 		{[]string{"raw", `{"method":"key","params":{"name":"Escape"}}`}, `{"method":"key","params":{"name":"Escape"}}`, outputJSON},
@@ -96,6 +100,11 @@ func TestBuildCallRequestRejectsBadArguments(t *testing.T) {
 		{"screenshot", "--scale", "1.5"},
 		{"screenshot", "--scale", "NaN"},
 		{"screenshot", "--scale", "half"},
+		{"screenshot", "--no-wait", "--no-wait"},
+		{"wait", "0"},
+		{"wait", "26"},
+		{"wait", "NaN"},
+		{"wait", "1", "2"},
 	} {
 		if _, _, err := buildCallRequest(args[0], args[1:]); err == nil {
 			t.Errorf("buildCallRequest(%q) succeeded, want error", args)
@@ -131,18 +140,26 @@ func TestRunCallUsageErrors(t *testing.T) {
 
 func TestPrintCallResult(t *testing.T) {
 	var out bytes.Buffer
-	if err := printCallResult(&out, outputScreenshotPath, json.RawMessage(`{"path":"a.png","absolutePath":"/abs/a.png"}`), image.Rectangle{}); err != nil {
+	if err := printCallResult(&out, io.Discard, outputScreenshotPath, json.RawMessage(`{"path":"a.png","absolutePath":"/abs/a.png"}`), image.Rectangle{}); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "/abs/a.png\n" {
 		t.Fatalf("screenshot output = %q", out.String())
 	}
 	out.Reset()
-	if err := printCallResult(&out, outputJSON, json.RawMessage(`{"ok":true}`), image.Rectangle{}); err != nil || out.String() != "{\"ok\":true}\n" {
+	if err := printCallResult(&out, io.Discard, outputJSON, json.RawMessage(`{"ok":true}`), image.Rectangle{}); err != nil || out.String() != "{\"ok\":true}\n" {
 		t.Fatalf("JSON output = %q, %v", out.String(), err)
 	}
-	if err := printCallResult(&out, outputScreenshotPath, json.RawMessage(`{"path":"a.png"}`), image.Rectangle{}); err == nil {
+	if err := printCallResult(&out, io.Discard, outputScreenshotPath, json.RawMessage(`{"path":"a.png"}`), image.Rectangle{}); err == nil {
 		t.Fatal("screenshot without absolutePath succeeded")
+	}
+	out.Reset()
+	var note bytes.Buffer
+	if err := printCallResult(&out, &note, outputScreenshotPath, json.RawMessage(`{"absolutePath":"/abs/a.png","loading":true}`), image.Rectangle{}); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "/abs/a.png\n" || !strings.Contains(note.String(), "still loading") {
+		t.Fatalf("loading screenshot output = %q, note %q", out.String(), note.String())
 	}
 }
 
@@ -332,7 +349,7 @@ func mustJSON(t *testing.T, value any) string {
 func TestPrintCallResultSelectionWarning(t *testing.T) {
 	var b strings.Builder
 	result := json.RawMessage(`{"ok":true,"frame":3,"warning":"action applied, but the UI did not settle: boom"}`)
-	err := printCallResult(&b, outputSelection, result, image.Rectangle{})
+	err := printCallResult(&b, io.Discard, outputSelection, result, image.Rectangle{})
 	var applied appliedWarning
 	if !errors.As(err, &applied) {
 		t.Fatalf("printCallResult() error = %v, want appliedWarning", err)
@@ -345,11 +362,11 @@ func TestPrintCallResultSelectionWarning(t *testing.T) {
 	}
 
 	// An older server reports no selection field at all.
-	err = printCallResult(&b, outputSelection, json.RawMessage(`{"ok":true,"frame":3}`), image.Rectangle{})
+	err = printCallResult(&b, io.Discard, outputSelection, json.RawMessage(`{"ok":true,"frame":3}`), image.Rectangle{})
 	if !errors.As(err, &applied) || b.Len() != 0 {
 		t.Fatalf("printCallResult(no selected field) = %q, %v, want an appliedWarning", b.String(), err)
 	}
-	if err := printCallResult(&b, outputSelection, json.RawMessage(`{"ok":true,"selected":[]}`), image.Rectangle{}); err != nil || b.String() != "no selection\n" {
+	if err := printCallResult(&b, io.Discard, outputSelection, json.RawMessage(`{"ok":true,"selected":[]}`), image.Rectangle{}); err != nil || b.String() != "no selection\n" {
 		t.Fatalf("printCallResult(empty selection) = %q, %v", b.String(), err)
 	}
 }

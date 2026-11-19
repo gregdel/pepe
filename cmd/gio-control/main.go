@@ -85,6 +85,7 @@ func run() int {
 
 	drv, err := driver.New(driver.Config{
 		Width: defaultWidth, Height: defaultHeight, PxPerDp: 1, PxPerSp: 1,
+		Loading: ui.Loading,
 	}, ui.Layout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "initialize headless driver: %v\n", err)

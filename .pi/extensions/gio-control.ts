@@ -564,7 +564,7 @@ export default function gioUiExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "gio_screenshot",
     label: "Screenshot Gio UI",
-    description: "Capture the actual headless Gio render and return it to the model as a PNG image.",
+    description: "Capture the actual headless Gio render and return it to the model as a PNG image. Waits up to 8s for library and artwork loading first.",
     promptSnippet: "Capture and visually inspect the headless Gio UI",
     executionMode: "sequential",
     parameters: Type.Object({}),
@@ -587,14 +587,15 @@ export default function gioUiExtension(pi: ExtensionAPI) {
 
       const width = typeof result.width === "number" ? result.width : undefined;
       const height = typeof result.height === "number" ? result.height : undefined;
-      const description = `Gio screenshot${width && height ? ` (${width}x${height})` : ""}${path ? ` from ${path}` : ""}`;
+      const loading = result.loading === true;
+      const description = `Gio screenshot${width && height ? ` (${width}x${height})` : ""}${path ? ` from ${path}` : ""}${loading ? " (artwork was still loading after waiting; take another screenshot)" : ""}`;
 
       return {
         content: [
           { type: "text" as const, text: description },
           { type: "image" as const, data, mimeType: "image/png" },
         ],
-        details: { width, height, path },
+        details: { width, height, path, loading },
       };
     },
   });

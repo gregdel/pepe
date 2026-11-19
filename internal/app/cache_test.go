@@ -353,3 +353,25 @@ func TestAsyncCacheNotifiesOnSuccessAndFailure(t *testing.T) {
 		t.Fatal("failure sentinel did not prevent a retry")
 	}
 }
+
+func TestAsyncCacheBusyUntilResultsDrained(t *testing.T) {
+	c := newAsyncCache[int](1, 1)
+	if c.busy() {
+		t.Fatal("new cache is busy")
+	}
+	release := make(chan struct{})
+	fetch := func() (int, error) { <-release; return 1, nil }
+	c.fetch("a", fetch)
+	c.fetch("b", fetch)
+	if !c.busy() {
+		t.Fatal("cache with active and queued fetches is not busy")
+	}
+	close(release)
+	waitForCache(t, func() bool {
+		c.drain()
+		return !c.busy()
+	})
+	if _, ok := c.get("b"); !ok {
+		t.Fatal("queued fetch was not resolved before the cache went idle")
+	}
+}

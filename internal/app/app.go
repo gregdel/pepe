@@ -469,6 +469,13 @@ func (a *App) scrollDetail(dir int) {
 
 // Layout renders one frame and processes input routed by the supplied
 // layout context. It is intentionally independent of gioapp.Window.
+// Loading reports whether the library or artwork is still being fetched, so
+// the headless driver can wait for it before a screenshot. Call it from the
+// goroutine that runs Layout.
+func (a *App) Loading() bool {
+	return a.refreshing || a.images.busy()
+}
+
 func (a *App) Layout(gtx C) D {
 	defer a.publishWebStatus()
 	gtx = scaleContext(gtx)

@@ -10,8 +10,8 @@
 #   scripts/gio log [LINES]      show the end of the server log
 #   scripts/gio <command> ...    send a request; see `scripts/gio help`
 #                                (tree [--compact [--all|--selected]], key, click,
-#                                type, resize, size, screenshot [--crop|--scale],
-#                                raw)
+#                                type, resize, size, screenshot [--crop|--scale|
+#                                --no-wait], wait [SECONDS], raw)
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

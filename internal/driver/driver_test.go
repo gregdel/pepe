@@ -633,3 +633,33 @@ func TestScreenshotKeepsExistingFileOnFailure(t *testing.T) {
 		t.Fatalf("existing file = %q, %v; want it untouched", data, err)
 	}
 }
+
+func TestWaitIdleRendersUntilLoaded(t *testing.T) {
+	frames, loadedAt := 0, 3
+	d, err := New(Config{
+		Width: 16, Height: 16, PxPerDp: 1, PxPerSp: 1,
+		Loading: func() bool { return frames < loadedAt },
+	}, func(gtx layout.Context) layout.Dimensions {
+		frames++
+		return layout.Dimensions{Size: gtx.Constraints.Max}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	idle, err := d.WaitIdle(time.Second)
+	if err != nil || !idle || frames != loadedAt {
+		t.Fatalf("WaitIdle() = %v, %v after %d frames, want idle after %d", idle, err, frames, loadedAt)
+	}
+
+	loadedAt = math.MaxInt
+	start := time.Now()
+	idle, err = d.WaitIdle(60 * time.Millisecond)
+	if err != nil || idle {
+		t.Fatalf("WaitIdle(still loading) = %v, %v, want not idle", idle, err)
+	}
+	if elapsed := time.Since(start); elapsed < 60*time.Millisecond || elapsed > time.Second {
+		t.Fatalf("WaitIdle(60ms) took %v", elapsed)
+	}
+}

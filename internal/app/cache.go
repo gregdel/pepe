@@ -77,6 +77,11 @@ func (c *asyncCache[T]) reset() {
 	c.lruEntries = make(map[string]*list.Element)
 }
 
+// busy reports whether fetches are in flight, queued, or awaiting drain.
+func (c *asyncCache[T]) busy() bool {
+	return c.active > 0 || len(c.pending) > 0
+}
+
 // get returns (val, true) if key has been resolved.
 // val may be zero/nil if the fetch failed permanently.
 func (c *asyncCache[T]) get(key string) (T, bool) {

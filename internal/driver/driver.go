@@ -38,6 +38,9 @@ type Config struct {
 	Height  int
 	PxPerDp float32
 	PxPerSp float32
+	// Loading, when set, reports whether the UI is still fetching content a
+	// screenshot should show. WaitIdle calls it between frames.
+	Loading func() bool
 }
 
 type Driver struct {
@@ -47,6 +50,7 @@ type Driver struct {
 	size        image.Point
 	metric      unit.Metric
 	layout      LayoutFunc
+	loading     func() bool
 	frameNumber uint64
 	closed      bool
 	// hasNextFrame and nextFrame hold the earliest redraw the UI asked for,
@@ -71,10 +75,11 @@ func New(cfg Config, layoutFunc LayoutFunc) (*Driver, error) {
 		return nil, fmt.Errorf("create headless window: %w", err)
 	}
 	d := &Driver{
-		window: window,
-		size:   image.Pt(cfg.Width, cfg.Height),
-		metric: unit.Metric{PxPerDp: cfg.PxPerDp, PxPerSp: cfg.PxPerSp},
-		layout: layoutFunc,
+		window:  window,
+		size:    image.Pt(cfg.Width, cfg.Height),
+		metric:  unit.Metric{PxPerDp: cfg.PxPerDp, PxPerSp: cfg.PxPerSp},
+		layout:  layoutFunc,
+		loading: cfg.Loading,
 	}
 	if err := d.Frame(); err != nil {
 		d.Close()
@@ -147,6 +152,26 @@ func (d *Driver) Refresh() error {
 		if err := d.Frame(); err != nil {
 			return err
 		}
+	}
+}
+
+// WaitIdle renders frames until Config.Loading reports false or timeout
+// elapses, and reports whether the UI went idle. Asynchronous results reach the
+// UI only when a frame consumes them, so it keeps rendering while it waits.
+// Without Config.Loading it renders one frame and reports idle.
+func (d *Driver) WaitIdle(timeout time.Duration) (bool, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		if err := d.Frame(); err != nil {
+			return false, err
+		}
+		if d.loading == nil || !d.loading() {
+			return true, nil
+		}
+		if !time.Now().Before(deadline) {
+			return false, nil
+		}
+		time.Sleep(min(50*time.Millisecond, time.Until(deadline)))
 	}
 }
 
