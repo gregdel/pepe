@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -50,6 +52,18 @@ type resizeParams struct {
 
 type typeParams struct {
 	Text string `json:"text"`
+}
+
+type screenshotParams struct {
+	Crop  *cropParams `json:"crop,omitempty"`
+	Scale float64     `json:"scale,omitempty"`
+}
+
+type cropParams struct {
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
 }
 
 // Serve answers newline-delimited requests from r on w until EOF or a
@@ -146,28 +160,19 @@ func dispatch(req request, drv *driver.Driver, repoRoot string, shotNumber *uint
 		if p.X != nil {
 			target.X, target.Y, target.Coordinates = *p.X, *p.Y, true
 		}
-		if err := drv.Click(target); err != nil {
-			return nil, false, err
-		}
-		return map[string]any{"ok": true, "frame": drv.FrameNumber()}, false, nil
+		return actionResult(drv, drv.Click(target))
 	case "type":
 		var p typeParams
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, false, fmt.Errorf("decode type params: %w", err)
 		}
-		if err := drv.Type(p.Text); err != nil {
-			return nil, false, err
-		}
-		return map[string]any{"ok": true, "frame": drv.FrameNumber()}, false, nil
+		return actionResult(drv, drv.Type(p.Text))
 	case "key":
 		var p keyParams
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, false, fmt.Errorf("decode key params: %w", err)
 		}
-		if err := drv.Key(p.Name, p.Modifiers); err != nil {
-			return nil, false, err
-		}
-		return map[string]any{"ok": true, "frame": drv.FrameNumber()}, false, nil
+		return actionResult(drv, drv.Key(p.Name, p.Modifiers))
 	case "resize":
 		var p resizeParams
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -178,6 +183,20 @@ func dispatch(req request, drv *driver.Driver, repoRoot string, shotNumber *uint
 		}
 		return map[string]any{"width": p.Width, "height": p.Height, "frame": drv.FrameNumber()}, false, nil
 	case "screenshot":
+		var p screenshotParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, false, fmt.Errorf("decode screenshot params: %w", err)
+		}
+		opts := driver.ScreenshotOptions{Scale: p.Scale}
+		if p.Crop != nil {
+			if p.Crop.Width <= 0 || p.Crop.Height <= 0 {
+				return nil, false, fmt.Errorf("screenshot crop needs a positive width and height")
+			}
+			if p.Crop.X > math.MaxInt-p.Crop.Width || p.Crop.Y > math.MaxInt-p.Crop.Height {
+				return nil, false, fmt.Errorf("screenshot crop is out of range")
+			}
+			opts.Crop = image.Rect(p.Crop.X, p.Crop.Y, p.Crop.X+p.Crop.Width, p.Crop.Y+p.Crop.Height)
+		}
 		screenshotDir := os.Getenv("GIO_CONTROL_SCREENSHOT_DIR")
 		if screenshotDir == "" {
 			screenshotDir = filepath.Join(".pi", "tmp", "screenshots")
@@ -185,7 +204,7 @@ func dispatch(req request, drv *driver.Driver, repoRoot string, shotNumber *uint
 		if !filepath.IsAbs(screenshotDir) {
 			screenshotDir = filepath.Join(repoRoot, screenshotDir)
 		}
-		path, err := writeScreenshot(drv, screenshotDir, shotNumber)
+		path, size, err := writeScreenshot(drv, screenshotDir, shotNumber, opts)
 		if err != nil {
 			return nil, false, err
 		}
@@ -193,7 +212,6 @@ func dispatch(req request, drv *driver.Driver, repoRoot string, shotNumber *uint
 		if err != nil {
 			rel = path
 		}
-		size := drv.Size()
 		return map[string]any{"path": rel, "absolutePath": path, "width": size.X, "height": size.Y}, false, nil
 	case "size":
 		size := drv.Size()
@@ -209,22 +227,54 @@ func dispatch(req request, drv *driver.Driver, repoRoot string, shotNumber *uint
 // claimed exclusively, so neither a restart nor another server sharing dir
 // overwrites an earlier screenshot. The first screenshot of a process continues
 // after the highest existing frame, avoiding a probe per existing file.
-func writeScreenshot(drv *driver.Driver, dir string, shotNumber *uint64) (string, error) {
+func writeScreenshot(drv *driver.Driver, dir string, shotNumber *uint64, opts driver.ScreenshotOptions) (string, image.Point, error) {
 	if *shotNumber == 0 {
 		*shotNumber = lastFrameNumber(dir)
+	}
+	img, err := drv.Capture(opts)
+	if err != nil {
+		return "", image.Point{}, err
 	}
 	for {
 		*shotNumber++
 		path := filepath.Join(dir, fmt.Sprintf("frame-%06d.png", *shotNumber))
-		err := drv.CreateScreenshot(path)
+		err := driver.CreatePNG(path, img)
 		if errors.Is(err, os.ErrExist) {
 			continue
 		}
 		if err != nil {
-			return "", err
+			return "", image.Point{}, err
 		}
-		return path, nil
+		return path, img.Bounds().Size(), nil
 	}
+}
+
+// actionResult reports the frame after an input action, with the selection,
+// so a caller can follow focus without fetching the whole tree. It only
+// settles immediate redraws (drv.Settle), not scheduled ones, so long input
+// sequences do not wait on animations or timers; a focus change that only
+// lands on a later redraw (an async refresh, say) shows in the next tree.
+//
+// actionErr is the action's own error. One matching driver.ErrRender means
+// the input was delivered, and like a failure to settle, it is only a warning:
+// reporting an error would invite a retry that repeats the input.
+func actionResult(drv *driver.Driver, actionErr error) (map[string]any, bool, error) {
+	if actionErr != nil && !errors.Is(actionErr, driver.ErrRender) {
+		return nil, false, actionErr
+	}
+	result := map[string]any{"ok": true}
+	err := actionErr
+	if err == nil {
+		err = drv.Settle()
+	}
+	if err != nil {
+		result["warning"] = fmt.Sprintf("action applied, but the UI could not be rendered: %v", err)
+	} else {
+		viewport := image.Rectangle{Max: drv.Size()}
+		result["selected"] = driver.Selected(drv.Tree(), viewport)
+	}
+	result["frame"] = drv.FrameNumber()
+	return result, false, nil
 }
 
 // lastFrameNumber returns the highest NNNNNN among frame-NNNNNN.png in dir, or

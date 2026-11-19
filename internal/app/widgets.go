@@ -85,6 +85,21 @@ func strokeRounded(gtx C, size image.Point, radius unit.Dp, col color.NRGBA) {
 	paint.Fill(gtx.Ops, col)
 }
 
+// markSelected exposes D-pad focus to the semantic tree, so headless tools
+// can find the focused control without a screenshot. Callers push it before
+// painting the focused content, so that content becomes its semantic child, and
+// pop it afterwards. A plain clip area adds no pointer handling; it clips to
+// size, which callers measure from the content itself, so focused rows render
+// as before (headless screenshots are pixel-identical without it). Under the
+// subtitle popup the area is pushed unmarked, so the popup owns the selection.
+func (a *App) markSelected(gtx C, size image.Point) clip.Stack {
+	stack := clip.Rect{Max: size}.Push(gtx.Ops)
+	if !a.selectionHidden {
+		semantic.SelectedOp(true).Add(gtx.Ops)
+	}
+	return stack
+}
+
 // focusRing is inset so the outline remains within the control's bounds.
 func focusRing(gtx C, size image.Point, radius unit.Dp) {
 	r := gtx.Dp(radius)
@@ -366,6 +381,9 @@ func (a *App) detailActionButton(gtx C, id, semanticLabel, text string, primary 
 		focused := primary && a.detail != nil && a.detail.kind == detailMovie
 		if primary {
 			bg = colorSelectBg
+		}
+		if focused {
+			defer a.markSelected(gtx, dims.Size).Pop()
 		}
 		fillRounded(gtx, dims.Size, radiusRow, bg)
 		if focused {

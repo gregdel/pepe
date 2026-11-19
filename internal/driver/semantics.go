@@ -3,6 +3,7 @@ package driver
 import (
 	"fmt"
 	"image"
+	"strings"
 
 	"gioui.org/io/input"
 	"gioui.org/io/semantic"
@@ -63,6 +64,11 @@ func bounds(rect image.Rectangle) Bounds {
 	return Bounds{MinX: rect.Min.X, MinY: rect.Min.Y, MaxX: rect.Max.X, MaxY: rect.Max.Y}
 }
 
+// Rect returns b as an image.Rectangle.
+func (b Bounds) Rect() image.Rectangle {
+	return image.Rect(b.MinX, b.MinY, b.MaxX, b.MaxY)
+}
+
 func semanticClass(class semantic.ClassOp) string {
 	switch class {
 	case semantic.Unknown:
@@ -88,11 +94,7 @@ func semanticClass(class semantic.ClassOp) string {
 // require the router's hit testing.
 func findNode(nodes []Node, id uint64, visible image.Rectangle) (Node, image.Rectangle, bool) {
 	for _, node := range nodes {
-		bounds := image.Rectangle{
-			Min: image.Pt(node.Bounds.MinX, node.Bounds.MinY),
-			Max: image.Pt(node.Bounds.MaxX, node.Bounds.MaxY),
-		}
-		clipped := visible.Intersect(bounds)
+		clipped := visible.Intersect(node.Bounds.Rect())
 		if node.ID == id {
 			return node, clipped, true
 		}
@@ -169,4 +171,57 @@ func describeNode(node Node) string {
 		return fmt.Sprintf("#%d %q", node.ID, node.Label)
 	}
 	return fmt.Sprintf("#%d", node.ID)
+}
+
+// Selection summarizes one selected semantic node, such as the D-pad focus.
+type Selection struct {
+	ID    uint64 `json:"id"`
+	Label string `json:"label,omitempty"`
+	// Bounds is the area left visible by the viewport and every ancestor.
+	Bounds Bounds `json:"bounds"`
+}
+
+// Selected returns every selected node in depth-first order. A selection is
+// named after its own label, else the nearest labelled control containing it
+// (such as a row's button), else its descendants' labels joined with " · ".
+// An unlabelled control in between hides labels of controls further out.
+func Selected(tree []Node, viewport image.Rectangle) []Selection {
+	selections := []Selection{}
+	var walk func(nodes []Node, clip image.Rectangle, control string)
+	walk = func(nodes []Node, clip image.Rectangle, control string) {
+		for _, node := range nodes {
+			visible := clip.Intersect(node.Bounds.Rect())
+			if node.Selected {
+				name := node.Label
+				// An unlabelled selected control shadows the controls
+				// further out, like it does for its own contents.
+				if name == "" && !isControl(node) {
+					name = control
+				}
+				if name == "" {
+					name = strings.Join(descendantLabels(node.Children, nil), " · ")
+				}
+				selections = append(selections, Selection{ID: node.ID, Label: name, Bounds: bounds(visible)})
+			}
+			// The nearest control names its contents, even when it is
+			// unlabelled and they fall back to their own labels.
+			childControl := control
+			if isControl(node) {
+				childControl = node.Label
+			}
+			walk(node.Children, visible, childControl)
+		}
+	}
+	walk(tree, viewport, "")
+	return selections
+}
+
+func descendantLabels(nodes []Node, labels []string) []string {
+	for _, node := range nodes {
+		if node.Label != "" {
+			labels = append(labels, node.Label)
+		}
+		labels = descendantLabels(node.Children, labels)
+	}
+	return labels
 }

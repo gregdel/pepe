@@ -9,8 +9,9 @@
 #   scripts/gio stop             stop the server
 #   scripts/gio log [LINES]      show the end of the server log
 #   scripts/gio <command> ...    send a request; see `scripts/gio help`
-#                                (tree [--compact], key, click, type, resize,
-#                                screenshot, raw)
+#                                (tree [--compact [--all|--selected]], key, click,
+#                                type, resize, size, screenshot [--crop|--scale],
+#                                raw)
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -179,7 +180,7 @@ stop) stop ;;
 restart) restart "$@" ;;
 log) tail -n "${1:-50}" "$log" ;;
 help | -h | --help)
-	sed -n '2,13s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"
+	sed -n '2,14s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"
 	if [[ -x $bin ]]; then
 		echo
 		"$bin" call --help 2>&1 || true

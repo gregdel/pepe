@@ -106,6 +106,7 @@ func (a *App) showTabs(gtx C, s *showPage) D {
 
 				switch {
 				case focused:
+					defer a.markSelected(gtx, dims.Size).Pop()
 					fillRounded(gtx, dims.Size, radiusRow, colorSelectBg)
 					focusRing(gtx, dims.Size, radiusRow)
 				case current:

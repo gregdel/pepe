@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"image"
 	"io"
 	"net"
@@ -14,6 +16,7 @@ import (
 
 	"gioui.org/io/semantic"
 	"gioui.org/layout"
+	"gioui.org/op/clip"
 	"gioui.org/widget"
 	"github.com/gregdel/pepe/internal/driver"
 )
@@ -424,6 +427,105 @@ func TestScreenshotContinuesAfterHighestFrame(t *testing.T) {
 		}
 		if got := result.(map[string]any)["absolutePath"]; got != filepath.Join(dir, want) {
 			t.Fatalf("screenshot path = %v, want %s", got, want)
+		}
+	}
+}
+
+func TestInputActionsReportSelection(t *testing.T) {
+	var button widget.Clickable
+	drv, err := driver.New(driver.Config{Width: 200, Height: 100, PxPerDp: 1, PxPerSp: 1}, func(gtx layout.Context) layout.Dimensions {
+		return button.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			semantic.Button.Add(gtx.Ops)
+			semantic.LabelOp("Play").Add(gtx.Ops)
+			size := image.Pt(100, 50)
+			defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
+			semantic.SelectedOp(true).Add(gtx.Ops)
+			return layout.Dimensions{Size: size}
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(drv.Close)
+	var shotNumber uint64
+	for _, req := range []request{
+		{Method: "key", Params: json.RawMessage(`{"name":"DownArrow"}`)},
+		{Method: "click", Params: json.RawMessage(`{"label":"Play"}`)},
+	} {
+		result, _, err := dispatch(req, drv, t.TempDir(), &shotNumber)
+		if err != nil {
+			t.Fatalf("%s: %v", req.Method, err)
+		}
+		selected, ok := result.(map[string]any)["selected"].([]driver.Selection)
+		if !ok || len(selected) != 1 || selected[0].Label != "Play" {
+			t.Fatalf("%s selected = %#v, want the Play button", req.Method, result)
+		}
+	}
+}
+
+func TestScreenshotCropReportsOutputSize(t *testing.T) {
+	t.Setenv("GIO_CONTROL_SCREENSHOT_DIR", t.TempDir())
+	clicks := 0
+	drv := newButtonDriver(t, "Apply", &clicks)
+	var shotNumber uint64
+	params := json.RawMessage(`{"crop":{"x":10,"y":10,"width":100,"height":60},"scale":0.5}`)
+	result, _, err := dispatch(request{Method: "screenshot", Params: params}, drv, t.TempDir(), &shotNumber)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := result.(map[string]any)
+	if got["width"] != 50 || got["height"] != 30 {
+		t.Fatalf("screenshot size = %vx%v, want 50x30", got["width"], got["height"])
+	}
+	for _, bad := range []string{
+		`{"crop":{"x":0,"y":0,"width":0,"height":10}}`,
+		`{"crop":{"x":9223372036854775807,"y":0,"width":10,"height":10}}`,
+		`{"crop":{"x":0,"y":9223372036854775807,"width":10,"height":10}}`,
+	} {
+		if _, _, err := dispatch(request{Method: "screenshot", Params: json.RawMessage(bad)}, drv, t.TempDir(), &shotNumber); err == nil {
+			t.Fatalf("screenshot with crop %s succeeded", bad)
+		}
+	}
+}
+
+func TestActionResultTreatsRenderFailureAsApplied(t *testing.T) {
+	clicks := 0
+	drv := newButtonDriver(t, "Apply", &clicks)
+	result, _, err := actionResult(drv, fmt.Errorf("%w: lost context", driver.ErrRender))
+	if err != nil {
+		t.Fatalf("actionResult(render error) error = %v, want a warning", err)
+	}
+	got := result
+	if got["ok"] != true || !strings.Contains(fmt.Sprint(got["warning"]), "lost context") || got["selected"] != nil {
+		t.Fatalf("actionResult(render error) = %#v", got)
+	}
+	other := errors.New("no such key")
+	if _, _, err := actionResult(drv, other); !errors.Is(err, other) {
+		t.Fatalf("actionResult(input error) error = %v, want %v", err, other)
+	}
+}
+
+func TestWriteScreenshotSkipsTakenNames(t *testing.T) {
+	clicks := 0
+	drv := newButtonDriver(t, "Apply", &clicks)
+	dir := t.TempDir()
+	// Names taken after the server picked its first number.
+	for _, name := range []string{"frame-000002.png", "frame-000003.png"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("keep"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shotNumber := uint64(1)
+	path, size, err := writeScreenshot(drv, dir, &shotNumber, driver.ScreenshotOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(path) != "frame-000004.png" || size != image.Pt(200, 100) {
+		t.Fatalf("writeScreenshot() = %s %v, want frame-000004.png 200x100", path, size)
+	}
+	for _, name := range []string{"frame-000002.png", "frame-000003.png"} {
+		if data, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(data) != "keep" {
+			t.Fatalf("%s was replaced: %q, %v", name, data, err)
 		}
 	}
 }

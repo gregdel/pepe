@@ -1,7 +1,11 @@
 package driver
 
 import (
+	"bytes"
 	"image"
+	"image/png"
+	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -443,6 +447,48 @@ func TestRefreshBoundsContinuousInvalidation(t *testing.T) {
 	}
 }
 
+// TestSettleKeepsScheduledRedraw checks that Settle renders immediate redraws
+// only, and that a scheduled one it sees stays pending for the next frame.
+func TestSettleKeepsScheduledRedraw(t *testing.T) {
+	frames := 0
+	immediate := false
+	d, err := New(Config{Width: 100, Height: 100, PxPerDp: 1, PxPerSp: 1}, func(gtx layout.Context) layout.Dimensions {
+		frames++
+		if immediate {
+			immediate = false
+			gtx.Execute(op.InvalidateCmd{})
+		} else {
+			gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(time.Hour)})
+		}
+		return layout.Dimensions{Size: gtx.Constraints.Max}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	immediate = true
+	if err := d.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	frames = 0
+	if err := d.Settle(); err != nil {
+		t.Fatal(err)
+	}
+	if frames != 1 {
+		t.Fatalf("Settle rendered %d frames for one immediate redraw, want 1", frames)
+	}
+	if err := d.Settle(); err != nil {
+		t.Fatal(err)
+	}
+	if frames != 1 {
+		t.Fatalf("Settle rendered a frame for a scheduled redraw")
+	}
+	if !d.hasNextFrame || time.Until(d.nextFrame) < 30*time.Minute {
+		t.Fatalf("scheduled redraw was dropped: pending %v at %v", d.hasNextFrame, d.nextFrame)
+	}
+}
+
 func TestLetterKeyNames(t *testing.T) {
 	for _, name := range []string{"s", "S", "r", "R", "h", "j", "k", "l", "q"} {
 		got, err := keyName(name)
@@ -469,5 +515,121 @@ func TestConfigValidation(t *testing.T) {
 		return layout.Dimensions{}
 	}); err == nil {
 		t.Fatal("expected invalid width error")
+	}
+}
+
+func TestSelectedNamesSelections(t *testing.T) {
+	tree := []Node{{
+		ID: 1, Bounds: Bounds{MaxX: 1000, MaxY: 1000},
+		Children: []Node{
+			// A selected row inside a button takes the button's label.
+			{ID: 2, Class: "button", Label: "Movies", Bounds: Bounds{MaxX: 100, MaxY: 20}, Children: []Node{
+				{ID: 3, Selected: true, Bounds: Bounds{MaxX: 100, MaxY: 20}, Children: []Node{{ID: 4, Label: "Movies · 2"}}},
+			}},
+			// A plain label does not name a later sibling's selection.
+			{ID: 5, Label: "Header"},
+			// Without a control, descendant labels name it; bounds are clipped.
+			{ID: 6, Selected: true, Bounds: Bounds{MinX: 50, MinY: 90, MaxX: 150, MaxY: 120}, Children: []Node{
+				{ID: 7, Label: "S01E01"}, {ID: 8, Children: []Node{{ID: 9, Label: "Pilot"}}},
+			}},
+			{ID: 10, Selected: true, Label: "Own", Bounds: Bounds{MinX: 200, MaxX: 300, MaxY: 10}},
+			// A nearer unlabelled control hides an outer control's label.
+			{ID: 11, Class: "button", Label: "Card", Children: []Node{
+				{ID: 12, Gestures: []string{"click"}, Children: []Node{
+					{ID: 13, Selected: true, Children: []Node{{ID: 14, Label: "Row"}}},
+				}},
+				// So does a selected node that is itself an unlabelled control.
+				{ID: 15, Selected: true, Gestures: []string{"click"}, Children: []Node{{ID: 16, Label: "Inner"}}},
+			}},
+		},
+	}}
+	got := Selected(tree, image.Rect(0, 0, 100, 100))
+	want := []Selection{
+		{ID: 3, Label: "Movies", Bounds: Bounds{MaxX: 100, MaxY: 20}},
+		{ID: 6, Label: "S01E01 · Pilot", Bounds: Bounds{MinX: 50, MinY: 90, MaxX: 100, MaxY: 100}},
+		{ID: 10, Label: "Own"},
+		{ID: 13, Label: "Row"},
+		{ID: 15, Label: "Inner"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Selected() = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Selected()[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if got := Selected(nil, image.Rect(0, 0, 10, 10)); got == nil || len(got) != 0 {
+		t.Fatalf("Selected(nil) = %#v, want an empty slice", got)
+	}
+}
+
+func TestScreenshotCropAndScale(t *testing.T) {
+	d, err := New(Config{Width: 200, Height: 100, PxPerDp: 1, PxPerSp: 1}, func(gtx layout.Context) layout.Dimensions {
+		return layout.Dimensions{Size: gtx.Constraints.Max}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	dir := t.TempDir()
+	for _, tt := range []struct {
+		opts ScreenshotOptions
+		want image.Point
+	}{
+		{ScreenshotOptions{}, image.Pt(200, 100)},
+		{ScreenshotOptions{Scale: 1}, image.Pt(200, 100)},
+		{ScreenshotOptions{Crop: image.Rect(10, 20, 110, 60)}, image.Pt(100, 40)},
+		{ScreenshotOptions{Crop: image.Rect(150, 50, 400, 400)}, image.Pt(50, 50)},
+		{ScreenshotOptions{Crop: image.Rect(0, 0, 100, 50), Scale: 0.5}, image.Pt(50, 25)},
+	} {
+		var buf bytes.Buffer
+		if err := d.WriteScreenshot(&buf, tt.opts); err != nil {
+			t.Fatalf("WriteScreenshot(%+v) = %v", tt.opts, err)
+		}
+		config, err := png.DecodeConfig(&buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := image.Pt(config.Width, config.Height); got != tt.want {
+			t.Fatalf("WriteScreenshot(%+v) size = %v, want %v", tt.opts, got, tt.want)
+		}
+	}
+	for _, opts := range []ScreenshotOptions{
+		{Scale: 1.5},
+		{Scale: -1},
+		{Scale: math.NaN()},
+		{Crop: image.Rect(300, 300, 310, 310)},
+		{Crop: image.Rectangle{Min: image.Pt(100, 50), Max: image.Pt(50, 20)}},
+		{Crop: image.Rect(10, 10, 10, 50)},
+	} {
+		path := filepath.Join(dir, "bad.png")
+		if _, err := d.CreateScreenshot(path, opts); err == nil {
+			t.Fatalf("CreateScreenshot(%+v) succeeded", opts)
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("CreateScreenshot(%+v) left %s behind: %v", opts, path, err)
+		}
+	}
+}
+
+func TestScreenshotKeepsExistingFileOnFailure(t *testing.T) {
+	d, err := New(Config{Width: 20, Height: 20, PxPerDp: 1, PxPerSp: 1}, func(gtx layout.Context) layout.Dimensions {
+		return layout.Dimensions{Size: gtx.Constraints.Max}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "shot.png")
+	if err := os.WriteFile(path, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	if err := d.Screenshot(path); err == nil {
+		t.Fatal("Screenshot on a closed driver succeeded")
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != "keep" {
+		t.Fatalf("existing file = %q, %v; want it untouched", data, err)
 	}
 }

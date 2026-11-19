@@ -89,6 +89,10 @@ type App struct {
 
 	// pushed full-screen detail page (nil = browse screen)
 	detail *detailScreen
+	// selectionHidden keeps markSelected out of the semantic tree while the
+	// screen under the subtitle popup is drawn, so only the popup's focus is
+	// exposed as selected.
+	selectionHidden bool
 
 	// Shared edge spacing; not an overscan reservation.
 	viewportInsets layout.Inset
@@ -541,6 +545,8 @@ func (a *App) layout(gtx C) D {
 					return a.layoutPlayingBar(gtx)
 				}),
 				layout.Flexed(1, func(gtx C) D {
+					a.selectionHidden = a.subPopup != nil
+					defer func() { a.selectionHidden = false }()
 					if a.detail != nil {
 						return a.layoutDetail(gtx)
 					}

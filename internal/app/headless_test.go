@@ -534,7 +534,9 @@ func TestHeadlessDuplicateTitlesHaveDistinctPointerTargets(t *testing.T) {
 	matches := func() []driver.Node {
 		t.Helper()
 		found := headlessLabelNodes(f.driver.Tree(), "Twin (2020)")
-		if len(found) != 4 || found[0].Class != "button" || found[1].ParentID != found[0].ID || found[2].Class != "button" || found[3].ParentID != found[2].ID || found[0].ID == found[2].ID {
+		// The focused row's label sits under its selection node, so check
+		// that each label is inside its button rather than a direct child.
+		if len(found) != 4 || found[0].Class != "button" || !headlessContains(found[0], found[1].ID) || found[2].Class != "button" || !headlessContains(found[2], found[3].ID) || found[0].ID == found[2].ID {
 			t.Fatalf("duplicate-title semantics = %+v, want two buttons and their nested labels", found)
 		}
 		return found
@@ -597,4 +599,14 @@ func TestHeadlessBrowseDoesNotExposeTextEditor(t *testing.T) {
 	if headlessHasClass(f.driver.Tree(), "editor") {
 		t.Fatal("browse UI unexpectedly contains a text editor")
 	}
+}
+
+// headlessContains reports whether id is a strict descendant of node.
+func headlessContains(node driver.Node, id uint64) bool {
+	for _, child := range node.Children {
+		if child.ID == id || headlessContains(child, id) {
+			return true
+		}
+	}
+	return false
 }

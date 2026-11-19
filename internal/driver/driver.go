@@ -19,6 +19,7 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/unit"
+	"golang.org/x/image/draw"
 )
 
 func init() {
@@ -48,6 +49,11 @@ type Driver struct {
 	layout      LayoutFunc
 	frameNumber uint64
 	closed      bool
+	// hasNextFrame and nextFrame hold the earliest redraw the UI asked for,
+	// like app.Window does: reading router.WakeupTime consumes it, so it is
+	// kept here until a frame is rendered.
+	hasNextFrame bool
+	nextFrame    time.Time
 }
 
 func New(cfg Config, layoutFunc LayoutFunc) (*Driver, error) {
@@ -88,10 +94,17 @@ func (d *Driver) Close() {
 	}
 }
 
+// ErrRender matches a failure to render a frame. Input methods queue their
+// input before rendering, so a Click, Key or Type error matching ErrRender
+// means the input was delivered although its frame was not rendered.
+var ErrRender = errors.New("render frame")
+
 func (d *Driver) Frame() error {
 	if d.closed || d.window == nil {
 		return errors.New("UI driver is closed")
 	}
+	pending, at := d.hasNextFrame, d.nextFrame
+	d.hasNextFrame = false
 	d.ops.Reset()
 	gtx := layout.Context{
 		Ops:         &d.ops,
@@ -102,10 +115,10 @@ func (d *Driver) Frame() error {
 	}
 	d.layout(gtx)
 	if err := d.window.Frame(&d.ops); err != nil {
-		return fmt.Errorf("render frame: %w", err)
+		d.hasNextFrame, d.nextFrame = pending, at
+		return fmt.Errorf("%w: %w", ErrRender, err)
 	}
-	d.router.Frame(&d.ops)
-	d.frameNumber++
+	d.finishFrame()
 	return nil
 }
 
@@ -118,7 +131,7 @@ func (d *Driver) Refresh() error {
 		return err
 	}
 	for {
-		at, pending := d.router.WakeupTime()
+		at, pending := d.nextFrame, d.hasNextFrame
 		if !pending {
 			return nil
 		}
@@ -136,6 +149,38 @@ func (d *Driver) Refresh() error {
 		}
 	}
 }
+
+// Settle renders the extra frames an input action asks for immediately, such
+// as a redraw requested while handling the event, so state that changed during
+// the action's frame is reflected in the semantic tree. Unlike Refresh it never
+// sleeps for a scheduled wakeup, and it stops after a few frames because a
+// running animation keeps requesting immediate redraws.
+func (d *Driver) Settle() error {
+	for range settleFrames {
+		if !d.hasNextFrame || d.nextFrame.After(time.Now()) {
+			return nil
+		}
+		if err := d.Frame(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// finishFrame completes a rendered frame and records the redraw it asks for.
+func (d *Driver) finishFrame() {
+	d.router.Frame(&d.ops)
+	d.frameNumber++
+	if at, ok := d.router.WakeupTime(); ok {
+		if !d.hasNextFrame || at.Before(d.nextFrame) {
+			d.hasNextFrame = true
+			d.nextFrame = at
+		}
+	}
+}
+
+// settleFrames bounds Settle.
+const settleFrames = 3
 
 func (d *Driver) FrameNumber() uint64 { return d.frameNumber }
 
@@ -309,6 +354,8 @@ func (d *Driver) renderWithFallbackFocus(name key.Name, mods key.Modifiers) erro
 	// Explicitly named SystemEvents are delivered to handlers that ask for the
 	// key. If the application did not consume Tab, mirror app.Window's focus
 	// fallback before completing the frame.
+	pending, at := d.hasNextFrame, d.nextFrame
+	d.hasNextFrame = false
 	d.ops.Reset()
 	gtx := layout.Context{Ops: &d.ops, Source: d.router.Source(), Now: time.Now(), Metric: d.metric, Constraints: layout.Exact(d.size)}
 	d.layout(gtx)
@@ -320,10 +367,10 @@ func (d *Driver) renderWithFallbackFocus(name key.Name, mods key.Modifiers) erro
 		}
 	}
 	if err := d.window.Frame(&d.ops); err != nil {
-		return fmt.Errorf("render frame: %w", err)
+		d.hasNextFrame, d.nextFrame = pending, at
+		return fmt.Errorf("%w: %w", ErrRender, err)
 	}
-	d.router.Frame(&d.ops)
-	d.frameNumber++
+	d.finishFrame()
 	return nil
 }
 
@@ -352,25 +399,60 @@ func (d *Driver) Resize(width, height int) error {
 	return d.Frame()
 }
 
+// ScreenshotOptions selects part of the frame and shrinks it, so a screenshot
+// costs less to store and read. The zero value is the full frame at full size.
+type ScreenshotOptions struct {
+	// Crop is the viewport area to keep; it is clipped to the viewport. The
+	// zero Crop keeps the whole frame; any other empty Crop is an error.
+	Crop image.Rectangle
+	// Scale shrinks the (cropped) image; 0 and 1 keep its size, and other
+	// values must be in (0, 1).
+	Scale float64
+}
+
 func (d *Driver) Screenshot(path string) error {
-	return d.saveScreenshot(path, os.O_TRUNC)
+	_, err := d.saveScreenshot(path, os.O_TRUNC, ScreenshotOptions{})
+	return err
 }
 
 // CreateScreenshot is like Screenshot but never replaces an existing name,
-// including a symlink; it then returns an error matching os.ErrExist.
-func (d *Driver) CreateScreenshot(path string) error {
-	return d.saveScreenshot(path, os.O_EXCL)
+// including a symlink; it then returns an error matching os.ErrExist. It
+// returns the written image size, which opts can make differ from Size.
+func (d *Driver) CreateScreenshot(path string, opts ScreenshotOptions) (image.Point, error) {
+	return d.saveScreenshot(path, os.O_EXCL, opts)
 }
 
-// saveScreenshot writes a PNG to path, opened with os.O_WRONLY|os.O_CREATE|mode,
-// and removes the file again if writing fails.
-func (d *Driver) saveScreenshot(path string, mode int) error {
-	if d.closed || d.window == nil {
-		return errors.New("UI driver is closed")
+// saveScreenshot renders a frame, then writes it as a PNG to path, opened with
+// os.O_WRONLY|os.O_CREATE|mode. Rendering first leaves an existing file
+// untouched when it fails; a failed write removes the file again.
+func (d *Driver) saveScreenshot(path string, mode int, opts ScreenshotOptions) (image.Point, error) {
+	if path == "" {
+		return image.Point{}, errors.New("screenshot path is required")
 	}
+	img, err := d.Capture(opts)
+	if err != nil {
+		return image.Point{}, err
+	}
+	if err := savePNG(path, mode, img); err != nil {
+		return image.Point{}, err
+	}
+	return img.Bounds().Size(), nil
+}
+
+// CreatePNG writes img as a PNG to a new file at path, like CreateScreenshot
+// does with a frame from Capture. It returns an error matching os.ErrExist
+// when the name exists, so a caller can retry another name without capturing
+// again.
+func CreatePNG(path string, img image.Image) error {
 	if path == "" {
 		return errors.New("screenshot path is required")
 	}
+	return savePNG(path, os.O_EXCL, img)
+}
+
+// savePNG writes img to path, opened with os.O_WRONLY|os.O_CREATE|mode; a
+// failed write removes the file again.
+func savePNG(path string, mode int, img image.Image) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create screenshot directory: %w", err)
 	}
@@ -378,10 +460,10 @@ func (d *Driver) saveScreenshot(path string, mode int) error {
 	if err != nil {
 		return fmt.Errorf("create screenshot: %w", err)
 	}
-	if err := d.WriteScreenshot(file); err != nil {
+	if err := png.Encode(file, img); err != nil {
 		_ = file.Close()
 		_ = os.Remove(path)
-		return err
+		return fmt.Errorf("encode screenshot: %w", err)
 	}
 	if err := file.Close(); err != nil {
 		_ = os.Remove(path)
@@ -391,21 +473,53 @@ func (d *Driver) saveScreenshot(path string, mode int) error {
 }
 
 // WriteScreenshot renders the current frame and writes it to w as a PNG.
-func (d *Driver) WriteScreenshot(w io.Writer) error {
-	if d.closed || d.window == nil {
-		return errors.New("UI driver is closed")
-	}
-	if err := d.Refresh(); err != nil {
+func (d *Driver) WriteScreenshot(w io.Writer, opts ScreenshotOptions) error {
+	img, err := d.Capture(opts)
+	if err != nil {
 		return err
-	}
-	img := image.NewRGBA(image.Rectangle{Max: d.size})
-	if err := d.window.Screenshot(img); err != nil {
-		return fmt.Errorf("capture screenshot: %w", err)
 	}
 	if err := png.Encode(w, img); err != nil {
 		return fmt.Errorf("encode screenshot: %w", err)
 	}
 	return nil
+}
+
+// Capture renders the current frame, then applies opts.
+func (d *Driver) Capture(opts ScreenshotOptions) (image.Image, error) {
+	if d.closed || d.window == nil {
+		return nil, errors.New("UI driver is closed")
+	}
+	if !(opts.Scale >= 0 && opts.Scale <= 1) { // also rejects NaN
+		return nil, fmt.Errorf("screenshot scale %g is outside (0, 1]", opts.Scale)
+	}
+	area := image.Rectangle{Max: d.size}
+	if opts.Crop != (image.Rectangle{}) {
+		if opts.Crop.Empty() {
+			return nil, fmt.Errorf("screenshot crop %v has no area", opts.Crop)
+		}
+		area = opts.Crop.Intersect(area)
+		if area.Empty() {
+			return nil, fmt.Errorf("screenshot crop %v is outside the %dx%d viewport", opts.Crop, d.size.X, d.size.Y)
+		}
+	}
+	if err := d.Refresh(); err != nil {
+		return nil, err
+	}
+	frame := image.NewRGBA(image.Rectangle{Max: d.size})
+	if err := d.window.Screenshot(frame); err != nil {
+		return nil, fmt.Errorf("capture screenshot: %w", err)
+	}
+	img := frame.SubImage(area)
+	if opts.Scale == 0 || opts.Scale == 1 {
+		return img, nil
+	}
+	size := image.Pt(
+		max(1, int(float64(area.Dx())*opts.Scale+0.5)),
+		max(1, int(float64(area.Dy())*opts.Scale+0.5)),
+	)
+	scaled := image.NewRGBA(image.Rectangle{Max: size})
+	draw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), img, area, draw.Src, nil)
+	return scaled, nil
 }
 
 func clickButton(name string) (pointer.Buttons, error) {

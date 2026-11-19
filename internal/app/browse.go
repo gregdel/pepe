@@ -314,6 +314,7 @@ func (a *App) rowShell(gtx C, selected, active bool, minHeight unit.Dp, content 
 		})
 		call := macro.Stop()
 		if selected {
+			defer a.markSelected(gtx, dims.Size).Pop()
 			fillRounded(gtx, dims.Size, radiusRow, colorSelectBg)
 			focusRing(gtx, dims.Size, radiusRow)
 		} else if active {

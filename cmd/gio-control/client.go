@@ -23,8 +23,11 @@ const (
 	callUsage          = `usage: gio-control call [--socket PATH] [--timeout DURATION] <command> [args]
 
 commands:
-  tree [--compact]                   semantic tree (JSON, or one node per line
-                                     with on-screen bounds)
+  tree                               semantic tree as JSON
+  tree --compact [--all|--selected]  one node per line with on-screen bounds;
+                                     plain wrappers are hidden (--all keeps
+                                     them), off-screen subtrees are collapsed,
+                                     --selected keeps only the selection paths
   key NAME [MODIFIER...]             key press, e.g. RightArrow, Return, Escape
   click [--occurrence N] LABEL       click a semantic label (1-based occurrence)
   click --id N                       click a semantic node id
@@ -32,11 +35,20 @@ commands:
   type TEXT                          insert text into the focused editor
   resize WIDTH HEIGHT                resize the viewport
   size                               viewport size
-  screenshot                         render a PNG and print its absolute path
+  screenshot [--crop X Y W H] [--scale F]
+                                     render a PNG and print its absolute path;
+                                     crop to a viewport area, shrink by F<1
   shutdown                           stop the server
   raw JSON                           send {"method":...,"params":...} as-is
 
-Arguments after the command are taken literally, except click options; use
+key, click and type print the selected (focused) node(s) afterwards, one per
+line, or "no selection". If the action was applied but the selection could
+not be read (the UI failed to render, or the server predates this), they
+print a warning on stderr instead and exit 3; do not retry the action
+blindly, since it already took effect.
+
+Arguments after the command are taken literally, except tree, click and
+screenshot options; use
 "click -- LABEL" for a label that starts with "--".
 `
 )
@@ -46,12 +58,34 @@ type callRequest struct {
 	Params any    `json:"params,omitempty"`
 }
 
-type callOutput int
+type outputKind int
 
 const (
-	outputJSON callOutput = iota
-	outputCompactTree
-	outputScreenshotPath
+	kindJSON outputKind = iota
+	kindCompactTree
+	kindScreenshotPath
+	kindSelection
+)
+
+// treeOptions trims a compact tree.
+type treeOptions struct {
+	// all keeps plain wrapper nodes, which have nothing but bounds.
+	all bool
+	// selected keeps only the paths to selected nodes and their subtrees.
+	selected bool
+}
+
+// callOutput says how runCall prints a result.
+type callOutput struct {
+	kind outputKind
+	tree treeOptions
+}
+
+var (
+	outputJSON           = callOutput{kind: kindJSON}
+	outputCompactTree    = callOutput{kind: kindCompactTree}
+	outputScreenshotPath = callOutput{kind: kindScreenshotPath}
+	outputSelection      = callOutput{kind: kindSelection}
 )
 
 // runCall sends one request to a serve-mode gio-control and prints its result.
@@ -75,7 +109,7 @@ func runCall(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	var viewport image.Rectangle
-	if output == outputCompactTree {
+	if output.kind == kindCompactTree {
 		if viewport, err = fetchViewport(*socketPath, *timeout); err != nil {
 			_, _ = fmt.Fprintf(stderr, "gio-control call: %v\n", err)
 			return 1
@@ -88,10 +122,20 @@ func runCall(args []string, stdout, stderr io.Writer) int {
 	}
 	if err := printCallResult(stdout, output, result, viewport); err != nil {
 		_, _ = fmt.Fprintf(stderr, "gio-control call: %v\n", err)
+		var applied appliedWarning
+		if errors.As(err, &applied) {
+			return 3
+		}
 		return 1
 	}
 	return 0
 }
+
+// appliedWarning reports an action that took effect although its outcome
+// could not be observed.
+type appliedWarning string
+
+func (w appliedWarning) Error() string { return "warning: " + string(w) }
 
 // runProbe exits 0 when a server accepts connections on the socket. It only
 // connects, so a server busy with another client still counts as running.
@@ -119,8 +163,8 @@ func envOr(name, fallback string) string {
 	return fallback
 }
 
-// buildCallRequest turns call arguments into a request. Only tree and click
-// take options; every other argument is literal, so text, key names and
+// buildCallRequest turns call arguments into a request. Only tree, click and
+// screenshot take options; every other argument is literal, so text, key names and
 // numbers may start with "-".
 func buildCallRequest(command string, args []string) (callRequest, callOutput, error) {
 	exactly := func(n int, usage string) error {
@@ -131,61 +175,53 @@ func buildCallRequest(command string, args []string) (callRequest, callOutput, e
 	}
 	switch command {
 	case "tree":
-		switch {
-		case len(args) == 0:
-			return callRequest{Method: "tree"}, outputJSON, nil
-		case len(args) == 1 && (args[0] == "--compact" || args[0] == "-compact"):
-			return callRequest{Method: "tree"}, outputCompactTree, nil
-		default:
-			return callRequest{}, 0, errors.New("usage: tree [--compact]")
-		}
+		return buildTreeRequest(args)
 	case "key":
 		if len(args) == 0 {
-			return callRequest{}, 0, errors.New("usage: key NAME [MODIFIER...]")
+			return callRequest{}, callOutput{}, errors.New("usage: key NAME [MODIFIER...]")
 		}
 		params := keyParams{Name: args[0], Modifiers: append([]string{}, args[1:]...)}
-		return callRequest{Method: "key", Params: params}, outputJSON, nil
+		return callRequest{Method: "key", Params: params}, outputSelection, nil
 	case "click":
 		return buildClickRequest(args)
 	case "type":
 		if err := exactly(1, "type TEXT"); err != nil {
-			return callRequest{}, 0, err
+			return callRequest{}, callOutput{}, err
 		}
-		return callRequest{Method: "type", Params: typeParams{Text: args[0]}}, outputJSON, nil
+		return callRequest{Method: "type", Params: typeParams{Text: args[0]}}, outputSelection, nil
 	case "resize":
 		if err := exactly(2, "resize WIDTH HEIGHT"); err != nil {
-			return callRequest{}, 0, err
+			return callRequest{}, callOutput{}, err
 		}
 		width, err := strconv.Atoi(args[0])
 		if err != nil {
-			return callRequest{}, 0, fmt.Errorf("resize width: %w", err)
+			return callRequest{}, callOutput{}, fmt.Errorf("resize width: %w", err)
 		}
 		height, err := strconv.Atoi(args[1])
 		if err != nil {
-			return callRequest{}, 0, fmt.Errorf("resize height: %w", err)
+			return callRequest{}, callOutput{}, fmt.Errorf("resize height: %w", err)
 		}
 		return callRequest{Method: "resize", Params: resizeParams{Width: width, Height: height}}, outputJSON, nil
-	case "screenshot", "shutdown", "size":
+	case "screenshot":
+		return buildScreenshotRequest(args)
+	case "shutdown", "size":
 		if err := exactly(0, command); err != nil {
-			return callRequest{}, 0, err
-		}
-		if command == "screenshot" {
-			return callRequest{Method: command}, outputScreenshotPath, nil
+			return callRequest{}, callOutput{}, err
 		}
 		return callRequest{Method: command}, outputJSON, nil
 	case "raw":
 		if len(args) != 1 {
-			return callRequest{}, 0, errors.New(`usage: raw '{"method":"tree"}'`)
+			return callRequest{}, callOutput{}, errors.New(`usage: raw '{"method":"tree"}'`)
 		}
 		var raw struct {
 			Method string          `json:"method"`
 			Params json.RawMessage `json:"params"`
 		}
 		if err := json.Unmarshal([]byte(args[0]), &raw); err != nil {
-			return callRequest{}, 0, fmt.Errorf("raw request: %w", err)
+			return callRequest{}, callOutput{}, fmt.Errorf("raw request: %w", err)
 		}
 		if raw.Method == "" {
-			return callRequest{}, 0, errors.New("raw request needs a method")
+			return callRequest{}, callOutput{}, errors.New("raw request needs a method")
 		}
 		req := callRequest{Method: raw.Method}
 		if len(raw.Params) > 0 {
@@ -193,8 +229,77 @@ func buildCallRequest(command string, args []string) (callRequest, callOutput, e
 		}
 		return req, outputJSON, nil
 	default:
-		return callRequest{}, 0, fmt.Errorf("unknown command %q", command)
+		return callRequest{}, callOutput{}, fmt.Errorf("unknown command %q", command)
 	}
+}
+
+// isOption reports whether arg is --name or -name.
+func isOption(arg, name string) bool {
+	return arg == "--"+name || arg == "-"+name
+}
+
+// buildTreeRequest parses "[--compact] [--all|--selected]"; --all and
+// --selected imply --compact.
+func buildTreeRequest(args []string) (callRequest, callOutput, error) {
+	usage := errors.New("usage: tree [--compact] [--all|--selected]")
+	output := outputJSON
+	for _, arg := range args {
+		switch {
+		case isOption(arg, "compact"):
+		case isOption(arg, "all"):
+			output.tree.all = true
+		case isOption(arg, "selected"):
+			output.tree.selected = true
+		default:
+			return callRequest{}, callOutput{}, usage
+		}
+		output.kind = kindCompactTree
+	}
+	if output.tree.all && output.tree.selected {
+		return callRequest{}, callOutput{}, usage
+	}
+	return callRequest{Method: "tree"}, output, nil
+}
+
+// buildScreenshotRequest parses "[--crop X Y W H] [--scale F]".
+func buildScreenshotRequest(args []string) (callRequest, callOutput, error) {
+	usage := errors.New("usage: screenshot [--crop X Y W H] [--scale F]")
+	var params screenshotParams
+	for len(args) > 0 {
+		switch {
+		case isOption(args[0], "crop") && len(args) >= 5 && params.Crop == nil:
+			var values [4]int
+			for i := range values {
+				value, err := strconv.Atoi(args[1+i])
+				if err != nil {
+					return callRequest{}, callOutput{}, fmt.Errorf("screenshot crop: %w", err)
+				}
+				values[i] = value
+			}
+			if values[2] <= 0 || values[3] <= 0 {
+				return callRequest{}, callOutput{}, errors.New("screenshot crop needs a positive width and height")
+			}
+			params.Crop = &cropParams{X: values[0], Y: values[1], Width: values[2], Height: values[3]}
+			args = args[5:]
+		case isOption(args[0], "scale") && len(args) >= 2 && params.Scale == 0:
+			scale, err := strconv.ParseFloat(args[1], 64)
+			if err != nil {
+				return callRequest{}, callOutput{}, fmt.Errorf("screenshot scale: %w", err)
+			}
+			if !(scale > 0 && scale <= 1) { // also rejects NaN
+				return callRequest{}, callOutput{}, fmt.Errorf("screenshot scale %g is outside (0, 1]", scale)
+			}
+			params.Scale = scale
+			args = args[2:]
+		default:
+			return callRequest{}, callOutput{}, usage
+		}
+	}
+	req := callRequest{Method: "screenshot"}
+	if params.Crop != nil || params.Scale != 0 {
+		req.Params = params
+	}
+	return req, outputScreenshotPath, nil
 }
 
 // buildClickRequest parses "[--occurrence N] [--] LABEL", "--id N" or
@@ -202,41 +307,41 @@ func buildCallRequest(command string, args []string) (callRequest, callOutput, e
 func buildClickRequest(args []string) (callRequest, callOutput, error) {
 	usage := errors.New("usage: click [--occurrence N] [--] LABEL | click --id N | click --xy X Y")
 	option := func(name string) bool {
-		return len(args) > 0 && (args[0] == "--"+name || args[0] == "-"+name)
+		return len(args) > 0 && isOption(args[0], name)
 	}
 	var params clickParams
 	switch {
 	case option("xy"):
 		if len(args) != 3 {
-			return callRequest{}, 0, usage
+			return callRequest{}, callOutput{}, usage
 		}
 		x, err := strconv.ParseFloat(args[1], 32)
 		if err != nil {
-			return callRequest{}, 0, fmt.Errorf("click x: %w", err)
+			return callRequest{}, callOutput{}, fmt.Errorf("click x: %w", err)
 		}
 		y, err := strconv.ParseFloat(args[2], 32)
 		if err != nil {
-			return callRequest{}, 0, fmt.Errorf("click y: %w", err)
+			return callRequest{}, callOutput{}, fmt.Errorf("click y: %w", err)
 		}
 		fx, fy := float32(x), float32(y)
 		params.X, params.Y = &fx, &fy
 	case option("id"):
 		if len(args) != 2 {
-			return callRequest{}, 0, usage
+			return callRequest{}, callOutput{}, usage
 		}
 		id, err := strconv.ParseUint(args[1], 10, 64)
 		if err != nil {
-			return callRequest{}, 0, fmt.Errorf("click id: %w", err)
+			return callRequest{}, callOutput{}, fmt.Errorf("click id: %w", err)
 		}
 		params.ID = &id
 	default:
 		if option("occurrence") {
 			if len(args) < 2 {
-				return callRequest{}, 0, usage
+				return callRequest{}, callOutput{}, usage
 			}
 			occurrence, err := strconv.Atoi(args[1])
 			if err != nil || occurrence < 0 {
-				return callRequest{}, 0, usage
+				return callRequest{}, callOutput{}, usage
 			}
 			params.Occurrence = occurrence
 			args = args[2:]
@@ -245,11 +350,11 @@ func buildClickRequest(args []string) (callRequest, callOutput, error) {
 			args = args[1:]
 		}
 		if len(args) != 1 {
-			return callRequest{}, 0, usage
+			return callRequest{}, callOutput{}, usage
 		}
 		params.Label = args[0]
 	}
-	return callRequest{Method: "click", Params: params}, outputJSON, nil
+	return callRequest{Method: "click", Params: params}, outputSelection, nil
 }
 
 // sendCall sends one request and waits at most timeout for its response,
@@ -320,15 +425,15 @@ func fetchViewport(socketPath string, timeout time.Duration) (image.Rectangle, e
 
 // printCallResult prints result; viewport clips compact tree bounds.
 func printCallResult(w io.Writer, output callOutput, result json.RawMessage, viewport image.Rectangle) error {
-	switch output {
-	case outputCompactTree:
+	switch output.kind {
+	case kindCompactTree:
 		var nodes []driver.Node
 		if err := json.Unmarshal(result, &nodes); err != nil {
 			return fmt.Errorf("decode tree: %w", err)
 		}
-		_, err := io.WriteString(w, formatCompactTree(nodes, viewport))
+		_, err := io.WriteString(w, formatCompactTree(nodes, viewport, output.tree))
 		return err
-	case outputScreenshotPath:
+	case kindScreenshotPath:
 		var shot struct {
 			AbsolutePath string `json:"absolutePath"`
 		}
@@ -340,53 +445,173 @@ func printCallResult(w io.Writer, output callOutput, result json.RawMessage, vie
 		}
 		_, err := fmt.Fprintln(w, shot.AbsolutePath)
 		return err
+	case kindSelection:
+		var action struct {
+			Selected *[]driver.Selection `json:"selected"`
+			Warning  string              `json:"warning"`
+		}
+		if err := json.Unmarshal(result, &action); err != nil {
+			return fmt.Errorf("decode selection: %w", err)
+		}
+		if action.Warning != "" {
+			return appliedWarning(action.Warning)
+		}
+		if action.Selected == nil {
+			return appliedWarning("the server did not report the selection; restart it (scripts/gio restart)")
+		}
+		_, err := io.WriteString(w, formatSelection(*action.Selected))
+		return err
 	default:
 		_, err := fmt.Fprintln(w, string(result))
 		return err
 	}
 }
 
+// formatSelection prints one selection per line, "#id "label" @x,y WxH", or
+// "no selection".
+func formatSelection(selections []driver.Selection) string {
+	if len(selections) == 0 {
+		return "no selection\n"
+	}
+	var b strings.Builder
+	for _, selection := range selections {
+		fmt.Fprintf(&b, "#%d", selection.ID)
+		if selection.Label != "" {
+			fmt.Fprintf(&b, " %q", selection.Label)
+		}
+		b.WriteString(formatBounds(selection.Bounds.Rect()))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// formatBounds prints " @x,y WxH", or " [offscreen]" for an empty area.
+func formatBounds(area image.Rectangle) string {
+	if area.Empty() {
+		return " [offscreen]"
+	}
+	return fmt.Sprintf(" @%d,%d %dx%d", area.Min.X, area.Min.Y, area.Dx(), area.Dy())
+}
+
 // formatCompactTree prints one node per line, indented by depth:
 // "#id class "label" (description) [selected] [disabled] @x,y WxH".
 // Bounds are clipped to the viewport and to every ancestor, like the area a
 // semantic click aims at, because raw semantic bounds are unclipped layout
-// boxes (text can report a near-infinite height). A node with nothing left is
-// marked [offscreen] instead.
-func formatCompactTree(nodes []driver.Node, viewport image.Rectangle) string {
+// boxes (text can report a near-infinite height).
+//
+// To keep the output short, plain wrappers (no class, label, description,
+// state or gesture) are left out and their children move up a level, unless
+// opts.all; a node with nothing visible is printed as
+// "[offscreen, N more]" without its N descendants; opts.selected keeps only
+// the paths to selected nodes and their subtrees. An off-screen path is never
+// collapsed before it reaches a selected node.
+func formatCompactTree(nodes []driver.Node, viewport image.Rectangle, opts treeOptions) string {
 	var b strings.Builder
-	var walk func(nodes []driver.Node, depth int, clip image.Rectangle)
-	walk = func(nodes []driver.Node, depth int, clip image.Rectangle) {
+	// containsSelection holds the nodes with a selection below them.
+	containsSelection := map[uint64]bool{}
+	markSelectionPaths(nodes, containsSelection)
+	var walk func(nodes []driver.Node, depth int, clip image.Rectangle, inSelection bool)
+	walk = func(nodes []driver.Node, depth int, clip image.Rectangle, inSelection bool) {
 		for _, node := range nodes {
-			b.WriteString(strings.Repeat("  ", depth))
-			fmt.Fprintf(&b, "#%d", node.ID)
-			if node.HasClass() {
-				fmt.Fprintf(&b, " %s", node.Class)
+			if opts.selected && !inSelection && !node.Selected && !containsSelection[node.ID] {
+				continue
 			}
-			if node.Label != "" {
-				fmt.Fprintf(&b, " %q", node.Label)
+			visible := clip.Intersect(node.Bounds.Rect())
+			if visible.Empty() && containsSelection[node.ID] {
+				// An ancestor of an off-screen selection: keep the path, so
+				// the selected node itself is still printed.
+				childDepth := depth
+				if opts.all || !isPlainWrapper(node) {
+					b.WriteString(strings.Repeat("  ", depth))
+					writeNodeHeader(&b, node)
+					b.WriteString(" [offscreen]\n")
+					childDepth++
+				}
+				walk(node.Children, childDepth, visible, inSelection || node.Selected)
+				continue
 			}
-			if node.Description != "" {
-				fmt.Fprintf(&b, " (%s)", node.Description)
-			}
-			if node.Selected {
-				b.WriteString(" [selected]")
-			}
-			if node.Disabled {
-				b.WriteString(" [disabled]")
-			}
-			bounds := node.Bounds
-			visible := clip.Intersect(image.Rectangle{
-				Min: image.Pt(bounds.MinX, bounds.MinY),
-				Max: image.Pt(bounds.MaxX, bounds.MaxY),
-			})
 			if visible.Empty() {
-				b.WriteString(" [offscreen]\n")
-			} else {
-				fmt.Fprintf(&b, " @%d,%d %dx%d\n", visible.Min.X, visible.Min.Y, visible.Dx(), visible.Dy())
+				hidden := countShown(node.Children, opts.all)
+				if !opts.all && isPlainWrapper(node) && hidden == 0 {
+					continue
+				}
+				b.WriteString(strings.Repeat("  ", depth))
+				writeNodeHeader(&b, node)
+				if hidden > 0 {
+					fmt.Fprintf(&b, " [offscreen, %d more]\n", hidden)
+				} else {
+					b.WriteString(" [offscreen]\n")
+				}
+				continue
 			}
-			walk(node.Children, depth+1, visible)
+			childDepth := depth
+			if opts.all || !isPlainWrapper(node) {
+				b.WriteString(strings.Repeat("  ", depth))
+				writeNodeHeader(&b, node)
+				b.WriteString(formatBounds(visible))
+				b.WriteString("\n")
+				childDepth++
+			}
+			walk(node.Children, childDepth, visible, inSelection || node.Selected)
 		}
 	}
-	walk(nodes, 0, viewport)
+	walk(nodes, 0, viewport, false)
+	if opts.selected && b.Len() == 0 {
+		return "no selection\n"
+	}
 	return b.String()
+}
+
+// writeNodeHeader writes "#id class "label" (description) [selected] [disabled]".
+func writeNodeHeader(b *strings.Builder, node driver.Node) {
+	fmt.Fprintf(b, "#%d", node.ID)
+	if node.HasClass() {
+		fmt.Fprintf(b, " %s", node.Class)
+	}
+	if node.Label != "" {
+		fmt.Fprintf(b, " %q", node.Label)
+	}
+	if node.Description != "" {
+		fmt.Fprintf(b, " (%s)", node.Description)
+	}
+	if node.Selected {
+		b.WriteString(" [selected]")
+	}
+	if node.Disabled {
+		b.WriteString(" [disabled]")
+	}
+}
+
+func isPlainWrapper(node driver.Node) bool {
+	return !node.HasClass() && node.Label == "" && node.Description == "" &&
+		!node.Selected && !node.Disabled && len(node.Gestures) == 0
+}
+
+// markSelectionPaths records in contains the ID of every node with a selected
+// descendant, and reports whether nodes are or contain a selection.
+func markSelectionPaths(nodes []driver.Node, contains map[uint64]bool) bool {
+	found := false
+	for _, node := range nodes {
+		if markSelectionPaths(node.Children, contains) {
+			contains[node.ID] = true
+			found = true
+		}
+		if node.Selected {
+			found = true
+		}
+	}
+	return found
+}
+
+// countShown counts the nodes under nodes that the compact tree would print:
+// every node with all, else all but plain wrappers.
+func countShown(nodes []driver.Node, all bool) int {
+	count := 0
+	for _, node := range nodes {
+		if all || !isPlainWrapper(node) {
+			count++
+		}
+		count += countShown(node.Children, all)
+	}
+	return count
 }
