@@ -46,23 +46,24 @@ func keepSelectedVisible(list *layout.List, cursor int, size image.Point, previo
 }
 
 // clickableLayout adds a semantic button and routes pointer activation into
-// the same application actions used by keyboard navigation.
+// the same application actions used by keyboard navigation. The action is
+// queued and runs before the next frame's layout, like key actions, so a frame
+// is never drawn half with the old state and half with the new one.
 func (a *App) clickableLayout(gtx C, id, label string, content layout.Widget, action func()) D {
 	clickable := a.clickables[id]
 	if clickable == nil {
 		clickable = new(widget.Clickable)
 		a.clickables[id] = clickable
 	}
-	clicked := clickable.Clicked(gtx)
-	dims := clickable.Layout(gtx, func(gtx C) D {
+	if clickable.Clicked(gtx) && action != nil {
+		a.pendingClick = action
+		gtx.Execute(op.InvalidateCmd{})
+	}
+	return clickable.Layout(gtx, func(gtx C) D {
 		semantic.Button.Add(gtx.Ops)
 		semantic.LabelOp(label).Add(gtx.Ops)
 		return content(gtx)
 	})
-	if clicked && action != nil {
-		action()
-	}
-	return dims
 }
 
 // fillRounded paints a rounded rectangle covering size.

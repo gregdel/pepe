@@ -144,6 +144,7 @@ type App struct {
 
 	// Gio persistent list state (must survive between frames)
 	clickables      map[string]*widget.Clickable
+	pendingClick    func() // pointer action from the last frame, see clickableLayout
 	leftList        layout.List
 	rightList       layout.List
 	playerLinesList layout.List
@@ -489,6 +490,12 @@ func (a *App) Layout(gtx C) D {
 	defer a.publishWebStatus()
 	gtx = scaleContext(gtx)
 	a.metric = gtx.Metric
+	// Run the last frame's click first: its closure captured that frame's
+	// state, which refresh results or web commands may replace below.
+	if click := a.pendingClick; click != nil {
+		a.pendingClick = nil
+		click()
+	}
 	a.drainChannels()
 	a.drainWebCommands()
 	paint.Fill(gtx.Ops, colorBg)

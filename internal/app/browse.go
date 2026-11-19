@@ -29,8 +29,6 @@ func (a *App) layoutBrowse(gtx C) D {
 				layout.Rigid(a.layoutModeRail),
 				layout.Rigid(verticalHairline),
 				layout.Flexed(1, func(gtx C) D {
-					// Rail clicks can open or close the remote page. Choose the
-					// content after the rigid rail has processed those clicks.
 					if a.browse.remote != nil {
 						return a.layoutWebRemote(gtx)
 					}

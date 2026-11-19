@@ -112,9 +112,7 @@ func TestHeadlessWebRemoteListingClicks(t *testing.T) {
 					if !ok {
 						t.Fatalf("missing rail button %q", label)
 					}
-					if err := f.driver.Click(driver.ClickTarget{ID: &id}); err != nil {
-						t.Fatal(err)
-					}
+					headlessClick(t, f, driver.ClickTarget{ID: &id})
 					if label == "Web remote" {
 						if f.app.browse.remote == nil {
 							t.Fatal("remote click did not open the remote page")

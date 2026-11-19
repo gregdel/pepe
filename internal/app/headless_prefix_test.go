@@ -115,9 +115,7 @@ func TestHeadlessPrefixTitlesReachable(t *testing.T) {
 					if !ok {
 						t.Fatalf("missing pointer target %q", entry.label)
 					}
-					if err := f.driver.Click(driver.ClickTarget{ID: &buttonID}); err != nil {
-						t.Fatal(err)
-					}
+					headlessClick(t, f, driver.ClickTarget{ID: &buttonID})
 					assertDetail(entry.id)
 					headlessKey(t, f, "LeftArrow")
 				}

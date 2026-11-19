@@ -107,6 +107,18 @@ func headlessKey(t *testing.T, f *headlessFixture, name string) {
 	}
 }
 
+// headlessClick clicks and renders the frame the click asks for, as a window
+// and gio-control do: pointer actions run before the next frame's layout.
+func headlessClick(t *testing.T, f *headlessFixture, target driver.ClickTarget) {
+	t.Helper()
+	if err := f.driver.Click(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.driver.Settle(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func headlessHasLabel(nodes []driver.Node, label string) bool {
 	for _, node := range nodes {
 		if node.Label == label || headlessHasLabel(node.Children, label) {
@@ -252,9 +264,7 @@ func TestHeadlessPlayingBarAndSwitchInputs(t *testing.T) {
 		t.Fatal("playing indicator missing from detail")
 	}
 	headlessKey(t, f, "Enter")
-	if err := f.driver.Click(driver.ClickTarget{Label: "Play movie", Occurrence: 1}); err != nil {
-		t.Fatal(err)
-	}
+	headlessClick(t, f, driver.ClickTarget{Label: "Play movie", Occurrence: 1})
 	if f.app.playerStatus != PlayerStatusRunning || f.app.playerDone != completion || f.app.pendingPlayback == nil || f.app.pendingPlayback.title != "New Movie (2026)" {
 		t.Fatal("keyboard or pointer Play did not queue replacement")
 	}
@@ -531,9 +541,7 @@ func TestHeadlessPrefixRowsHaveIndependentPointerTargets(t *testing.T) {
 		if !ok {
 			t.Fatalf("no button for prefix %q", label)
 		}
-		if err := f.driver.Click(driver.ClickTarget{ID: &id}); err != nil {
-			t.Fatal(err)
-		}
+		headlessClick(t, f, driver.ClickTarget{ID: &id})
 		if node := f.app.browse.nav.getCurrentNode(); node.Label != label {
 			t.Fatalf("clicking %q entered %q", label, node.Label)
 		}
@@ -586,9 +594,7 @@ func TestHeadlessDuplicateTitlesHaveDistinctPointerTargets(t *testing.T) {
 			id := found[tc.occurrence-1].ID
 			target = driver.ClickTarget{ID: &id}
 		}
-		if err := f.driver.Click(target); err != nil {
-			t.Fatal(err)
-		}
+		headlessClick(t, f, target)
 		if detail := f.app.detail; detail == nil || detail.kind != detailMovie || detail.movieID != tc.id {
 			t.Fatalf("click occurrence %d (by ID %t) opened %+v, want %s", tc.occurrence, tc.byID, detail, tc.id)
 		}
@@ -609,13 +615,33 @@ func TestHeadlessRailNestedLabelClick(t *testing.T) {
 			id := matches[1].ID
 			target = driver.ClickTarget{ID: &id}
 		}
-		if err := f.driver.Click(target); err != nil {
-			t.Fatal(err)
-		}
+		headlessClick(t, f, target)
 		if f.app.browse.library.mode != ListingModeDateAdded || f.app.browse.focus != browseFocusModeRail {
 			t.Fatalf("nested rail click (by ID %t) did not select Last added", byID)
 		}
 		headlessKey(t, f, "UpArrow")
+	}
+}
+
+func TestHeadlessClickAppliesBeforeNextFrame(t *testing.T) {
+	f := newHeadlessFixture(t)
+	headlessKey(t, f, "LeftArrow")
+	if err := f.driver.Click(driver.ClickTarget{Label: "Last added", Occurrence: 2}); err != nil {
+		t.Fatal(err)
+	}
+	// The click frame is drawn entirely with the state it started with.
+	if f.app.browse.library.mode != ListingModeTitle {
+		t.Fatal("click changed the listing during the frame that received it")
+	}
+	frame := f.driver.FrameNumber()
+	if err := f.driver.Settle(); err != nil {
+		t.Fatal(err)
+	}
+	if f.driver.FrameNumber() == frame {
+		t.Fatal("click did not request an immediate redraw")
+	}
+	if f.app.browse.library.mode != ListingModeDateAdded {
+		t.Fatal("click was not applied on the next frame")
 	}
 }
 
