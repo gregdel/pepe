@@ -145,13 +145,10 @@ func (a *App) layoutSubtitlePopup(gtx C) D {
 		return D{}
 	}
 
-	// Schedule re-invalidation while loading/downloading.
-	if p.state == SubtitlePopupLoading || p.state == SubtitlePopupDownloading {
-		gtx.Execute(op.InvalidateCmd{})
-	}
-	// Schedule auto-close invalidation when done.
+	// The list and download goroutines invalidate when they finish; only the
+	// auto-close needs a scheduled frame.
 	if p.state == SubtitlePopupDone && !p.doneAt.IsZero() {
-		gtx.Execute(op.InvalidateCmd{At: p.doneAt.Add(1500 * time.Millisecond)})
+		gtx.Execute(op.InvalidateCmd{At: p.doneAt.Add(subtitleDoneDuration)})
 	}
 
 	// Dim the whole screen.
@@ -183,8 +180,9 @@ func (a *App) layoutSubtitlePopup(gtx C) D {
 	macro := op.Record(gtx.Ops)
 	a.layoutSubtitlePopupContent(boxGtx, p)
 	call := macro.Stop()
-	op.Offset(image.Pt(boxX, boxY)).Add(gtx.Ops)
+	offset := op.Offset(image.Pt(boxX, boxY)).Push(gtx.Ops)
 	call.Add(gtx.Ops)
+	offset.Pop()
 
 	return D{Size: gtx.Constraints.Max}
 }

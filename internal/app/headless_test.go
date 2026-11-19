@@ -408,6 +408,31 @@ func headlessLabelInside(nodes []driver.Node, label string, viewport image.Point
 	return false
 }
 
+func TestHeadlessMovieDetailOpensAtTop(t *testing.T) {
+	f := newHeadlessFixture(t)
+	for _, id := range []string{"movie-old", "movie-new"} {
+		f.app.client.movies[id].Plot = strings.Repeat("A long synopsis that requires scrolling the detail page. ", 80)
+	}
+	f.app.pushMovieDetail(&MediaItem{ID: "movie-old", Title: "Old Movie", Type: mediaKindMovie})
+	if err := f.driver.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	for range 8 {
+		headlessKey(t, f, "DownArrow")
+	}
+	if pos := f.app.detailList.Position; pos.First == 0 && pos.Offset == 0 {
+		t.Fatal("fixture did not scroll the first detail page")
+	}
+	headlessKey(t, f, "LeftArrow")
+	f.app.pushMovieDetail(&MediaItem{ID: "movie-new", Title: "New Movie", Type: mediaKindMovie})
+	if err := f.driver.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	if pos := f.app.detailList.Position; pos.First != 0 || pos.Offset != 0 {
+		t.Fatalf("second detail position = %+v, want top", pos)
+	}
+}
+
 func TestHeadlessMovieDetailShortContentScroll(t *testing.T) {
 	f := newHeadlessFixture(t)
 	f.app.pushMovieDetail(&MediaItem{ID: "movie-old", Title: "Old Movie", Type: mediaKindMovie})

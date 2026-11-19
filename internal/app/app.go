@@ -14,6 +14,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	polochon "github.com/odwrtw/polochon/lib"
@@ -147,6 +148,10 @@ type App struct {
 	rightList       layout.List
 	playerLinesList layout.List
 	detailList      layout.List
+
+	// metric is the scaled metric of the last frame, for input handled
+	// outside layout.
+	metric unit.Metric
 
 	// key input tag — a stable pointer used as event.Tag
 	keyTag *bool
@@ -458,9 +463,12 @@ func (a *App) drainChannels() {
 	a.images.drain()
 }
 
+// detailScrollStep is how far one Up/Down moves the movie detail page.
+const detailScrollStep = unit.Dp(160)
+
 // scrollDetail scrolls the movie detail page content with the keyboard.
 func (a *App) scrollDetail(dir int) {
-	const step = 160 // px
+	step := a.metric.Dp(detailScrollStep)
 	// Offset is relative to the first visible item. Gio traverses earlier
 	// items for negative offsets and clamps the actual list boundaries.
 	a.detailList.Position.Offset += dir * step
@@ -480,6 +488,7 @@ func (a *App) Loading() bool {
 func (a *App) Layout(gtx C) D {
 	defer a.publishWebStatus()
 	gtx = scaleContext(gtx)
+	a.metric = gtx.Metric
 	a.drainChannels()
 	a.drainWebCommands()
 	paint.Fill(gtx.Ops, colorBg)

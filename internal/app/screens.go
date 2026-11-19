@@ -136,6 +136,7 @@ func (a *App) pushMovieDetail(media *MediaItem) {
 		movieID:    media.ID,
 		movieTitle: media.Title,
 	}
+	a.detailList.Position = layout.Position{}
 }
 
 // pushShowDetail opens the full-screen detail page for a show. Does nothing
