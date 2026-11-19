@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/op/paint"
+	"gioui.org/unit"
 	"github.com/gregdel/pepe/internal/driver"
 )
 
@@ -238,6 +240,20 @@ func checkHelpBounds(t *testing.T, nodes []driver.Node, size image.Point) {
 			}
 		}
 		checkHelpBounds(t, node.Children, size)
+	}
+}
+
+func TestKeycapsShareHeightAndBaseline(t *testing.T) {
+	a := &App{th: newAppTheme()}
+	var ops op.Ops
+	gtx := layout.Context{Ops: &ops, Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Constraints: layout.Constraints{Max: image.Pt(1920, 1080)}}
+	want := a.keycap(gtx, "esc")
+	// Arrows use the symbol fallback font, whose line box is taller than Roboto's.
+	for _, key := range []string{"↑↓", "←", "→/enter", "home"} {
+		got := a.keycap(gtx, key)
+		if got.Size.Y != want.Size.Y || got.Baseline != want.Baseline {
+			t.Errorf("keycap %q height/baseline = %d/%d, want %d/%d like esc", key, got.Size.Y, got.Baseline, want.Size.Y, want.Baseline)
+		}
 	}
 }
 

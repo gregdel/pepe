@@ -3,6 +3,7 @@ package app
 import (
 	"image"
 	"image/color"
+	"math"
 	"strconv"
 
 	"gioui.org/f32"
@@ -414,19 +415,33 @@ type hint struct {
 	color color.NRGBA // nonzero draws a remote bar; key remains its accessible name
 }
 
-// keycap renders a keyboard key as an outlined rounded cap.
+// keycap renders a keyboard key as an outlined rounded cap. Arrow glyphs come
+// from the symbol fallback font, whose taller line metrics would make those
+// caps taller with a lower baseline, so every cap takes Roboto's line height
+// and sets its text on Roboto's baseline. A label clips to its constraints,
+// so the text is measured without a height limit, then laid out at its own
+// size; the cap's clip bounds what is drawn.
 func (a *App) keycap(gtx C, key string) D {
-	inset := layout.Inset{Left: dp8, Right: dp8, Top: dp2, Bottom: dp2}
-	macro := op.Record(gtx.Ops)
-	dims := inset.Layout(gtx, func(gtx C) D {
-		return a.label(gtx, spSmall, key, colorFg, font.Medium)
-	})
-	call := macro.Stop()
+	measureGtx := gtx
+	measureGtx.Constraints = layout.Constraints{Max: image.Pt(gtx.Constraints.Max.X, math.MaxInt32)}
+	measure := op.Record(gtx.Ops)
+	line := a.label(measureGtx, spSmall, "M", colorFg, font.Medium)
+	keyText := a.label(measureGtx, spSmall, key, colorFg, font.Medium)
+	measure.Stop()
 
-	fillRounded(gtx, dims.Size, dp6, colorSurface2)
-	strokeRounded(gtx, dims.Size, dp6, colorOutline)
-	call.Add(gtx.Ops)
-	return dims
+	padX, padY := gtx.Dp(dp8), gtx.Dp(dp2)
+	size := image.Pt(keyText.Size.X+2*padX, line.Size.Y+2*padY)
+	// Baseline is measured from the bottom; align the distances from the top.
+	shift := (line.Size.Y - line.Baseline) - (keyText.Size.Y - keyText.Baseline)
+	defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
+	fillRounded(gtx, size, dp6, colorSurface2)
+	strokeRounded(gtx, size, dp6, colorOutline)
+	offset := op.Offset(image.Pt(padX, padY+shift)).Push(gtx.Ops)
+	textGtx := gtx
+	textGtx.Constraints = layout.Exact(keyText.Size)
+	a.label(textGtx, spSmall, key, colorFg, font.Medium)
+	offset.Pop()
+	return D{Size: size, Baseline: padY + line.Baseline}
 }
 
 // hintItem renders a keyboard keycap or remote colour bar beside its action.
