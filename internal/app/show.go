@@ -195,21 +195,21 @@ func (a *App) showEpisodeInfo(gtx C, s *showPage) D {
 		)
 	})
 
-	playText := "▶ Play"
+	playText := "Play"
 	if pos := a.resumePos[episodeMediaKey(node.ShowID, ep.Season, ep.Episode)]; pos > minimumResumePosition {
-		playText = "▶ Resume " + formatResumePos(pos)
+		playText = "Resume " + formatResumePos(pos)
 	}
 	sections = append(sections, spacerFn(dp12))
 	sections = append(sections, func(gtx C) D {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
-				return a.detailActionButton(gtx, "detail:show:play", "Play episode", playText, true, func() {
+				return a.detailActionButton(gtx, "detail:show:play", "Play episode", playText, playIcon, true, func() {
 					a.launchEpisode(node)
 				})
 			}),
 			layout.Rigid(layout.Spacer{Width: dp12}.Layout),
 			layout.Rigid(func(gtx C) D {
-				return a.detailActionButton(gtx, "detail:show:subtitles", "Episode subtitles", "Subtitles", false, a.openSubtitlePopup)
+				return a.detailActionButton(gtx, "detail:show:subtitles", "Episode subtitles", "Subtitles", nil, false, a.openSubtitlePopup)
 			}),
 		)
 	})

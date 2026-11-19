@@ -16,13 +16,7 @@ var embeddedRoboto []byte
 //go:embed embed/roboto-italic.ttf
 var embeddedRobotoItalic []byte
 
-//go:embed embed/noto-sans-symbols.ttf
-var embeddedSymbols []byte
-
-//go:embed embed/noto-sans-symbols2.ttf
-var embeddedSymbols2 []byte
-
-var embeddedFontFaces = parseEmbeddedFonts(embeddedRoboto, embeddedRobotoItalic, embeddedSymbols, embeddedSymbols2)
+var embeddedFontFaces = parseEmbeddedFonts(embeddedRoboto, embeddedRobotoItalic)
 
 func parseEmbeddedFonts(collections ...[]byte) []font.FontFace {
 	var all []font.FontFace

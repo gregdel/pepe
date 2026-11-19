@@ -248,7 +248,7 @@ func TestKeycapsShareHeightAndBaseline(t *testing.T) {
 	var ops op.Ops
 	gtx := layout.Context{Ops: &ops, Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Constraints: layout.Constraints{Max: image.Pt(1920, 1080)}}
 	want := a.keycap(gtx, "esc")
-	// Arrows use the symbol fallback font, whose line box is taller than Roboto's.
+	// Arrow keys are drawn as icons; their caps must match text caps.
 	for _, key := range []string{"↑↓", "←", "→/enter", "home"} {
 		got := a.keycap(gtx, key)
 		if got.Size.Y != want.Size.Y || got.Baseline != want.Baseline {

@@ -11,12 +11,6 @@ FONT_REGULAR_SHA256="d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b27787
 FONT_ITALIC_PATH="$FONT_DIR/roboto-italic.ttf"
 FONT_ITALIC_URL="$FONT_BASE_URL/Roboto-Italic%5Bwdth%2Cwght%5D.ttf"
 FONT_ITALIC_SHA256="9725a847af6b460ffca162ae66d20dad48b01876137947180b42d7dcd7887182"
-FONT_SYMBOLS_PATH="$FONT_DIR/noto-sans-symbols.ttf"
-FONT_SYMBOLS_URL="https://raw.githubusercontent.com/google/fonts/$FONT_REVISION/ofl/notosanssymbols/NotoSansSymbols%5Bwght%5D.ttf"
-FONT_SYMBOLS_SHA256="f7e7e04b4a24b6c78893d50cbfd2b2f6cae49617ab047bfef668d252adb128f7"
-FONT_SYMBOLS2_PATH="$FONT_DIR/noto-sans-symbols2.ttf"
-FONT_SYMBOLS2_URL="https://raw.githubusercontent.com/google/fonts/$FONT_REVISION/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf"
-FONT_SYMBOLS2_SHA256="7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21"
 
 require_command() {
 	if ! command -v "$1" >/dev/null 2>&1; then
@@ -60,8 +54,6 @@ fetch_font() {
 
 fetch_font "$FONT_REGULAR_PATH" "$FONT_REGULAR_URL" "$FONT_REGULAR_SHA256" "Roboto variable font"
 fetch_font "$FONT_ITALIC_PATH" "$FONT_ITALIC_URL" "$FONT_ITALIC_SHA256" "Roboto Italic variable font"
-fetch_font "$FONT_SYMBOLS_PATH" "$FONT_SYMBOLS_URL" "$FONT_SYMBOLS_SHA256" "Noto Sans Symbols fallback font"
-fetch_font "$FONT_SYMBOLS2_PATH" "$FONT_SYMBOLS2_URL" "$FONT_SYMBOLS2_SHA256" "Noto Sans Symbols 2 fallback font"
 
 "$ROOT_DIR/scripts/fetch-assets.sh" "$ROOT_DIR/packaging/embed"
 

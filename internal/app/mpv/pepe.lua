@@ -250,7 +250,7 @@ local function select_subtitles()
     -- pause/help panels cannot obscure it. No separate menu or key dispatcher.
     input.select({
         prompt = #items == 1 and "Subtitles (no tracks available):"
-            or "Subtitles — ↑↓ Choose · OK Select · Back Close:",
+            or "Subtitles — Up/Down Choose · OK Select · Back Close:",
         items = items, default_item = default_item,
         submit = function(index)
             if loaded and generation == selected_generation and ids[index] then

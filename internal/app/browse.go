@@ -55,12 +55,12 @@ func verticalHairline(gtx C) D {
 // ── Mode rail ─────────────────────────────────────────────────────────────────
 
 var (
-	radixModeIcon     = mustModeIcon(icons.ActionList)
-	dateAddedModeIcon = mustModeIcon(icons.ActionSchedule)
-	webRemoteIcon     = mustModeIcon(icons.CommunicationPhoneLinkRing)
+	radixModeIcon     = mustIcon(icons.ActionList)
+	dateAddedModeIcon = mustIcon(icons.ActionSchedule)
+	webRemoteIcon     = mustIcon(icons.CommunicationPhoneLinkRing)
 )
 
-func mustModeIcon(data []byte) *widget.Icon {
+func mustIcon(data []byte) *widget.Icon {
 	icon, err := widget.NewIcon(data)
 	if err != nil {
 		panic(err)

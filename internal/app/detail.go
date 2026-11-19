@@ -93,9 +93,9 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen, alpha float32) D {
 	movieID := movie.ImdbID
 	id := d.movieID
 
-	playText := "▶ Play"
+	playText := "Play"
 	if pos := a.resumePos[movieMediaKey(movieID)]; pos > minimumResumePosition {
-		playText = "▶ Resume " + formatResumePos(pos)
+		playText = "Resume " + formatResumePos(pos)
 	}
 
 	var sections []func(C) D
@@ -114,13 +114,13 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen, alpha float32) D {
 	sections = append(sections, func(gtx C) D {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
-				return a.detailActionButton(gtx, "detail:movie:play", "Play movie", playText, true, func() {
+				return a.detailActionButton(gtx, "detail:movie:play", "Play movie", playText, playIcon, true, func() {
 					a.launchMovie(&MediaItem{ID: d.movieID, Title: d.movieTitle, Type: mediaKindMovie})
 				})
 			}),
 			layout.Rigid(layout.Spacer{Width: dp12}.Layout),
 			layout.Rigid(func(gtx C) D {
-				return a.detailActionButton(gtx, "detail:movie:subtitles", "Movie subtitles", "Subtitles", false, a.openSubtitlePopup)
+				return a.detailActionButton(gtx, "detail:movie:subtitles", "Movie subtitles", "Subtitles", nil, false, a.openSubtitlePopup)
 			}),
 		)
 	})

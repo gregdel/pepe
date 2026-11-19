@@ -140,12 +140,10 @@ func (web *webUI) handler() http.Handler {
 		contentType string
 		data        []byte
 	}{
-		"/{$}":          {"text/html; charset=utf-8", webHTML},
-		"/remote.css":   {"text/css; charset=utf-8", webCSS},
-		"/remote.js":    {"text/javascript; charset=utf-8", webJS},
-		"/roboto.ttf":   {"font/ttf", embeddedRoboto},
-		"/symbols.ttf":  {"font/ttf", embeddedSymbols},
-		"/symbols2.ttf": {"font/ttf", embeddedSymbols2},
+		"/{$}":        {"text/html; charset=utf-8", webHTML},
+		"/remote.css": {"text/css; charset=utf-8", webCSS},
+		"/remote.js":  {"text/javascript; charset=utf-8", webJS},
+		"/roboto.ttf": {"font/ttf", embeddedRoboto},
 	} {
 		mux.HandleFunc("GET "+path, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", asset.contentType)

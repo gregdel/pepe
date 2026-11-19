@@ -3,7 +3,6 @@ package app
 import (
 	"image"
 	"image/color"
-	"math"
 	"strconv"
 
 	"gioui.org/f32"
@@ -18,6 +17,7 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"github.com/odwrtw/polochon/lib/papi"
+	"golang.org/x/exp/shiny/materialdesign/icons"
 	"golang.org/x/image/draw"
 )
 
@@ -375,7 +375,8 @@ func (a *App) countPill(gtx C, n int, selected bool) D {
 
 // detailActionButton exposes pointer and semantic activation without adding a
 // D-pad focus zone; keyboard activation remains owned by the detail state.
-func (a *App) detailActionButton(gtx C, id, semanticLabel, text string, primary bool, action func()) D {
+// detailActionButton draws a pill button; icon, when set, precedes the text.
+func (a *App) detailActionButton(gtx C, id, semanticLabel, text string, icon *widget.Icon, primary bool, action func()) D {
 	return a.clickableLayout(gtx, id, semanticLabel, func(gtx C) D {
 		inset := layout.Inset{Left: dp16, Right: dp16, Top: dp8, Bottom: dp8}
 		macro := op.Record(gtx.Ops)
@@ -384,7 +385,18 @@ func (a *App) detailActionButton(gtx C, id, semanticLabel, text string, primary 
 			if primary {
 				col = colorSelectFg
 			}
-			return a.label(gtx, sp, text, col, font.Bold)
+			label := func(gtx C) D { return a.label(gtx, sp, text, col, font.Bold) }
+			if icon == nil {
+				return label(gtx)
+			}
+			measure := op.Record(gtx.Ops)
+			line := label(gtx)
+			measure.Stop()
+			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(inlineIcon(icon, line.Size.Y, line.Size.Y, col)),
+				layout.Rigid(layout.Spacer{Width: dp6}.Layout),
+				layout.Rigid(label),
+			)
 		})
 		call := macro.Stop()
 
@@ -415,33 +427,70 @@ type hint struct {
 	color color.NRGBA // nonzero draws a remote bar; key remains its accessible name
 }
 
-// keycap renders a keyboard key as an outlined rounded cap. Arrow glyphs come
-// from the symbol fallback font, whose taller line metrics would make those
-// caps taller with a lower baseline, so every cap takes Roboto's line height
-// and sets its text on Roboto's baseline. A label clips to its constraints,
-// so the text is measured without a height limit, then laid out at its own
-// size; the cap's clip bounds what is drawn.
+// Roboto, the only embedded font, has no arrows or play symbol, so these are
+// drawn as icons.
+var (
+	keycapArrows = map[rune]*widget.Icon{
+		'↑': mustIcon(icons.NavigationArrowUpward),
+		'↓': mustIcon(icons.NavigationArrowDownward),
+		'←': mustIcon(icons.NavigationArrowBack),
+		'→': mustIcon(icons.NavigationArrowForward),
+	}
+	playIcon = mustIcon(icons.AVPlayArrow)
+)
+
+// inlineIcon draws icon at most lineHeight tall, centred in a box exactly one
+// text line high so it lines up with the labels beside it.
+func inlineIcon(icon *widget.Icon, lineHeight, size int, col color.NRGBA) layout.Widget {
+	return func(gtx C) D {
+		defer op.Offset(image.Pt(0, (lineHeight-size)/2)).Push(gtx.Ops).Pop()
+		gtx.Constraints = layout.Exact(image.Pt(size, size))
+		icon.Layout(gtx, col)
+		return D{Size: image.Pt(size, lineHeight)}
+	}
+}
+
+// keycap renders a keyboard key as an outlined rounded cap, one Roboto line
+// high whether it holds text, arrow icons or both. key is its accessible name.
 func (a *App) keycap(gtx C, key string) D {
-	measureGtx := gtx
-	measureGtx.Constraints = layout.Constraints{Max: image.Pt(gtx.Constraints.Max.X, math.MaxInt32)}
+	gtx.Constraints.Min = image.Point{}
 	measure := op.Record(gtx.Ops)
-	line := a.label(measureGtx, spSmall, "M", colorFg, font.Medium)
-	keyText := a.label(measureGtx, spSmall, key, colorFg, font.Medium)
+	line := a.label(gtx, spSmall, "M", colorFg, font.Medium)
 	measure.Stop()
 
-	padX, padY := gtx.Dp(dp8), gtx.Dp(dp2)
-	size := image.Pt(keyText.Size.X+2*padX, line.Size.Y+2*padY)
-	// Baseline is measured from the bottom; align the distances from the top.
-	shift := (line.Size.Y - line.Baseline) - (keyText.Size.Y - keyText.Baseline)
-	defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
-	fillRounded(gtx, size, dp6, colorSurface2)
-	strokeRounded(gtx, size, dp6, colorOutline)
-	offset := op.Offset(image.Pt(padX, padY+shift)).Push(gtx.Ops)
-	textGtx := gtx
-	textGtx.Constraints = layout.Exact(keyText.Size)
-	a.label(textGtx, spSmall, key, colorFg, font.Medium)
-	offset.Pop()
-	return D{Size: size, Baseline: padY + line.Baseline}
+	var children []layout.FlexChild
+	textStart := 0
+	flush := func(end int) {
+		if run := key[textStart:end]; run != "" {
+			children = append(children, layout.Rigid(func(gtx C) D {
+				return a.label(gtx, spSmall, run, colorFg, font.Medium)
+			}))
+		}
+	}
+	for i, r := range key {
+		icon := keycapArrows[r]
+		if icon == nil {
+			continue
+		}
+		flush(i)
+		textStart = i + len(string(r))
+		children = append(children, layout.Rigid(inlineIcon(icon, line.Size.Y, line.Size.Y*4/5, colorFg)))
+	}
+	flush(len(key))
+
+	inset := layout.Inset{Left: dp8, Right: dp8, Top: dp2, Bottom: dp2}
+	macro := op.Record(gtx.Ops)
+	dims := inset.Layout(gtx, func(gtx C) D {
+		return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
+	})
+	call := macro.Stop()
+
+	defer clip.Rect{Max: dims.Size}.Push(gtx.Ops).Pop()
+	semantic.LabelOp(key).Add(gtx.Ops)
+	fillRounded(gtx, dims.Size, dp6, colorSurface2)
+	strokeRounded(gtx, dims.Size, dp6, colorOutline)
+	call.Add(gtx.Ops)
+	return D{Size: dims.Size, Baseline: gtx.Dp(dp2) + line.Baseline}
 }
 
 // hintItem renders a keyboard keycap or remote colour bar beside its action.

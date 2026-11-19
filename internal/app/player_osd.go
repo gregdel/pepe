@@ -48,8 +48,6 @@ func (a *App) playerInterfaceArgs(runtimeDir string, fromWeb bool) ([]string, er
 		}{
 			{"roboto.ttf", embeddedRoboto},
 			{"roboto-italic.ttf", embeddedRobotoItalic},
-			{"noto-sans-symbols.ttf", embeddedSymbols},
-			{"noto-sans-symbols2.ttf", embeddedSymbols2},
 		} {
 			if err := os.WriteFile(filepath.Join(fontDir, font.name), font.data, 0o600); err != nil {
 				return nil, fmt.Errorf("write playback font: %w", err)

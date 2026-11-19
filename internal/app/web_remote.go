@@ -167,7 +167,7 @@ func (a *App) layoutWebRemote(gtx C) D {
 					return D{}
 				}
 				return layout.Inset{Top: dp8}.Layout(gtx, func(gtx C) D {
-					return a.label(gtx, spMeta, fmt.Sprintf("Address %d of %d · Right, then ↑↓ to change", page.cursor+1, len(page.urls)), colorSubtle, 0)
+					return a.label(gtx, spMeta, fmt.Sprintf("Address %d of %d · Right, then Up/Down to change", page.cursor+1, len(page.urls)), colorSubtle, 0)
 				})
 			}),
 		)

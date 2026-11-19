@@ -115,7 +115,7 @@ mkdir -p dist
 (cd dist && sha256sum pepe > pepe.sha256)
 ```
 
-In addition to pinned Roboto/Noto Sans Symbols fonts, `build.sh` fetches artwork
+In addition to pinned Roboto fonts, `build.sh` fetches artwork
 with `scripts/fetch-assets.sh packaging/embed`. The platform-independent
 `packaging/assets.txt` pins the five artwork attachments from
 [issue #1](https://git.quimbo.fr/gregdel/pepe/issues/1). Downloads use HTTPS and

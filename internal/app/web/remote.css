@@ -3,9 +3,7 @@
   src: url('/roboto.ttf') format('truetype');
   font-weight: 100 900;
 }
-@font-face { font-family: Symbols; src: url('/symbols.ttf') format('truetype'); }
-@font-face { font-family: Symbols2; src: url('/symbols2.ttf') format('truetype'); }
-:root { color-scheme: dark; font-family: Roboto, Symbols, Symbols2, sans-serif; }
+:root { color-scheme: dark; font-family: Roboto, sans-serif; }
 * { box-sizing: border-box; }
 body { margin: 0; background: #08080a; color: #e8e8ec; }
 main { max-width: 36rem; margin: auto; padding: 1.25rem; }

@@ -291,7 +291,7 @@ func TestTVDetailsAndOverlays(t *testing.T) {
 					t.Fatal("driver left detail transition unfinished")
 				}
 				tvAssertSafeButton(t, f, "Play movie")
-				if !headlessHasLabel(f.driver.Tree(), "▶ Resume 5:00") {
+				if !headlessHasLabel(f.driver.Tree(), "Resume 5:00") {
 					t.Fatal("resume action missing")
 				}
 				if headlessHasLabel(f.driver.Tree(), "Status: Idle") || headlessHasLabel(f.driver.Tree(), "Added: ") {
