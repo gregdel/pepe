@@ -250,10 +250,16 @@ func (a *App) twoTone(gtx C, size unit.Sp, prefix, rest string, restCol color.NR
 // Cache display-sized artwork; full-size posters can otherwise evict each
 // other while still visible, triggering continuous refetch and redraw.
 const (
-	posterMaxWidth  = 800
-	posterMaxHeight = 1200
 	fanartMaxWidth  = 2560
 	fanartMaxHeight = 1440
+)
+
+var (
+	posterMaxSize = image.Pt(800, 1200)
+	// Nav rows show 44dp posters: about 2× their size at 1080p, and 1:1 at
+	// the largest UI scale. A separate small texture keeps the GPU from
+	// minifying a full poster without mipmaps, which shimmers while scrolling.
+	rowPosterMaxSize = image.Pt(96, 144)
 )
 
 func fetchImageOp(fetchFn func() (image.Image, error), maxWidth, maxHeight int) (paint.ImageOp, error) {
@@ -264,6 +270,12 @@ func fetchImageOp(fetchFn func() (image.Image, error), maxWidth, maxHeight int) 
 	if img == nil {
 		return paint.ImageOp{}, nil
 	}
+	return paint.NewImageOp(resizeArtwork(img, maxWidth, maxHeight)), nil
+}
+
+// resizeArtwork shrinks img to fit within maxWidth×maxHeight, keeping its
+// aspect ratio. Smaller images are returned unchanged.
+func resizeArtwork(img image.Image, maxWidth, maxHeight int) image.Image {
 	bounds := img.Bounds()
 	width, height := bounds.Dx(), bounds.Dy()
 	if width > maxWidth {
@@ -274,12 +286,19 @@ func fetchImageOp(fetchFn func() (image.Image, error), maxWidth, maxHeight int) 
 		width = max(1, width*maxHeight/height)
 		height = maxHeight
 	}
-	if width != bounds.Dx() || height != bounds.Dy() {
-		resized := image.NewRGBA(image.Rect(0, 0, width, height))
-		draw.ApproxBiLinear.Scale(resized, resized.Bounds(), img, bounds, draw.Src, nil)
-		img = resized
+	if width == bounds.Dx() && height == bounds.Dy() {
+		return img
 	}
-	return paint.NewImageOp(img), nil
+	resized := image.NewRGBA(image.Rect(0, 0, width, height))
+	// ApproxBiLinear samples only 4 source pixels and aliases beyond about
+	// 2×; the kernel scaler widens its support when shrinking but costs
+	// several times more CPU, so keep it for large reductions.
+	var scaler draw.Scaler = draw.ApproxBiLinear
+	if bounds.Dx() > 2*width {
+		scaler = draw.BiLinear
+	}
+	scaler.Scale(resized, resized.Bounds(), img, bounds, draw.Src, nil)
+	return resized
 }
 
 // fetchArtwork keeps failures visible in the log even though the cache resolves
@@ -304,7 +323,8 @@ func (a *App) scheduleArtworkRetry(gtx C, cacheKey string) {
 
 // posterImage renders a 2:3 poster at the given width, asynchronously fetching
 // it on first use. A placeholder surface is drawn while loading or on failure.
-func (a *App) posterImage(gtx C, cacheKey string, fetchFn func() (image.Image, error), width, radius unit.Dp) D {
+// maxSize bounds the cached texture; keys must differ between sizes.
+func (a *App) posterImage(gtx C, cacheKey string, fetchFn func() (image.Image, error), width, radius unit.Dp, maxSize image.Point) D {
 	w := gtx.Dp(width)
 	size := image.Pt(w, w*3/2)
 
@@ -313,7 +333,7 @@ func (a *App) posterImage(gtx C, cacheKey string, fetchFn func() (image.Image, e
 
 	img, ok := a.images.get(cacheKey)
 	if !ok {
-		a.fetchArtwork(cacheKey, fetchFn, posterMaxWidth, posterMaxHeight)
+		a.fetchArtwork(cacheKey, fetchFn, maxSize.X, maxSize.Y)
 	}
 	a.scheduleArtworkRetry(gtx, cacheKey)
 	defer clip.RRect{
@@ -348,17 +368,26 @@ func (a *App) fanart(gtx C, cacheKey string, fetchFn func() (image.Image, error)
 	return D{Size: gtx.Constraints.Max}
 }
 
-// Catalog artwork uses the same cache keys across browse, preview and detail.
+// Preview and detail share full-size poster cache keys; nav rows use small
+// "row" keys for the same files (see rowPosterMaxSize).
 func (a *App) movieThumb(gtx C, id string, width, radius unit.Dp) D {
-	return a.posterImage(gtx, "thumb:"+id, func() (image.Image, error) {
-		return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.ThumbFile })
-	}, width, radius)
+	return a.posterImage(gtx, "thumb:"+id, a.movieThumbFile(id), width, radius, posterMaxSize)
 }
 
 func (a *App) showPoster(gtx C, id string, width, radius unit.Dp) D {
-	return a.posterImage(gtx, "poster:"+id, func() (image.Image, error) {
+	return a.posterImage(gtx, "poster:"+id, a.showPosterFile(id), width, radius, posterMaxSize)
+}
+
+func (a *App) movieThumbFile(id string) func() (image.Image, error) {
+	return func() (image.Image, error) {
+		return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.ThumbFile })
+	}
+}
+
+func (a *App) showPosterFile(id string) func() (image.Image, error) {
+	return func() (image.Image, error) {
 		return a.client.fetchShowImage(id, func(s *papi.Show) *papi.File { return s.PosterFile })
-	}, width, radius)
+	}
 }
 
 func (a *App) movieFanart(gtx C, id string) D {

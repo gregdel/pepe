@@ -271,7 +271,7 @@ func TestPosterImagesStayCachedAcrossListFrames(t *testing.T) {
 				fetches.Add(1)
 				return fetchImageOp(func() (image.Image, error) {
 					return image.NewRGBA(image.Rect(0, 0, 1600, 2400)), nil
-				}, posterMaxWidth, posterMaxHeight)
+				}, posterMaxSize.X, posterMaxSize.Y)
 			})
 			waitForCache(t, func() bool { return len(c.done) == 1 })
 			c.drain()
@@ -282,7 +282,7 @@ func TestPosterImagesStayCachedAcrossListFrames(t *testing.T) {
 	}
 	for _, key := range []string{"first", "second", "third"} {
 		img, ok := c.get(key)
-		if !ok || img.Size() != image.Pt(posterMaxWidth, posterMaxHeight) {
+		if !ok || img.Size() != posterMaxSize {
 			t.Errorf("%s: cached image size = %v, cached = %v", key, img.Size(), ok)
 		}
 	}
@@ -294,9 +294,10 @@ func TestArtworkSizingPreservesAspectRatio(t *testing.T) {
 		src, want  image.Point
 		maxW, maxH int
 	}{
-		{"portrait", image.Pt(1600, 2400), image.Pt(800, 1200), posterMaxWidth, posterMaxHeight},
+		{"portrait", image.Pt(1600, 2400), image.Pt(800, 1200), posterMaxSize.X, posterMaxSize.Y},
 		{"landscape", image.Pt(3840, 2160), image.Pt(2560, 1440), fanartMaxWidth, fanartMaxHeight},
-		{"already small", image.Pt(200, 300), image.Pt(200, 300), posterMaxWidth, posterMaxHeight},
+		{"already small", image.Pt(200, 300), image.Pt(200, 300), posterMaxSize.X, posterMaxSize.Y},
+		{"nav row", image.Pt(1000, 1500), image.Pt(96, 144), rowPosterMaxSize.X, rowPosterMaxSize.Y},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			img, err := fetchImageOp(func() (image.Image, error) {
@@ -306,6 +307,26 @@ func TestArtworkSizingPreservesAspectRatio(t *testing.T) {
 				t.Fatalf("image size = %v, err = %v; want %v", img.Size(), err, tc.want)
 			}
 		})
+	}
+}
+
+// A large reduction must average the source: white every third column, shrunk
+// 10×, is a uniform third grey (85). 4-tap sampling ranges from 0 to 127.
+func TestArtworkLargeReductionDoesNotAlias(t *testing.T) {
+	src := image.NewGray(image.Rect(0, 0, 960, 1440))
+	for y := range 1440 {
+		for x := 0; x < 960; x += 3 {
+			src.Pix[y*src.Stride+x] = 0xff
+		}
+	}
+	got, ok := resizeArtwork(src, rowPosterMaxSize.X, rowPosterMaxSize.Y).(*image.RGBA)
+	if !ok || got.Bounds().Size() != rowPosterMaxSize {
+		t.Fatalf("resized = %T %v, want RGBA %v", got, got.Bounds(), rowPosterMaxSize)
+	}
+	for i := 0; i < len(got.Pix); i += 4 {
+		if v := got.Pix[i]; v < 85-16 || v > 85+16 {
+			t.Fatalf("pixel %d = %d, want about 85", i/4, v)
+		}
 	}
 }
 
@@ -485,11 +506,11 @@ func TestArtworkSchedulesRedrawForTransientRetry(t *testing.T) {
 	}
 
 	frame(func(gtx C) { a.fanart(gtx, "fanart:x", failure) })
-	frame(func(gtx C) { a.posterImage(gtx, "thumb:x", failure, 10, 0) })
+	frame(func(gtx C) { a.posterImage(gtx, "thumb:x", failure, 10, 0, posterMaxSize) })
 	resolve()
 	for _, draw := range []func(C){
 		func(gtx C) { a.fanart(gtx, "fanart:x", failure) },
-		func(gtx C) { a.posterImage(gtx, "thumb:x", failure, 10, 0) },
+		func(gtx C) { a.posterImage(gtx, "thumb:x", failure, 10, 0, posterMaxSize) },
 	} {
 		if at, ok := frame(draw); !ok || at.IsZero() {
 			t.Fatalf("transient artwork failure scheduled no redraw (%v, %v)", at, ok)

@@ -423,7 +423,7 @@ func (a *App) terminalRow(gtx C, node *RadixNode, currentPath string, selected b
 func (a *App) rowPoster(gtx C, media *MediaItem) D {
 	const thumbW = unit.Dp(44)
 	if media.Type == mediaKindShow {
-		return a.showPoster(gtx, media.ID, thumbW, radiusThumb)
+		return a.posterImage(gtx, "rowposter:"+media.ID, a.showPosterFile(media.ID), thumbW, radiusThumb, rowPosterMaxSize)
 	}
-	return a.movieThumb(gtx, media.ID, thumbW, radiusThumb)
+	return a.posterImage(gtx, "rowthumb:"+media.ID, a.movieThumbFile(media.ID), thumbW, radiusThumb, rowPosterMaxSize)
 }

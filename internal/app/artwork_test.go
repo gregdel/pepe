@@ -170,7 +170,7 @@ func TestArtworkUnknownErrorsNeverLogTheirText(t *testing.T) {
 		}
 		completed := make(chan struct{}, 1)
 		a.images.onDone = func() { completed <- struct{}{} }
-		a.fetchArtwork("thumb:tt001", func() (image.Image, error) { return nil, err }, posterMaxWidth, posterMaxHeight)
+		a.fetchArtwork("thumb:tt001", func() (image.Image, error) { return nil, err }, posterMaxSize.X, posterMaxSize.Y)
 		waitForArtwork(t, a, completed)
 		if got := output.String(); !strings.Contains(got, `error="artwork load failed"`) || strings.Contains(got, "https://") || strings.Contains(got, "private-token") || strings.Contains(got, "password") {
 			t.Fatalf("unsafe or missing fallback diagnostic: %s", got)
