@@ -7,7 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"gioui.org/io/input"
+	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/op/paint"
+	"gioui.org/unit"
 )
 
 func newAsyncCache[T any](maxActive, maxPending int) *asyncCache[T] {
@@ -373,5 +377,122 @@ func TestAsyncCacheBusyUntilResultsDrained(t *testing.T) {
 	})
 	if _, ok := c.get("b"); !ok {
 		t.Fatal("queued fetch was not resolved before the cache went idle")
+	}
+}
+
+func TestAsyncCacheRetriesTransientFailuresWithBackoff(t *testing.T) {
+	c := newAsyncCache[int](2, 0)
+	transient := errors.New("timed out")
+	c.retryable = func(err error) bool { return errors.Is(err, transient) }
+	now := time.Unix(1000, 0)
+	c.now = func() time.Time { return now }
+	var calls atomic.Int32
+	var fail atomic.Bool
+	fail.Store(true)
+	fetch := func() (int, error) {
+		calls.Add(1)
+		if fail.Load() {
+			return 0, transient
+		}
+		return 5, nil
+	}
+	resolve := func() {
+		t.Helper()
+		waitForCache(t, func() bool {
+			c.drain()
+			return !c.busy()
+		})
+	}
+
+	c.fetch("a", fetch)
+	c.fetch("permanent", func() (int, error) { return 0, errors.New("image file not set") })
+	resolve()
+	if value, ok := c.get("a"); !ok || value != 0 {
+		t.Fatalf("transient failure = (%d, %v), want a cached placeholder", value, ok)
+	}
+	if at, ok := c.retryAt("a"); !ok || !at.Equal(now.Add(cacheRetryBase)) {
+		t.Fatalf("first retryAt = %v, %v, want %v", at, ok, now.Add(cacheRetryBase))
+	}
+	if _, ok := c.retryAt("permanent"); ok {
+		t.Fatal("permanent failure has a retry time")
+	}
+
+	now = now.Add(cacheRetryBase)
+	if _, ok := c.get("a"); ok {
+		t.Fatal("transient failure still cached after its backoff")
+	}
+	c.fetch("a", fetch)
+	resolve()
+	if at, _ := c.retryAt("a"); !at.Equal(now.Add(2 * cacheRetryBase)) {
+		t.Fatalf("second retryAt = %v, want the backoff doubled to %v", at, now.Add(2*cacheRetryBase))
+	}
+
+	now = now.Add(time.Hour)
+	if _, ok := c.get("permanent"); !ok {
+		t.Fatal("permanent failure was dropped")
+	}
+	fail.Store(false)
+	if _, ok := c.get("a"); ok {
+		t.Fatal("transient failure still cached after its second backoff")
+	}
+	c.fetch("a", fetch)
+	resolve()
+	if value, ok := c.get("a"); !ok || value != 5 {
+		t.Fatalf("retried fetch = (%d, %v), want (5, true)", value, ok)
+	}
+	if _, ok := c.retryAt("a"); ok || len(c.retries) != 0 {
+		t.Fatal("success kept retry state")
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("fetch calls = %d, want 3", calls.Load())
+	}
+}
+
+func TestAsyncCacheRetryBackoffIsCapped(t *testing.T) {
+	c := newAsyncCache[int](1, 0)
+	now := time.Unix(1000, 0)
+	c.now = func() time.Time { return now }
+	for range 40 {
+		c.recordRetry("a", true)
+	}
+	if got := c.retries["a"].at.Sub(now); got != cacheRetryMax {
+		t.Fatalf("backoff after many failures = %v, want %v", got, cacheRetryMax)
+	}
+	c.reset()
+	if len(c.retries) != 0 {
+		t.Fatal("reset kept retry state")
+	}
+}
+
+func TestArtworkSchedulesRedrawForTransientRetry(t *testing.T) {
+	a := &App{images: newWeightedAsyncCache[paint.ImageOp](2, 0, imageCacheBudget, imageOpWeight)}
+	a.images.retryable = isTransientArtworkError
+	failure := func() (image.Image, error) {
+		return nil, transientError{&artworkError{"artwork request timed out", errors.New("timeout")}}
+	}
+	frame := func(widget func(C)) (time.Time, bool) {
+		var router input.Router
+		var ops op.Ops
+		widget(C{Ops: &ops, Source: router.Source(), Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Constraints: layout.Exact(image.Pt(64, 64))})
+		router.Frame(&ops)
+		return router.WakeupTime()
+	}
+	resolve := func() {
+		waitForCache(t, func() bool {
+			a.images.drain()
+			return !a.images.busy()
+		})
+	}
+
+	frame(func(gtx C) { a.fanart(gtx, "fanart:x", failure) })
+	frame(func(gtx C) { a.posterImage(gtx, "thumb:x", failure, 10, 0) })
+	resolve()
+	for _, draw := range []func(C){
+		func(gtx C) { a.fanart(gtx, "fanart:x", failure) },
+		func(gtx C) { a.posterImage(gtx, "thumb:x", failure, 10, 0) },
+	} {
+		if at, ok := frame(draw); !ok || at.IsZero() {
+			t.Fatalf("transient artwork failure scheduled no redraw (%v, %v)", at, ok)
+		}
 	}
 }

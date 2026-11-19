@@ -317,6 +317,7 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		app.sseDone = done
 		go app.forwardSSE(ctx, done)
 	}
+	app.images.retryable = isTransientArtworkError
 	if invalidate != nil {
 		app.images.onDone = invalidate
 	}

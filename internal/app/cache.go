@@ -4,6 +4,14 @@ import (
 	"container/list"
 	_ "image/jpeg"
 	_ "image/png"
+	"time"
+)
+
+// Transient failures are retried after a backoff that doubles from
+// cacheRetryBase up to cacheRetryMax.
+const (
+	cacheRetryBase = 2 * time.Second
+	cacheRetryMax  = time.Minute
 )
 
 // cacheResult carries the result of an async fetch.
@@ -11,6 +19,12 @@ type cacheResult[T any] struct {
 	key        string
 	val        T
 	generation uint64
+	retry      bool
+}
+
+type cacheRetry struct {
+	at       time.Time
+	attempts int
 }
 
 type cacheRequest[T any] struct {
@@ -26,7 +40,9 @@ type cacheWeightEntry struct {
 
 // asyncCache is a generic on-demand cache with async fetching.
 // Keys are caller-defined strings (e.g. "thumb:tt0133093", "fanart:tt0133093").
-// A zero-value T stored in the cache is a permanent-failure sentinel — no retry.
+// A zero-value T stored in the cache is a failure sentinel. It is permanent
+// unless retryable reports the error as transient: then get treats the key as
+// unresolved again once its backoff has elapsed, so the caller fetches it anew.
 type asyncCache[T any] struct {
 	cache       map[string]T
 	loading     map[string]uint64
@@ -42,6 +58,9 @@ type asyncCache[T any] struct {
 	cacheWeight int64
 	lru         *list.List
 	lruEntries  map[string]*list.Element
+	retryable   func(error) bool
+	retries     map[string]cacheRetry
+	now         func() time.Time
 }
 
 // The budget must be positive; weight must be non-nil and zero for failures.
@@ -62,6 +81,8 @@ func newWeightedAsyncCache[T any](maxActive, maxPending int, maxWeight int64, we
 		maxWeight:  maxWeight,
 		lru:        list.New(),
 		lruEntries: make(map[string]*list.Element),
+		retries:    make(map[string]cacheRetry),
+		now:        time.Now,
 	}
 }
 
@@ -75,6 +96,7 @@ func (c *asyncCache[T]) reset() {
 	c.cacheWeight = 0
 	c.lru.Init()
 	c.lruEntries = make(map[string]*list.Element)
+	c.retries = make(map[string]cacheRetry)
 }
 
 // busy reports whether fetches are in flight, queued, or awaiting drain.
@@ -83,13 +105,28 @@ func (c *asyncCache[T]) busy() bool {
 }
 
 // get returns (val, true) if key has been resolved.
-// val may be zero/nil if the fetch failed permanently.
+// val may be zero/nil if the fetch failed. A transient failure whose backoff
+// has elapsed is dropped and reported as unresolved, so the caller refetches.
 func (c *asyncCache[T]) get(key string) (T, bool) {
 	val, ok := c.cache[key]
+	if retry, failed := c.retries[key]; ok && failed && !c.now().Before(retry.at) {
+		delete(c.cache, key)
+		var zero T
+		return zero, false
+	}
 	if entry := c.lruEntries[key]; ok && entry != nil {
 		c.lru.MoveToFront(entry)
 	}
 	return val, ok
+}
+
+// retryAt reports when a transient failure cached for key may be retried.
+func (c *asyncCache[T]) retryAt(key string) (time.Time, bool) {
+	if _, ok := c.cache[key]; !ok {
+		return time.Time{}, false
+	}
+	retry, ok := c.retries[key]
+	return retry.at, ok
 }
 
 // fetch triggers an async load for key if it is not already cached or queued.
@@ -129,14 +166,17 @@ func (c *asyncCache[T]) start(request cacheRequest[T]) {
 	c.active++
 	go func() {
 		val, err := request.fetchFn()
+		retry := false
 		if err != nil {
 			var zero T
 			val = zero
+			retry = c.retryable != nil && c.retryable(err)
 		}
 		c.done <- cacheResult[T]{
 			key:        request.key,
 			val:        val,
 			generation: request.generation,
+			retry:      retry,
 		}
 		if c.onDone != nil {
 			c.onDone()
@@ -196,6 +236,7 @@ func (c *asyncCache[T]) drain() {
 			c.active--
 			if res.generation == c.generation && c.loading[res.key] == res.generation {
 				delete(c.loading, res.key)
+				c.recordRetry(res.key, res.retry)
 				c.store(res.key, res.val)
 			}
 			c.startPending()
@@ -203,4 +244,21 @@ func (c *asyncCache[T]) drain() {
 			return
 		}
 	}
+}
+
+// recordRetry schedules the next attempt after a transient failure, doubling
+// the delay each time, and forgets the attempts after any other result.
+func (c *asyncCache[T]) recordRetry(key string, retry bool) {
+	if !retry {
+		delete(c.retries, key)
+		return
+	}
+	next := c.retries[key]
+	delay := cacheRetryMax
+	if next.attempts < 16 {
+		delay = min(cacheRetryBase<<next.attempts, cacheRetryMax)
+	}
+	next.attempts++
+	next.at = c.now().Add(delay)
+	c.retries[key] = next
 }

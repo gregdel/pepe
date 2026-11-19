@@ -242,6 +242,17 @@ type artworkError struct {
 func (e *artworkError) Error() string { return e.err.Error() }
 func (e *artworkError) Unwrap() error { return e.err }
 
+// transientError marks an artwork failure that may succeed later: a network
+// error or timeout, a 5xx/408/429 response, or an interrupted download.
+type transientError struct{ error }
+
+func (e transientError) Unwrap() error { return e.error }
+
+func isTransientArtworkError(err error) bool {
+	var transient transientError
+	return errors.As(err, &transient)
+}
+
 func artworkLogReason(err error) string {
 	var failure *artworkError
 	if errors.As(err, &failure) {
@@ -278,6 +289,9 @@ func (c *APIClient) fetchImageFile(f papi.Downloadable) (image.Image, error) {
 	}
 	defer func() { _ = body.Close() }()
 	img, err := decodeArtwork(body)
+	if isTransientArtworkError(err) {
+		return nil, err
+	}
 	if err != nil {
 		reason := "artwork decode failed (corrupt image or size limit exceeded)"
 		if errors.Is(err, image.ErrFormat) {
@@ -291,7 +305,11 @@ func (c *APIClient) fetchImageFile(f papi.Downloadable) (image.Image, error) {
 func decodeArtwork(body io.Reader) (image.Image, error) {
 	payload, err := io.ReadAll(io.LimitReader(body, artworkPayloadLimit+1))
 	if err != nil {
-		return nil, err
+		reason := "artwork download interrupted"
+		if errors.Is(err, context.DeadlineExceeded) {
+			reason = "artwork request timed out"
+		}
+		return nil, transientError{&artworkError{reason, err}}
 	}
 	if len(payload) > artworkPayloadLimit {
 		return nil, fmt.Errorf("artwork payload exceeds %d bytes", artworkPayloadLimit)
@@ -358,14 +376,19 @@ func (c *APIClient) fetchAuthenticatedURL(rawURL string) (io.ReadCloser, error) 
 		if errors.Is(err, context.DeadlineExceeded) {
 			reason = "artwork request timed out"
 		}
-		return nil, &artworkError{reason, err}
+		return nil, transientError{&artworkError{reason, err}}
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
-		return nil, &artworkError{
+		var failure error = &artworkError{
 			fmt.Sprintf("download returned %d %s", resp.StatusCode, http.StatusText(resp.StatusCode)),
 			fmt.Errorf("download returned %s", resp.Status),
 		}
+		switch {
+		case resp.StatusCode >= 500, resp.StatusCode == http.StatusRequestTimeout, resp.StatusCode == http.StatusTooManyRequests:
+			failure = transientError{failure}
+		}
+		return nil, failure
 	}
 	return resp.Body, nil
 }

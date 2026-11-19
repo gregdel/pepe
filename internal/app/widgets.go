@@ -267,6 +267,14 @@ func (a *App) fetchArtwork(cacheKey string, fetchFn func() (image.Image, error),
 	})
 }
 
+// scheduleArtworkRetry redraws when a visible transient failure may be
+// retried; nothing else would wake an idle TV UI to fetch it again.
+func (a *App) scheduleArtworkRetry(gtx C, cacheKey string) {
+	if at, ok := a.images.retryAt(cacheKey); ok {
+		gtx.Execute(op.InvalidateCmd{At: at})
+	}
+}
+
 // posterImage renders a 2:3 poster at the given width, asynchronously fetching
 // it on first use. A placeholder surface is drawn while loading or on failure.
 func (a *App) posterImage(gtx C, cacheKey string, fetchFn func() (image.Image, error), width, radius unit.Dp) D {
@@ -280,6 +288,7 @@ func (a *App) posterImage(gtx C, cacheKey string, fetchFn func() (image.Image, e
 	if !ok {
 		a.fetchArtwork(cacheKey, fetchFn, posterMaxWidth, posterMaxHeight)
 	}
+	a.scheduleArtworkRetry(gtx, cacheKey)
 	defer clip.RRect{
 		Rect: image.Rectangle{Max: size},
 		NE:   gtx.Dp(radius), NW: gtx.Dp(radius), SE: gtx.Dp(radius), SW: gtx.Dp(radius),
@@ -305,6 +314,7 @@ func (a *App) fanart(gtx C, cacheKey string, fetchFn func() (image.Image, error)
 				Position: layout.Center,
 			}.Layout(gtx)
 		}
+		a.scheduleArtworkRetry(gtx, cacheKey)
 		return D{Size: gtx.Constraints.Max}
 	}
 	a.fetchArtwork(cacheKey, fetchFn, fanartMaxWidth, fanartMaxHeight)

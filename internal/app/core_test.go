@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	polochon "github.com/odwrtw/polochon/lib"
@@ -85,6 +86,8 @@ func TestArtworkRequestTimeoutAndRecovery(t *testing.T) {
 	if body, err := client.fetchAuthenticatedURL(server.URL); err == nil {
 		_ = body.Close()
 		t.Fatal("stalled artwork request did not time out")
+	} else if !isTransientArtworkError(err) || artworkLogReason(err) != "artwork request timed out" {
+		t.Fatalf("timeout error = %v (transient %v, reason %q), want a transient timeout", err, isTransientArtworkError(err), artworkLogReason(err))
 	}
 	body, err := client.fetchAuthenticatedURL(server.URL)
 	if err != nil {
@@ -161,6 +164,42 @@ func TestFetchAuthenticatedURLRejectsUnexpectedStatus(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "401 Unauthorized") {
 		t.Fatalf("error = %v, want 401 status", err)
+	}
+}
+
+func TestArtworkFailuresClassifiedAsTransient(t *testing.T) {
+	for status, transient := range map[int]bool{
+		http.StatusNotFound:            false,
+		http.StatusUnauthorized:        false,
+		http.StatusRequestTimeout:      true,
+		http.StatusTooManyRequests:     true,
+		http.StatusInternalServerError: true,
+		http.StatusServiceUnavailable:  true,
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(status)
+		}))
+		_, err := (&APIClient{}).fetchAuthenticatedURL(server.URL)
+		server.Close()
+		if err == nil || isTransientArtworkError(err) != transient {
+			t.Errorf("status %d: error %v, transient = %v, want %v", status, err, isTransientArtworkError(err), transient)
+		}
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	deadURL := server.URL
+	server.Close()
+	if _, err := (&APIClient{}).fetchAuthenticatedURL(deadURL); !isTransientArtworkError(err) {
+		t.Errorf("connection failure %v is not transient", err)
+	}
+	if _, err := decodeArtwork(iotest.ErrReader(errors.New("connection reset"))); !isTransientArtworkError(err) {
+		t.Errorf("interrupted download %v is not transient", err)
+	}
+	if _, err := decodeArtwork(strings.NewReader("not an image")); err == nil || isTransientArtworkError(err) {
+		t.Errorf("undecodable artwork error %v, want a permanent failure", err)
+	}
+	if isTransientArtworkError(&artworkError{"image file not set", errors.New("unset")}) {
+		t.Error("missing image file is transient")
 	}
 }
 
