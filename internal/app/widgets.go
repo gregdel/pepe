@@ -347,8 +347,22 @@ func (a *App) posterImage(gtx C, cacheKey string, fetchFn func() (image.Image, e
 			Position: layout.Center,
 		}.Layout(gtx2)
 	}
-	paint.Fill(gtx.Ops, colorSurface2)
+	posterPlaceholder(gtx, size)
 	return D{Size: size}
+}
+
+// posterPlaceholder marks where a poster belongs while it loads, or when the
+// title has none; a large plain box reads as broken. Nav-row posters stay
+// plain: an icon that small is only a smudge.
+func posterPlaceholder(gtx C, size image.Point) {
+	paint.Fill(gtx.Ops, colorSurface2)
+	if size.X < gtx.Dp(posterPlaceholderMinWidth) {
+		return
+	}
+	side := size.X / 3
+	defer op.Offset(image.Pt((size.X-side)/2, (size.Y-side)/2)).Push(gtx.Ops).Pop()
+	gtx.Constraints = layout.Exact(image.Pt(side, side))
+	posterPlaceholderIcon.Layout(gtx, colorOutline)
 }
 
 // fanart renders a full-bleed cover image filling the constraints.
@@ -491,8 +505,11 @@ var (
 		'←': mustIcon(icons.NavigationArrowBack),
 		'→': mustIcon(icons.NavigationArrowForward),
 	}
-	playIcon = mustIcon(icons.AVPlayArrow)
+	playIcon              = mustIcon(icons.AVPlayArrow)
+	posterPlaceholderIcon = mustIcon(icons.AVMovie)
 )
+
+const posterPlaceholderMinWidth = unit.Dp(80)
 
 // inlineIcon draws icon at most lineHeight tall, centred in a box exactly one
 // text line high so it lines up with the labels beside it.
