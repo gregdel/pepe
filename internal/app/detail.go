@@ -20,7 +20,7 @@ const (
 	detailFadeDuration = 140 * time.Millisecond
 	moviePosterWidth   = unit.Dp(280)
 	showPosterWidth    = unit.Dp(240)
-	movieDetailWidth   = unit.Dp(900)
+	movieDetailWidth   = proseWidth // narrow panel, wider fanart feather
 	showDetailWidth    = unit.Dp(1300)
 	detailColumnGap    = dp32
 )

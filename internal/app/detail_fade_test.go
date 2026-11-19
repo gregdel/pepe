@@ -62,7 +62,7 @@ func renderDetailFadeFrame(t *testing.T, window *headless.Window, router *input.
 }
 
 func detailFadeLuminance(c color.RGBA) float64 {
-	return relativeLuminance(color.NRGBA{R: c.R, G: c.G, B: c.B, A: c.A})
+	return linearLuminance(color.NRGBA{R: c.R, G: c.G, B: c.B, A: c.A})
 }
 
 func detailFadePixelNear(a, b color.RGBA, tolerance int) bool {

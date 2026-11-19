@@ -3,6 +3,7 @@ package app
 import (
 	"image"
 	"image/color"
+	"math"
 	"strconv"
 
 	"gioui.org/f32"
@@ -146,41 +147,66 @@ func scrim(gtx C, textTop int) {
 	}
 }
 
-func detailBackdrop(gtx C) {
-	paint.Fill(gtx.Ops, color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x40})
-	paintGradient(gtx, image.Rectangle{Max: gtx.Constraints.Max},
-		f32.Pt(0, 0), f32.Pt(0, float32(gtx.Constraints.Max.Y)),
-		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x00},
-		color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: 0x60},
-	)
-}
-
 // detailScrim protects the full-height reading area and eases into the fanart
-// only beyond its edge. Keep the feather wide even when the viewport clips it.
+// beyond its edge, reaching fully clear at the window's right edge so the
+// whole exposed width is used for the transition.
 func detailScrim(gtx C, readingEdge int) {
 	size := gtx.Constraints.Max
 	readingEdge = min(max(readingEdge, 0), size.X)
 	defer clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops).Pop()
-	detailBackdrop(gtx)
 	paint.FillShape(gtx.Ops, colorDetailPanel, clip.Rect(image.Rect(0, 0, readingEdge, size.Y)).Op())
-	fade := gtx.Dp(unit.Dp(720))
-	if fade > 0 {
-		paintDetailFeather(gtx, image.Rect(readingEdge, 0, readingEdge+fade, size.Y),
-			f32.Pt(float32(readingEdge), 0), f32.Pt(float32(readingEdge+fade), 0))
+	paintDetailFeather(gtx, readingEdge, size.X-readingEdge)
+}
+
+const detailFeatherSegments = 16
+
+// paintDetailFeather eases from the reading surface at x0 to clear over width.
+// Over white artwork its perceived (sRGB) brightness follows a smoothstep, so
+// it leaves the flat surface and reaches the fanart with zero slope: a ramp
+// starting at full slope reads as a hard edge. Alpha is solved per segment
+// because Gio blends in linear light.
+func paintDetailFeather(gtx C, x0, width int) {
+	if width <= 0 {
+		return
+	}
+	panel := linearLuminance(colorDetailPanel)
+	surface := float64(colorDetailPanel.A) / 255
+	start := linearToSRGB(surface*panel + 1 - surface)
+	tint := func(i int) color.NRGBA {
+		t := float64(i) / detailFeatherSegments
+		v := start + (1-start)*t*t*(3-2*t)
+		c := colorDetailPanel
+		c.A = uint8(255*(1-srgbToLinear(v))/(1-panel) + 0.5)
+		return c
+	}
+	size := gtx.Constraints.Max
+	for i := range detailFeatherSegments {
+		xa, xb := x0+width*i/detailFeatherSegments, x0+width*(i+1)/detailFeatherSegments
+		if xb <= xa {
+			continue
+		}
+		paintGradient(gtx, image.Rect(xa, 0, xb, size.Y),
+			f32.Pt(float32(xa), 0), f32.Pt(float32(xb), 0), tint(i), tint(i+1))
 	}
 }
 
-// Two identical feather layers give the opaque edge a gentler perceptual
-// slope in linear-light compositing. Together their initial alpha matches the
-// reading surface; neither layer extends into the text area by itself.
-func paintDetailFeather(gtx C, bounds image.Rectangle, from, to f32.Point) {
-	start := colorDetailPanel
-	start.A = 0xdb
-	clear := start
-	clear.A = 0
-	for range 2 {
-		paintGradient(gtx, bounds, from, to, start, clear)
+// linearLuminance is the relative luminance of c's colour, ignoring alpha.
+func linearLuminance(c color.NRGBA) float64 {
+	return 0.2126*srgbToLinear(float64(c.R)/255) + 0.7152*srgbToLinear(float64(c.G)/255) + 0.0722*srgbToLinear(float64(c.B)/255)
+}
+
+func srgbToLinear(v float64) float64 {
+	if v <= 0.04045 {
+		return v / 12.92
 	}
+	return math.Pow((v+0.055)/1.055, 2.4)
+}
+
+func linearToSRGB(v float64) float64 {
+	if v <= 0.0031308 {
+		return v * 12.92
+	}
+	return 1.055*math.Pow(v, 1/2.4) - 0.055
 }
 
 // paintGradient fills bounds with a linear gradient between from and to.
@@ -224,10 +250,14 @@ func (a *App) body(gtx C, size unit.Sp, s string, col color.NRGBA, maxLines int)
 	return lbl.Layout(gtx)
 }
 
-// prose keeps editorial descriptions near 55–70 characters per line at the
-// body type size, independently of title and technical-metadata panel widths.
+// proseWidth keeps editorial descriptions near 55–70 characters per line at
+// the body type size.
+const proseWidth = unit.Dp(720)
+
+// prose caps descriptions at proseWidth, independently of title and
+// technical-metadata panel widths.
 func (a *App) prose(gtx C, s string) D {
-	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(720)))
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(proseWidth))
 	gtx.Constraints.Min.X = min(gtx.Constraints.Min.X, gtx.Constraints.Max.X)
 	return a.body(gtx, spBody, s, colorFg, 0)
 }

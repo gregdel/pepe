@@ -18,7 +18,9 @@ var (
 	colorSubtle = color.NRGBA{R: 0xa0, G: 0xa0, B: 0xab, A: 0xff} // secondary text
 	colorMuted  = color.NRGBA{R: 0x88, G: 0x88, B: 0x94, A: 0xff} // hints, disabled
 
-	// Reading scrim remains readable over white artwork after linear blending.
+	// The least alpha that keeps detail text (colorPrimary is the dimmest) at
+	// 4.5:1 over white artwork after linear blending; less shows the fanart
+	// more but fails contrast.
 	colorDetailPanel = color.NRGBA{R: 0x10, G: 0x10, B: 0x14, A: 0xfa}
 
 	colorPrimary  = color.NRGBA{R: 0x9c, G: 0x7f, B: 0xff, A: 0xff} // accent (prefix, wordmark)

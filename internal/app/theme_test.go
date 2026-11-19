@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -48,13 +49,8 @@ func composite(fg, bg color.NRGBA) color.NRGBA {
 	a := float64(fg.A) / 255
 	// Gio composites premultiplied colors in linear space, not sRGB.
 	blend := func(f, b uint8) uint8 {
-		v := linearChannel(f)*a + linearChannel(b)*(1-a)
-		if v <= 0.0031308 {
-			v *= 12.92
-		} else {
-			v = 1.055*math.Pow(v, 1/2.4) - 0.055
-		}
-		return uint8(math.Round(v * 255))
+		v := srgbToLinear(float64(f)/255)*a + srgbToLinear(float64(b)/255)*(1-a)
+		return uint8(math.Round(linearToSRGB(v) * 255))
 	}
 	return color.NRGBA{
 		R: blend(fg.R, bg.R),
@@ -65,23 +61,11 @@ func composite(fg, bg color.NRGBA) color.NRGBA {
 }
 
 func contrastRatio(a, b color.NRGBA) float64 {
-	la, lb := relativeLuminance(a), relativeLuminance(b)
+	la, lb := linearLuminance(a), linearLuminance(b)
 	if la < lb {
 		la, lb = lb, la
 	}
 	return (la + 0.05) / (lb + 0.05)
-}
-
-func linearChannel(v uint8) float64 {
-	n := float64(v) / 255
-	if n <= 0.04045 {
-		return n / 12.92
-	}
-	return math.Pow((n+0.055)/1.055, 2.4)
-}
-
-func relativeLuminance(c color.NRGBA) float64 {
-	return 0.2126*linearChannel(c.R) + 0.7152*linearChannel(c.G) + 0.0722*linearChannel(c.B)
 }
 
 // Render the actual compositor over worst-case white artwork without text.
@@ -156,13 +140,26 @@ func TestDetailReadingScrimRenderedContrast(t *testing.T) {
 					if edge < size.X {
 						protected := color.NRGBAModel.Convert(img.At(edge-1, 1)).(color.NRGBA)
 						exposed := color.NRGBAModel.Convert(img.At(size.X-1, 1)).(color.NRGBA)
-						if relativeLuminance(exposed) <= relativeLuminance(protected) {
+						if linearLuminance(exposed) <= linearLuminance(protected) {
 							t.Fatal("scrim does not fade into the exposed artwork")
 						}
 					}
 				})
 			}
 		})
+	}
+}
+
+// The reading surface is no darker than text contrast needs over white.
+func TestDetailPanelIsMinimal(t *testing.T) {
+	white := color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
+	if got := contrastRatio(colorPrimary, composite(colorDetailPanel, white)); got < 4.5 {
+		t.Fatalf("panel contrast = %.2f:1, want 4.5:1", got)
+	}
+	lighter := colorDetailPanel
+	lighter.A--
+	if got := contrastRatio(colorPrimary, composite(lighter, white)); got >= 4.5 {
+		t.Fatalf("a lighter panel still reaches %.2f:1; colorDetailPanel is darker than needed", got)
 	}
 }
 
@@ -182,57 +179,40 @@ func TestDetailScrimClampedEdges(t *testing.T) {
 	}
 }
 
+// The feather eases from the reading surface to fully clear at the window's
+// right edge, without darkening or abrupt steps, for movie-like and narrower
+// show-like exposed areas.
 func TestDetailScrimFeatherSmoothness(t *testing.T) {
 	for _, size := range []image.Point{image.Pt(1920, 1080), image.Pt(1280, 800)} {
-		t.Run(size.String(), func(t *testing.T) {
-			edge := size.X / 3
-			var fade int
-			img := renderDetailScrim(t, size, func(gtx C) {
-				fade = gtx.Dp(unit.Dp(720))
-				detailScrim(gtx, edge)
+		for _, edge := range []int{size.X * 13 / 20, size.X * 5 / 6} {
+			t.Run(fmt.Sprintf("%v/edge=%d", size, edge), func(t *testing.T) {
+				img := renderDetailScrim(t, size, func(gtx C) { detailScrim(gtx, edge) })
+				// The fanart under the feather's end is not darkened.
+				bare := renderDetailScrim(t, size, func(C) {})
+				y := size.Y / 3
+				previous := color.RGBAModel.Convert(img.At(edge-1, y)).(color.RGBA)
+				for x := edge; x < size.X; x++ {
+					current := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
+					if current.R < previous.R || current.G < previous.G || current.B < previous.B {
+						t.Fatalf("feather darkened at x=%d: %v to %v", x, previous, current)
+					}
+					if !detailFadePixelNear(current, previous, 2) {
+						t.Fatalf("abrupt feather transition at x=%d: %v to %v", x, previous, current)
+					}
+					previous = current
+				}
+				end := color.RGBAModel.Convert(bare.At(size.X-1, y)).(color.RGBA)
+				if !detailFadePixelNear(previous, end, 1) {
+					t.Fatalf("feather is not clear at the right edge: %v / %v", previous, end)
+				}
+				// Halfway, the feather is still clearly darker than the fanart.
+				x := (edge + size.X) / 2
+				actual := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
+				base := color.NRGBAModel.Convert(bare.At(x, y)).(color.NRGBA)
+				if linearLuminance(base)-linearLuminance(actual) < 0.05 {
+					t.Fatal("feather ended before the middle of the exposed area")
+				}
 			})
-			backdrop := renderDetailScrim(t, size, detailBackdrop)
-			y := size.Y / 3
-			previous := color.RGBAModel.Convert(img.At(edge-1, y)).(color.RGBA)
-			for x := edge; x <= edge+fade; x++ {
-				current := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
-				if current.R < previous.R || current.G < previous.G || current.B < previous.B {
-					t.Fatalf("feather darkened at x=%d: %v to %v", x, previous, current)
-				}
-				if !detailFadePixelNear(current, previous, 2) {
-					t.Fatalf("abrupt feather transition at x=%d: %v to %v", x, previous, current)
-				}
-				previous = current
-			}
-			end := color.RGBAModel.Convert(backdrop.At(edge+fade, y)).(color.RGBA)
-			if !detailFadePixelNear(previous, end, 1) {
-				t.Fatalf("feather did not reach the backdrop: %v / %v", previous, end)
-			}
-			// The feather must still be visible at 480dp, not end there.
-			x := edge + fade*2/3
-			actual := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
-			base := color.NRGBAModel.Convert(backdrop.At(x, y)).(color.NRGBA)
-			if relativeLuminance(base)-relativeLuminance(actual) < 0.05 {
-				t.Fatal("feather ended before the wider 720dp transition")
-			}
-		})
-	}
-}
-
-func TestDetailScrimFeatherClipping(t *testing.T) {
-	// Hold the pixel metric and height constant to isolate viewport clipping
-	// from the application's proportional UI scaling.
-	draw := func(gtx C) {
-		gtx.Metric = unit.Metric{PxPerDp: 1, PxPerSp: 1}
-		detailScrim(gtx, 1000)
-	}
-	full := renderDetailScrim(t, image.Pt(1920, 800), draw)
-	cropped := renderDetailScrim(t, image.Pt(1280, 800), draw)
-	for _, p := range []image.Point{image.Pt(999, 1), image.Pt(1100, 400), image.Pt(1279, 799)} {
-		a := color.RGBAModel.Convert(full.At(p.X, p.Y)).(color.RGBA)
-		b := color.RGBAModel.Convert(cropped.At(p.X, p.Y)).(color.RGBA)
-		if !detailFadePixelNear(a, b, 1) {
-			t.Errorf("viewport compressed the feather at %v: %v / %v", p, a, b)
 		}
 	}
 }
@@ -252,7 +232,7 @@ func TestPreviewScrimRenderedContrast(t *testing.T) {
 					}
 				}
 			}
-			if l := relativeLuminance(at(size.X/2, 1)); l < 0.7 {
+			if l := linearLuminance(at(size.X/2, 1)); l < 0.7 {
 				t.Fatalf("top of the fanart darkened to luminance %.2f", l)
 			}
 			previous := color.RGBAModel.Convert(img.At(size.X/2, 0)).(color.RGBA)
