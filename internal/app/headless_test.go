@@ -278,7 +278,7 @@ func TestHeadlessLastAddedPreviews(t *testing.T) {
 	headlessKey(t, f, "DownArrow")
 	headlessKey(t, f, "RightArrow")
 	headlessKey(t, f, "RightArrow")
-	for _, label := range []string{"New Movie", "2026  ·  2h 5m  ·  Drama, Sci-Fi"} {
+	for _, label := range []string{"New Movie", "2026  ·  2h 5m  ·  1080p  ·  Drama, Sci-Fi"} {
 		if !headlessHasLabel(f.driver.Tree(), label) {
 			t.Errorf("movie preview semantic tree does not contain %q", label)
 		}
@@ -287,7 +287,7 @@ func TestHeadlessLastAddedPreviews(t *testing.T) {
 	headlessKey(t, f, "LeftArrow")
 	headlessKey(t, f, "DownArrow")
 	headlessKey(t, f, "RightArrow")
-	for _, label := range []string{"Fixture Show", "2024  ·  8.4  ·  2 seasons · 3 episodes"} {
+	for _, label := range []string{"Fixture Show", "2024  ·  8.4/10  ·  2 seasons  ·  3 episodes"} {
 		if !headlessHasLabel(f.driver.Tree(), label) {
 			t.Errorf("show preview semantic tree does not contain %q", label)
 		}
@@ -444,9 +444,9 @@ func TestHeadlessShowSeasonAndEpisodeNavigation(t *testing.T) {
 	}
 	for _, label := range []string{
 		"Fixture Show",
-		"2024  ·  8.4  ·  2 seasons · 3 episodes",
+		"2024  ·  8.4/10  ·  2 seasons  ·  3 episodes",
 		"Play episode",
-		"Aired Jan 2, 2026  ·  45 min  ·  8.1",
+		"Aired Jan 2, 2026  ·  45 min  ·  8.1/10",
 		"Episode details for Pilot",
 		"720p  ·  H.264 + Dolby Digital  ·  MKV  ·  1.1 GB  ·  FIXTURE",
 	} {

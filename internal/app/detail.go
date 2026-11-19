@@ -103,7 +103,7 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen, alpha float32) D {
 		return a.body(gtx, spTitle, d.movieTitle, colorFg, 2)
 	})
 
-	if metaLine := buildMetaLine(movie.Year, movie.Runtime, movie.Genres); metaLine != "" {
+	if metaLine := buildMetaLine(movie.Year, movie.Runtime, "", float64(movie.Rating), movie.Genres); metaLine != "" {
 		sections = append(sections, spacerFn(dp8))
 		sections = append(sections, func(gtx C) D {
 			return a.body(gtx, spMeta, metaLine, colorSubtle, 2)
@@ -193,8 +193,9 @@ func (a *App) detailMessage(gtx C, msg string) D {
 	})
 }
 
-// buildMetaLine returns "1999  ·  2h 16m  ·  Action, Sci-Fi" from resolved values.
-func buildMetaLine(year, runtime int, genres []string) string {
+// buildMetaLine returns "1999  ·  2h 16m  ·  1080p  ·  8.7/10  ·  Action, Sci-Fi"
+// from resolved values; an empty quality is omitted.
+func buildMetaLine(year, runtime int, quality string, rating float64, genres []string) string {
 	var parts []string
 	if year > 0 {
 		parts = append(parts, fmt.Sprintf("%d", year))
@@ -206,6 +207,12 @@ func buildMetaLine(year, runtime int, genres []string) string {
 		} else {
 			parts = append(parts, fmt.Sprintf("%dm", m))
 		}
+	}
+	if quality != "" {
+		parts = append(parts, quality)
+	}
+	if rating > 0 {
+		parts = append(parts, formatRating(rating))
 	}
 	if g := formatGenres(genres); g != "" {
 		parts = append(parts, g)

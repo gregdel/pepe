@@ -61,3 +61,12 @@ func TestFormatSubtitleSummary(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildMetaLine(t *testing.T) {
+	if got, want := buildMetaLine(1999, 136, "1080p", 8.7, []string{"Action", "Sci-Fi"}), "1999  ·  2h 16m  ·  1080p  ·  8.7/10  ·  Action, Sci-Fi"; got != want {
+		t.Fatalf("buildMetaLine() = %q, want %q", got, want)
+	}
+	if got, want := buildMetaLine(0, 45, "", 0, nil), "45m"; got != want {
+		t.Fatalf("buildMetaLine() without metadata = %q, want %q", got, want)
+	}
+}

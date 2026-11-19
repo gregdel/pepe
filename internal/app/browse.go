@@ -85,22 +85,35 @@ func (a *App) layoutModeRail(gtx C) D {
 		}),
 		layout.Stacked(func(gtx C) D {
 			gtx.Constraints.Min = gtx.Constraints.Max
-			return layout.Center.Layout(gtx, func(gtx C) D {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(func(gtx C) D {
-						return a.layoutModeOption(gtx, ListingModeTitle)
-					}),
-					layout.Rigid(func(gtx C) D {
-						return a.layoutModeOption(gtx, ListingModeDateAdded)
-					}),
-					layout.Rigid(func(gtx C) D {
-						return a.layoutModeOption(gtx, listingModeCount)
-					}),
-				)
+			// Expanded, keep the selected pill clear of the divider.
+			var inset layout.Inset
+			if a.browse.focus == browseFocusModeRail {
+				inset.Right = dp8
+			}
+			return inset.Layout(gtx, func(gtx C) D {
+				return layout.Center.Layout(gtx, func(gtx C) D {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx C) D {
+							return a.layoutModeOption(gtx, ListingModeTitle)
+						}),
+						layout.Rigid(func(gtx C) D {
+							return a.layoutModeOption(gtx, ListingModeDateAdded)
+						}),
+						layout.Rigid(func(gtx C) D {
+							return a.layoutModeOption(gtx, listingModeCount)
+						}),
+					)
+				})
 			})
 		}),
 	)
 }
+
+const (
+	modeIconSize = unit.Dp(36)
+	// railRowInset is rowShell's total horizontal padding (outer + inner).
+	railRowInset = 2 * (dp8 + dp12)
+)
 
 func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
 	active := a.railOption() == mode
@@ -123,10 +136,10 @@ func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
 				iconColor = colorSelectFg
 			}
 
-			return layout.Center.Layout(gtx, func(gtx C) D {
+			row := func(gtx C) D {
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 					layout.Rigid(func(gtx C) D {
-						size := gtx.Dp(unit.Dp(36))
+						size := gtx.Dp(modeIconSize)
 						gtx.Constraints = layout.Exact(image.Pt(size, size))
 						return icon.Layout(gtx, iconColor)
 					}),
@@ -139,6 +152,15 @@ func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
 						})
 					}),
 				)
+			}
+			if a.browse.focus != browseFocusModeRail {
+				return layout.Center.Layout(gtx, row)
+			}
+			// Expanded: left-align so icons share an edge, offset to where
+			// the collapsed rail centres them.
+			gtx.Constraints.Min.X = gtx.Constraints.Max.X
+			return layout.W.Layout(gtx, func(gtx C) D {
+				return layout.Inset{Left: (modeRailWidth - railRowInset - modeIconSize) / 2}.Layout(gtx, row)
 			})
 		})
 	}, func() {
@@ -179,7 +201,11 @@ func (a *App) layoutHeader(gtx C) D {
 // layoutSectionLabel renders the current browse section in the header.
 func (a *App) layoutSectionLabel(gtx C) D {
 	if a.browse.remote != nil {
-		return a.label(gtx, spMeta, "Scan to connect", colorFg, font.Medium)
+		status := "Unavailable"
+		if len(a.browse.remote.urls) > 0 {
+			status = "Scan to connect"
+		}
+		return a.label(gtx, spMeta, status, colorFg, font.Medium)
 	}
 	section := "Movies"
 	if a.browse.nav.isAtRoot() {
@@ -363,10 +389,8 @@ func (a *App) terminalRow(gtx C, node *RadixNode, currentPath string, selected b
 
 	return a.rowShell(gtx, selected, false, thumbW*3/2, func(gtx C) D {
 		titleCol := colorFg
-		subCol := colorMuted
 		if selected {
 			titleCol = colorSelectFg
-			subCol = colorSelectFg
 		}
 
 		media := a.mediaForNode(node)
@@ -393,13 +417,6 @@ func (a *App) terminalRow(gtx C, node *RadixNode, currentPath string, selected b
 				}
 				return a.twoTone(gtx, spBrowse, currentPath, fullString[len(currentPath):], titleCol, colorPrimary)
 			}),
-			layout.Rigid(func(gtx C) D {
-				q := a.rowQuality(media)
-				if q == "" {
-					return D{}
-				}
-				return a.label(gtx, spTiny, q, subCol, font.Medium)
-			}),
 		)
 	})
 }
@@ -411,16 +428,4 @@ func (a *App) rowPoster(gtx C, media *MediaItem) D {
 		return a.showPoster(gtx, media.ID, thumbW, radiusThumb)
 	}
 	return a.movieThumb(gtx, media.ID, thumbW, radiusThumb)
-}
-
-// rowQuality returns the right-aligned quality label for a movie row.
-func (a *App) rowQuality(media *MediaItem) string {
-	if media == nil || media.Type != mediaKindMovie {
-		return ""
-	}
-	movie, ok := a.client.getMovie(media.ID)
-	if !ok {
-		return ""
-	}
-	return formatQualityBadge(movie.Quality)
 }

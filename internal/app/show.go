@@ -269,18 +269,18 @@ func buildEpisodeMetaLine(ep *papi.Episode) string {
 		parts = append(parts, fmt.Sprintf("%d min", ep.Runtime))
 	}
 	if ep.Rating > 0 {
-		parts = append(parts, fmt.Sprintf("%.1f", ep.Rating))
+		parts = append(parts, formatRating(float64(ep.Rating)))
 	}
 	return strings.Join(parts, "  ·  ")
 }
 
 func buildShowSummary(show *papi.Show) string {
 	seasons, episodes := showCounts(show)
-	meta := buildShowMetaLine(show.Year, float64(show.Rating))
-	if meta != "" {
-		meta += "  ·  "
+	parts := []string{plural(seasons, "season"), plural(episodes, "episode")}
+	if meta := buildShowMetaLine(show.Year, float64(show.Rating)); meta != "" {
+		parts = append([]string{meta}, parts...)
 	}
-	return meta + fmt.Sprintf("%d seasons · %d episodes", seasons, episodes)
+	return strings.Join(parts, "  ·  ")
 }
 
 func buildShowMetaLine(year int, rating float64) string {
@@ -289,7 +289,7 @@ func buildShowMetaLine(year int, rating float64) string {
 		parts = append(parts, fmt.Sprintf("%d", year))
 	}
 	if rating > 0 {
-		parts = append(parts, fmt.Sprintf("%.1f", rating))
+		parts = append(parts, formatRating(rating))
 	}
 	return strings.Join(parts, "  ·  ")
 }

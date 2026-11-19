@@ -12,6 +12,17 @@ import (
 
 func formatQualityBadge(quality polochon.Quality) string { return string(quality) }
 
+// plural returns "1 season" or "2 seasons".
+func plural(n int, word string) string {
+	if n == 1 {
+		return "1 " + word
+	}
+	return fmt.Sprintf("%d %ss", n, word)
+}
+
+// formatRating returns a labelled rating such as "8.3/10".
+func formatRating(rating float64) string { return fmt.Sprintf("%.1f/10", rating) }
+
 func formatContainer(container string) string { return strings.ToUpper(container) }
 
 func formatCodecs(video, audio string) string {

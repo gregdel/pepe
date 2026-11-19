@@ -54,7 +54,7 @@ func (a *App) previewRoot(gtx C) D {
 			}),
 			layout.Rigid(layout.Spacer{Height: dp8}.Layout),
 			layout.Rigid(func(gtx C) D {
-				return a.label(gtx, spMeta, fmt.Sprintf("%d items in the library", count), colorSubtle, 0)
+				return a.label(gtx, spBody, fmt.Sprintf("%d items in the library", count), colorSubtle, 0)
 			}),
 		)
 	})
@@ -93,7 +93,7 @@ func (a *App) previewGroup(gtx C, node *RadixNode) D {
 					if i >= maxShow {
 						lines = append(lines, labelLine{
 							text:  fmt.Sprintf("… and %d more", len(node.Children)-maxShow),
-							color: colorMuted, size: sp,
+							color: colorMuted, size: spBrowse,
 						})
 						break
 					}
@@ -103,7 +103,7 @@ func (a *App) previewGroup(gtx C, node *RadixNode) D {
 					} else {
 						label = group + child.Label + "  ›"
 					}
-					lines = append(lines, labelLine{text: label, color: colorFg, size: sp})
+					lines = append(lines, labelLine{text: label, color: colorFg, size: spBrowse})
 				}
 				return a.renderLines(gtx, &a.rightList, lines)
 			}),
@@ -150,7 +150,8 @@ func (a *App) previewMovie(gtx C, media *MediaItem) D {
 	return a.previewShell(gtx, func(gtx C) D {
 		return a.movieFanart(gtx, movieID)
 	}, func(gtx C) D {
-		return a.previewMediaContent(gtx, media, buildMetaLine(movie.Year, movie.Runtime, movie.Genres), func(gtx C) D {
+		meta := buildMetaLine(movie.Year, movie.Runtime, formatQualityBadge(movie.Quality), float64(movie.Rating), movie.Genres)
+		return a.previewMediaContent(gtx, media, meta, func(gtx C) D {
 			return a.movieThumb(gtx, id, unit.Dp(140), radiusPoster)
 		})
 	})

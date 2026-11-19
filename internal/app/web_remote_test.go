@@ -151,6 +151,9 @@ func TestHeadlessWebRemoteSetup(t *testing.T) {
 	if !headlessHasLabel(f.driver.Tree(), "Web remote") || !headlessHasLabel(f.driver.Tree(), f.app.browse.remote.message) {
 		t.Fatal("disabled remote is missing its setup instructions")
 	}
+	if !headlessHasLabel(f.driver.Tree(), "Unavailable") || headlessHasLabel(f.driver.Tree(), "Scan to connect") {
+		t.Fatal("disabled remote header still invites scanning")
+	}
 	if err := f.app.startWebUI("127.0.0.1:0"); err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +187,7 @@ func TestHeadlessWebRemoteQR(t *testing.T) {
 			if err := f.driver.Resize(size.X, size.Y); err != nil {
 				t.Fatal(err)
 			}
-			for _, label := range []string{"Web remote QR code", "http://192.168.1.12:8081/"} {
+			for _, label := range []string{"Web remote QR code", "http://192.168.1.12:8081/", "Scan to connect"} {
 				if !headlessLabelInside(f.driver.Tree(), label, size) {
 					t.Errorf("missing visible label %q", label)
 				}
