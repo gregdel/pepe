@@ -112,17 +112,10 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen, alpha float32) D {
 
 	sections = append(sections, spacerFn(dp16))
 	sections = append(sections, func(gtx C) D {
-		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-			layout.Rigid(func(gtx C) D {
-				return a.detailActionButton(gtx, "detail:movie:play", "Play movie", playText, playIcon, true, func() {
-					a.launchMovie(&MediaItem{ID: d.movieID, Title: d.movieTitle, Type: mediaKindMovie})
-				})
-			}),
-			layout.Rigid(layout.Spacer{Width: dp12}.Layout),
-			layout.Rigid(func(gtx C) D {
-				return a.detailActionButton(gtx, "detail:movie:subtitles", "Movie subtitles", "Subtitles", nil, false, a.openSubtitlePopup)
-			}),
-		)
+		gtx.Constraints.Min = image.Point{}
+		return a.playButton(gtx, "detail:movie:play", "Play movie", playText, func() {
+			a.launchMovie(&MediaItem{ID: d.movieID, Title: d.movieTitle, Type: mediaKindMovie})
+		})
 	})
 
 	if movie.Plot != "" {

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"gioui.org/layout"
 	"gioui.org/op/paint"
 	"github.com/gregdel/pepe/internal/driver"
 	polochon "github.com/odwrtw/polochon/lib"
@@ -117,6 +118,18 @@ func headlessClick(t *testing.T, f *headlessFixture, target driver.ClickTarget) 
 	if err := f.driver.Settle(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func headlessFindNode(nodes []driver.Node, label string) (driver.Node, bool) {
+	for _, node := range nodes {
+		if node.Label == label {
+			return node, true
+		}
+		if found, ok := headlessFindNode(node.Children, label); ok {
+			return found, true
+		}
+	}
+	return driver.Node{}, false
 }
 
 func headlessHasLabel(nodes []driver.Node, label string) bool {
@@ -462,6 +475,7 @@ func TestHeadlessMovieDetailShortContentScroll(t *testing.T) {
 
 func TestHeadlessShowSeasonAndEpisodeNavigation(t *testing.T) {
 	f := newHeadlessFixture(t)
+	f.app.resumePos[episodeMediaKey("show-one", 1, 1)] = 300
 
 	headlessKey(t, f, "LeftArrow")
 	headlessKey(t, f, "DownArrow")
@@ -480,7 +494,8 @@ func TestHeadlessShowSeasonAndEpisodeNavigation(t *testing.T) {
 	for _, label := range []string{
 		"Fixture Show",
 		"2024  ·  8.4/10  ·  2 seasons  ·  3 episodes",
-		"Play episode",
+		"Play S01E01 Pilot",
+		"Resume from 5:00",
 		"Aired Jan 2, 2026  ·  45 min  ·  8.1/10",
 		"Episode details for Pilot",
 		"720p  ·  H.264 + Dolby Digital  ·  MKV  ·  1.1 GB  ·  FIXTURE",
@@ -507,6 +522,55 @@ func TestHeadlessShowSeasonAndEpisodeNavigation(t *testing.T) {
 	headlessKey(t, f, "LeftArrow")
 	if f.app.detail != nil {
 		t.Fatal("left from show episode focus did not close detail")
+	}
+}
+
+func TestHeadlessShowPointerTargets(t *testing.T) {
+	f := newHeadlessFixture(t)
+	// A running player turns a launch into a queued replacement, so no mpv starts.
+	f.app.playerStatus = PlayerStatusRunning
+	f.app.playerStop = make(chan struct{})
+	f.app.playerDone = make(chan playerResult, 1)
+	f.app.pushShowDetail(&MediaItem{ID: "show-one", Title: "Fixture Show", Type: mediaKindShow})
+	if err := f.driver.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	show := f.app.detail.show
+
+	headlessClick(t, f, driver.ClickTarget{Label: "Season 2", Occurrence: 1})
+	if show.focus != focusTabs || show.seasonCursor != 1 || show.epCursor != 0 || f.app.pendingPlayback != nil {
+		t.Fatalf("season click = (focus=%v, season=%d, episode=%d, pending=%v)", show.focus, show.seasonCursor, show.epCursor, f.app.pendingPlayback)
+	}
+
+	headlessClick(t, f, driver.ClickTarget{Label: "Season 1", Occurrence: 1})
+	headlessClick(t, f, driver.ClickTarget{Label: "Play S01E02 Second Episode", Occurrence: 1})
+	if show.focus != focusEpisodes || show.seasonCursor != 0 || show.epCursor != 1 {
+		t.Fatalf("episode click = (focus=%v, season=%d, episode=%d)", show.focus, show.seasonCursor, show.epCursor)
+	}
+	if f.app.pendingPlayback == nil || !strings.Contains(f.app.pendingPlayback.title, "Second Episode") {
+		t.Fatalf("episode click did not queue playback: %+v", f.app.pendingPlayback)
+	}
+
+	// The subtitle popup is modal: clicks on the dimmed detail do nothing.
+	var targets []driver.ClickTarget
+	for _, label := range []string{"Play S01E01 Pilot", "Season 2"} {
+		node, ok := headlessFindNode(f.driver.Tree(), label)
+		if !ok {
+			t.Fatalf("missing %q", label)
+		}
+		b := node.Bounds
+		targets = append(targets, driver.ClickTarget{X: float32(b.MinX+b.MaxX) / 2, Y: float32(b.MinY+b.MaxY) / 2, Coordinates: true})
+	}
+	f.app.pendingPlayback = nil
+	f.app.subPopup = &SubtitlePopup{video: f.app.client.movies["movie-new"], state: SubtitlePopupReady, entries: subtitleEntries(3), list: layout.List{Axis: layout.Vertical}}
+	if err := f.driver.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range targets {
+		headlessClick(t, f, target)
+	}
+	if show.seasonCursor != 0 || show.epCursor != 1 || f.app.pendingPlayback != nil {
+		t.Fatalf("click through popup = (season=%d, episode=%d, pending=%v)", show.seasonCursor, show.epCursor, f.app.pendingPlayback)
 	}
 }
 

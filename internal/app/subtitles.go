@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"gioui.org/font"
+	"gioui.org/io/event"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -151,8 +153,15 @@ func (a *App) layoutSubtitlePopup(gtx C) D {
 		gtx.Execute(op.InvalidateCmd{At: p.doneAt.Add(subtitleDoneDuration)})
 	}
 
-	// Dim the whole screen.
+	// Dim the whole screen. The popup is modal: its handler is foremost, so
+	// pointer input never reaches detail or browse targets beneath it.
 	defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
+	for {
+		if _, ok := gtx.Event(pointer.Filter{Target: p, Kinds: pointer.Press | pointer.Release | pointer.Scroll}); !ok {
+			break
+		}
+	}
+	event.Op(gtx.Ops, p)
 	paint.Fill(gtx.Ops, color.NRGBA{A: 0xb0})
 
 	// Center a box: 60% width, up to 70% height.

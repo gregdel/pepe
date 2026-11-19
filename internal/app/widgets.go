@@ -472,50 +472,43 @@ func (a *App) countPill(gtx C, n int, selected bool) D {
 
 // ── Detail actions ────────────────────────────────────────────────────────────
 
-// detailActionButton exposes pointer and semantic activation without adding a
-// D-pad focus zone; keyboard activation remains owned by the detail state.
-// detailActionButton draws a pill button; icon, when set, precedes the text.
-func (a *App) detailActionButton(gtx C, id, semanticLabel, text string, icon *widget.Icon, primary bool, action func()) D {
+// playButton draws the movie detail's focused Play pill. Enter activates it
+// through the detail state; the click target serves pointer and touch.
+func (a *App) playButton(gtx C, id, semanticLabel, text string, action func()) D {
 	return a.clickableLayout(gtx, id, semanticLabel, func(gtx C) D {
-		inset := layout.Inset{Left: dp16, Right: dp16, Top: dp8, Bottom: dp8}
-		macro := op.Record(gtx.Ops)
-		dims := inset.Layout(gtx, func(gtx C) D {
-			col := colorFg
-			if primary {
-				col = colorSelectFg
-			}
-			label := func(gtx C) D { return a.label(gtx, sp, text, col, font.Bold) }
-			if icon == nil {
-				return label(gtx)
-			}
+		return a.pill(gtx, true, colorSelectBg, func(gtx C) D {
+			label := func(gtx C) D { return a.label(gtx, sp, text, colorSelectFg, font.Bold) }
 			measure := op.Record(gtx.Ops)
 			line := label(gtx)
 			measure.Stop()
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(inlineIcon(icon, line.Size.Y, line.Size.Y, col)),
+				layout.Rigid(inlineIcon(playIcon, line.Size.Y, line.Size.Y, colorSelectFg)),
 				layout.Rigid(layout.Spacer{Width: dp6}.Layout),
 				layout.Rigid(label),
 			)
 		})
-		call := macro.Stop()
-
-		bg := colorSurface2
-		focused := primary && a.detail != nil && a.detail.kind == detailMovie
-		if primary {
-			bg = colorSelectBg
-		}
-		if focused {
-			defer a.markSelected(gtx, dims.Size).Pop()
-		}
-		fillRounded(gtx, dims.Size, radiusRow, bg)
-		if focused {
-			focusRing(gtx, dims.Size, radiusRow)
-		} else if !primary {
-			strokeRounded(gtx, dims.Size, radiusRow, colorOutline)
-		}
-		call.Add(gtx.Ops)
-		return dims
 	}, action)
+}
+
+// pill draws content on a rounded background; bg with zero alpha draws none.
+// A focused pill carries the D-pad focus ring and semantic selection.
+func (a *App) pill(gtx C, focused bool, bg color.NRGBA, content layout.Widget) D {
+	inset := layout.Inset{Left: dp16, Right: dp16, Top: dp8, Bottom: dp8}
+	macro := op.Record(gtx.Ops)
+	dims := inset.Layout(gtx, content)
+	call := macro.Stop()
+
+	if focused {
+		defer a.markSelected(gtx, dims.Size).Pop()
+	}
+	if bg.A != 0 {
+		fillRounded(gtx, dims.Size, radiusRow, bg)
+	}
+	if focused {
+		focusRing(gtx, dims.Size, radiusRow)
+	}
+	call.Add(gtx.Ops)
+	return dims
 }
 
 // ── Keycap hints ──────────────────────────────────────────────────────────────

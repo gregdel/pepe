@@ -3,11 +3,11 @@ package app
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"strings"
 
 	"gioui.org/font"
 	"gioui.org/layout"
-	"gioui.org/op"
 	"github.com/odwrtw/polochon/lib/papi"
 )
 
@@ -88,32 +88,21 @@ func (a *App) showTabs(gtx C, s *showPage) D {
 			focused := current && s.focus == focusTabs
 
 			return layout.Inset{Right: dp8}.Layout(gtx, func(gtx C) D {
-				inset := layout.Inset{Left: dp16, Right: dp16, Top: dp8, Bottom: dp8}
-				macro := op.Record(gtx.Ops)
-				dims := inset.Layout(gtx, func(gtx C) D {
-					col := colorSubtle
-					weight := font.Medium
+				return a.clickableLayout(gtx, fmt.Sprintf("season:%s:%d", s.showID, i), season.Label, func(gtx C) D {
+					col, weight, bg := colorSubtle, font.Medium, color.NRGBA{}
 					switch {
 					case focused:
-						col = colorSelectFg
-						weight = font.Bold
+						col, weight, bg = colorSelectFg, font.Bold, colorSelectBg
 					case current:
-						col = colorFg
+						col, bg = colorFg, colorSurface2
 					}
-					return a.label(gtx, sp, season.Label, col, weight)
+					return a.pill(gtx, focused, bg, func(gtx C) D {
+						return a.label(gtx, sp, season.Label, col, weight)
+					})
+				}, func() {
+					s.focus = focusTabs
+					s.switchSeason(i - s.seasonCursor)
 				})
-				call := macro.Stop()
-
-				switch {
-				case focused:
-					defer a.markSelected(gtx, dims.Size).Pop()
-					fillRounded(gtx, dims.Size, radiusRow, colorSelectBg)
-					focusRing(gtx, dims.Size, radiusRow)
-				case current:
-					fillRounded(gtx, dims.Size, radiusRow, colorSurface2)
-				}
-				call.Add(gtx.Ops)
-				return dims
 			})
 		})
 	})
@@ -136,37 +125,43 @@ func (a *App) showEpisodeList(gtx C, s *showPage) D {
 			node := episodes[i]
 			selected := i == s.epCursor && s.focus == focusEpisodes
 
-			return a.rowShell(gtx, selected, false, browseRowHeight, func(gtx C) D {
-				titleCol := colorFg
-				subCol := colorSubtle
-				if selected {
-					titleCol = colorSelectFg
-					subCol = colorSelectFg
-				}
-				code, title := episodeDisplayParts(node)
-				weight := font.Normal
-				if selected {
-					weight = font.Bold
-				}
+			code, title := episodeDisplayParts(node)
+			return a.clickableLayout(gtx, fmt.Sprintf("episode:%s:%d:%d", s.showID, s.seasonCursor, i), strings.TrimSpace("Play "+code+" "+title), func(gtx C) D {
+				return a.rowShell(gtx, selected, false, browseRowHeight, func(gtx C) D {
+					titleCol := colorFg
+					subCol := colorSubtle
+					if selected {
+						titleCol = colorSelectFg
+						subCol = colorSelectFg
+					}
+					weight := font.Normal
+					if selected {
+						weight = font.Bold
+					}
 
-				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(func(gtx C) D {
-						return layout.Inset{Right: dp16}.Layout(gtx, func(gtx C) D {
-							return a.label(gtx, sp, code, titleCol, font.Medium)
-						})
-					}),
-					layout.Flexed(1, func(gtx C) D {
-						return a.label(gtx, sp, title, titleCol, weight)
-					}),
-					layout.Rigid(func(gtx C) D {
-						if node.Episode == nil || node.Episode.Runtime <= 0 {
-							return D{}
-						}
-						return layout.Inset{Left: dp12}.Layout(gtx, func(gtx C) D {
-							return a.label(gtx, spTiny, fmt.Sprintf("%d min", node.Episode.Runtime), subCol, 0)
-						})
-					}),
-				)
+					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(func(gtx C) D {
+							return layout.Inset{Right: dp16}.Layout(gtx, func(gtx C) D {
+								return a.label(gtx, sp, code, titleCol, font.Medium)
+							})
+						}),
+						layout.Flexed(1, func(gtx C) D {
+							return a.label(gtx, sp, title, titleCol, weight)
+						}),
+						layout.Rigid(func(gtx C) D {
+							if node.Episode == nil || node.Episode.Runtime <= 0 {
+								return D{}
+							}
+							return layout.Inset{Left: dp12}.Layout(gtx, func(gtx C) D {
+								return a.label(gtx, spTiny, fmt.Sprintf("%d min", node.Episode.Runtime), subCol, 0)
+							})
+						}),
+					)
+				})
+			}, func() {
+				s.focus = focusEpisodes
+				s.epCursor = i
+				a.launchEpisode(node)
 			})
 		})
 	})
@@ -195,24 +190,15 @@ func (a *App) showEpisodeInfo(gtx C, s *showPage) D {
 		)
 	})
 
-	playText := "Play"
+	// The resume position replaces the Play button's label: Enter resumes,
+	// so it gets its own line rather than being clamped off the meta line.
 	if pos := a.resumePos[episodeMediaKey(node.ShowID, ep.Season, ep.Episode)]; pos > minimumResumePosition {
-		playText = "Resume " + formatResumePos(pos)
+		resume := "Resume from " + formatResumePos(pos)
+		sections = append(sections, spacerFn(dp12))
+		sections = append(sections, func(gtx C) D {
+			return a.body(gtx, spMeta, resume, colorFg, 1)
+		})
 	}
-	sections = append(sections, spacerFn(dp12))
-	sections = append(sections, func(gtx C) D {
-		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-			layout.Rigid(func(gtx C) D {
-				return a.detailActionButton(gtx, "detail:show:play", "Play episode", playText, playIcon, true, func() {
-					a.launchEpisode(node)
-				})
-			}),
-			layout.Rigid(layout.Spacer{Width: dp12}.Layout),
-			layout.Rigid(func(gtx C) D {
-				return a.detailActionButton(gtx, "detail:show:subtitles", "Episode subtitles", "Subtitles", nil, false, a.openSubtitlePopup)
-			}),
-		)
-	})
 
 	if meta := buildEpisodeMetaLine(ep); meta != "" {
 		sections = append(sections, spacerFn(dp12))

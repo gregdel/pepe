@@ -258,7 +258,7 @@ func TestTVDelayedArtworkAndMissingSynopsis(t *testing.T) {
 	if err := f.driver.Refresh(); err != nil {
 		t.Fatal(err)
 	}
-	if !headlessHasLabel(f.driver.Tree(), "Pilot") || !headlessHasLabel(f.driver.Tree(), "Play episode") {
+	if !headlessHasLabel(f.driver.Tree(), "Pilot") || !headlessHasLabel(f.driver.Tree(), "Play S01E01 Pilot") {
 		t.Fatal("missing synopsis hid episode information")
 	}
 	tvCapture(t, f, "show-missing-synopsis-1280")
@@ -325,7 +325,7 @@ func TestTVDetailsAndOverlays(t *testing.T) {
 				if headlessHasLabel(f.driver.Tree(), show.Plot) {
 					t.Fatal("show summary competes with episode content")
 				}
-				tvAssertSafeButton(t, f, "Play episode")
+				tvAssertSafeButton(t, f, "Season 1")
 				// The poster has its own column; it must not consume list height.
 				var checkTitle func([]driver.Node)
 				checkTitle = func(nodes []driver.Node) {
@@ -360,6 +360,8 @@ func TestTVDetailsAndOverlays(t *testing.T) {
 				if s.epCursor != 23 || s.epCursor < pos.First || s.epCursor > pos.First+pos.Count-1 || (s.epCursor == pos.First+pos.Count-1 && pos.OffsetLast < 0) {
 					t.Fatalf("selected episode not fully visible: cursor %d, %+v", s.epCursor, pos)
 				}
+				code, title := episodeDisplayParts(s.currentEpisode())
+				tvAssertSafeButton(t, f, "Play "+code+" "+title)
 				tvCapture(t, f, fmt.Sprintf("show-episodes-%d-art-%d", size.X, shade))
 				f.app.subPopup = &SubtitlePopup{video: f.app.client.movies["movie-new"], state: SubtitlePopupReady, entries: subtitleEntries(60), list: layout.List{Axis: layout.Vertical}}
 				if err := f.driver.Frame(); err != nil {

@@ -112,7 +112,7 @@ func TestDetailArtworkEntranceFade(t *testing.T) {
 		posterWidth                        unit.Dp
 	}{
 		{"movie", movieID, "LUMINOUS MOVIE", "Play movie", "thumb:" + movieID, mediaKindMovie, moviePosterWidth},
-		{"show", showID, "LUMINOUS SHOW", "Play episode", "poster:" + showID, mediaKindShow, showPosterWidth},
+		{"show", showID, "LUMINOUS SHOW", "Season 1", "poster:" + showID, mediaKindShow, showPosterWidth},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client := NewEmptyAPIClient(nil)
