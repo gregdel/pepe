@@ -90,8 +90,10 @@ func TestHeadlessPrefixTitlesReachable(t *testing.T) {
 						t.Fatalf("terminal %q has no media preview", node.FullString)
 					}
 					headlessKey(t, f, "Enter")
+					assertDetail(id)
+					headlessKey(t, f, "LeftArrow")
 					if f.app.detail != nil || f.app.browse.nav.getSelectedChild() != node {
-						t.Fatal("Enter changed terminal navigation")
+						t.Fatal("Left did not return to the terminal")
 					}
 					// A successful refresh must restore the terminal's identity and path.
 					snapshot := buildLibrarySnapshot(radixListingBuilder{}, f.app.client.movieItems, f.app.client.showItems)

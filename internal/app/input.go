@@ -130,10 +130,8 @@ func (a *App) handleBrowseAction(action inputAction) {
 		a.navigateEscape()
 	case actionHome:
 		a.navigateHome()
-	case actionRight:
+	case actionRight, actionActivate:
 		a.navigateRight()
-	case actionActivate:
-		a.activateBrowseSelection()
 	case actionToggleSection:
 		a.toggleSection()
 	case actionRefresh:

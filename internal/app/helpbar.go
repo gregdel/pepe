@@ -140,7 +140,7 @@ func (a *App) contextHints() []hint {
 		{key: "tab", label: "section"},
 	}
 	if media := a.selectedBrowseMedia(); media != nil {
-		hints = append(hints, hint{key: "→", label: "details"})
+		hints = append(hints, hint{key: "→/enter", label: "details"})
 	} else if a.browse.nav.getChildrenCount() > 0 {
 		hints = append(hints, hint{key: "→/enter", label: "browse"})
 	}

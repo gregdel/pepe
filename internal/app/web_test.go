@@ -246,13 +246,9 @@ func TestHeadlessWebNavigationAndPopupPriority(t *testing.T) {
 	}
 	remote("right") // mode rail -> content
 	remote("right") // home -> movies
-	remote("ok")    // terminal: OK must not open details
-	if f.app.detail != nil {
-		t.Fatal("remote OK opened a browse terminal")
-	}
-	remote("right")
+	remote("ok")    // terminal: OK opens details like Right
 	if f.app.detail == nil {
-		t.Fatal("remote Right did not open details")
+		t.Fatal("remote OK did not open details")
 	}
 	detail := f.app.detail
 	f.app.subPopup = &SubtitlePopup{}

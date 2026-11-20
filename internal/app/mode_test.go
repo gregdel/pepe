@@ -37,7 +37,7 @@ func TestModeRailAppliesImmediately(t *testing.T) {
 	if a.browse.library.mode != ListingModeDateAdded || a.browse.focus != browseFocusModeRail {
 		t.Errorf("Down = (mode %v, focus %v), want Date added with rail focus", a.browse.library.mode, a.browse.focus)
 	}
-	a.activateBrowseSelection()
+	a.navigateRight()
 	if a.browse.focus != browseFocusContent || !a.browse.nav.isAtRoot() {
 		t.Error("Enter from the mode rail did not return to Home")
 	}
@@ -132,19 +132,14 @@ func TestLeftMovesFromSectionToHomeToModeRail(t *testing.T) {
 	}
 }
 
-func TestRightOpensMovieDetailWhileEnterDoesNothing(t *testing.T) {
+func TestRightAndEnterOpenMovieDetail(t *testing.T) {
 	movie := newMovieListingItem(testMovie("tt001", "Movie", 2001))
 	a := newModeTestApp([]*listingItem{movie}, nil)
 	a.browse.nav.resetToSection(SectionMovies, a.sectionRoot(SectionMovies))
 
-	a.activateBrowseSelection()
-	if a.detail != nil {
-		t.Fatal("Enter opened movie details")
-	}
-
-	a.navigateRight()
+	a.handleBrowseAction(actionActivate)
 	if a.detail == nil || a.detail.kind != detailMovie || a.detail.movieID != "tt001" {
-		t.Fatalf("Right detail = %#v, want movie tt001", a.detail)
+		t.Fatalf("Enter detail = %#v, want movie tt001", a.detail)
 	}
 }
 

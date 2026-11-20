@@ -89,18 +89,10 @@ func (a *App) navigateRight() {
 		a.browse.focus = browseFocusContent
 		return
 	}
-	a.navigateForward(true)
+	a.navigateForward()
 }
 
-func (a *App) activateBrowseSelection() {
-	if a.browse.focus == browseFocusModeRail {
-		a.browse.focus = browseFocusContent
-		return
-	}
-	a.navigateForward(false)
-}
-
-func (a *App) navigateForward(openTerminal bool) {
+func (a *App) navigateForward() {
 	if a.browse.onPage() {
 		return
 	}
@@ -121,10 +113,6 @@ func (a *App) navigateForward(openTerminal bool) {
 		a.browse.nav.goForward(child)
 		return
 	}
-	if !openTerminal {
-		return
-	}
-
 	media := a.mediaForNode(child)
 	if media == nil {
 		return

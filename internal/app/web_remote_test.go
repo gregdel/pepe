@@ -55,7 +55,7 @@ func TestWebRemoteNavigationPreservesListing(t *testing.T) {
 		t.Fatal("opening remote changed the catalog or navigation")
 	}
 	a.navigateRight()
-	a.activateBrowseSelection()
+	a.navigateRight()
 	a.navigateRight()
 	if a.browse.nav != nav || a.detail != nil {
 		t.Fatal("QR page navigated the hidden catalog")

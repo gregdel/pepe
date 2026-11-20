@@ -368,7 +368,7 @@ func (a *App) layoutNavList(gtx C) D {
 		}, func() {
 			a.browse.focus = browseFocusContent
 			a.browse.nav.cursor = i
-			a.navigateForward(true)
+			a.navigateForward()
 		})
 	})
 }
