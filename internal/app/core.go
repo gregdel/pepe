@@ -39,6 +39,7 @@ type APIClient struct {
 	client        *papi.Client
 	token         string
 	server        string // polochon_url without credentials or query, for display
+	endpoint      string // polochon_url as given to papi, which prefixes download URLs
 	artworkClient *http.Client
 
 	mu         sync.RWMutex
@@ -77,7 +78,7 @@ func NewAPIClient(endpoint, token string, log *slog.Logger) (*APIClient, error) 
 	papiClient.SetTimeout(apiRequestTimeout)
 
 	c := NewEmptyAPIClient(log)
-	c.client, c.token = papiClient, token
+	c.client, c.token, c.endpoint = papiClient, token, endpoint
 	c.server = displayServer(endpoint)
 	if endpointURL, err := url.Parse(endpoint); err == nil && strings.EqualFold(endpointURL.Scheme, "http") {
 		c.log.Warn("polochon_url uses unencrypted HTTP; use the canonical HTTPS URL if available: HTTP-to-HTTPS artwork redirects are blocked")
@@ -200,7 +201,27 @@ func (c *APIClient) snapshotFor(builder listingBuilder) LibrarySnapshot {
 func (c *APIClient) getDownloadURL(target papi.Downloadable) (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.client.DownloadURL(target)
+	raw, err := c.client.DownloadURL(target)
+	if err != nil {
+		return "", err
+	}
+	return escapeDownloadPath(c.endpoint, raw), nil
+}
+
+// escapeDownloadPath escapes each path segment after the endpoint: papi
+// appends file names verbatim, and release names contain spaces, brackets,
+// "#", "?" or "%" that would otherwise break or truncate the URL.
+func escapeDownloadPath(endpoint, raw string) string {
+	prefix := strings.TrimSuffix(endpoint, "/") + "/"
+	rest, ok := strings.CutPrefix(raw, prefix)
+	if !ok {
+		return raw
+	}
+	segments := strings.Split(rest, "/")
+	for i, segment := range segments {
+		segments[i] = url.PathEscape(segment)
+	}
+	return prefix + strings.Join(segments, "/")
 }
 
 func (c *APIClient) getToken() string {

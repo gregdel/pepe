@@ -547,3 +547,19 @@ func TestFetchImageFileRedirects(t *testing.T) {
 		t.Errorf("destination received %d requests, want none", got)
 	}
 }
+
+func TestEscapeDownloadPath(t *testing.T) {
+	for _, tc := range []struct{ endpoint, raw, want string }{
+		{"https://polochon.example", "https://polochon.example/movies/tt7526136/download/Heart.Of.The.Beast.2026.1080p.WEBRip.x265.10bit.AAC5.1-[YTS.GG - YTS.BZ].mp4",
+			"https://polochon.example/movies/tt7526136/download/Heart.Of.The.Beast.2026.1080p.WEBRip.x265.10bit.AAC5.1-%5BYTS.GG%20-%20YTS.BZ%5D.mp4"},
+		{"https://polochon.example/api/", "https://polochon.example/api//shows/tt1/seasons/1/episodes/2/download/What? #1 100%.mkv",
+			"https://polochon.example/api//shows/tt1/seasons/1/episodes/2/download/What%3F%20%231%20100%25.mkv"},
+		{"https://polochon.example", "https://polochon.example/movies/tt1/download/Plain.Name.mkv",
+			"https://polochon.example/movies/tt1/download/Plain.Name.mkv"},
+		{"https://polochon.example", "https://elsewhere.example/a b", "https://elsewhere.example/a b"},
+	} {
+		if got := escapeDownloadPath(tc.endpoint, tc.raw); got != tc.want {
+			t.Errorf("escapeDownloadPath(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+}
