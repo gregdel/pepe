@@ -305,7 +305,7 @@ func writeWebJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-// drainWebCommands runs on the same event loop as physical input.
+// drainWebCommands runs under a.mu, serialized with physical input.
 func (a *App) drainWebCommands() {
 	if a.webUI == nil {
 		return

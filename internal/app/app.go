@@ -5,6 +5,7 @@ import (
 	"image"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -173,6 +174,9 @@ type App struct {
 	invalidate  func()
 	closeWindow func()
 	th          *material.Theme
+
+	// mu serializes App state between run's event loop and Run's event pump.
+	mu sync.Mutex
 }
 
 type libraryView struct {
@@ -415,7 +419,21 @@ func (a *App) Close() {
 // the default slog handler writes to. A non-nil loadErr means the initial
 // library fetch failed: start empty and keep retrying.
 func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Config, loadErr error, logs *LogBuffer) error {
-	a := New(client, sseCh, config, w.Invalidate, func() { w.Perform(system.ActionClose) })
+	wake := make(chan struct{}, 1)
+	invalidate := func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+		w.Invalidate()
+	}
+	// The pump may request the close: perform it from the event loop.
+	var closing atomic.Bool
+	closeWindow := func() {
+		closing.Store(true)
+		w.Invalidate()
+	}
+	a := New(client, sseCh, config, invalidate, closeWindow)
 	defer a.Close()
 	a.UseLogs(logs)
 	if loadErr != nil {
@@ -426,7 +444,44 @@ func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 			return err
 		}
 	}
-	return a.run(w.Event)
+	defer a.pumpEvents(wake)()
+	return a.run(func() event.Event {
+		if closing.Swap(false) {
+			w.Perform(system.ActionClose)
+		}
+		return w.Event()
+	})
+}
+
+// pumpEvents processes remote commands and async results on each wake-up,
+// independently of drawing. Behind direct-DRM mpv the compositor's VT is
+// inactive and a buffer swap in run's FrameEvent can block until playback
+// ends. The returned function stops the pump and waits for it.
+func (a *App) pumpEvents(wake <-chan struct{}) (stop func()) {
+	quit, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-quit:
+				return
+			case <-wake:
+				a.mu.Lock()
+				a.processEvents()
+				a.mu.Unlock()
+			}
+		}
+	}()
+	return func() {
+		close(quit)
+		<-done
+	}
+}
+
+func (a *App) processEvents() {
+	a.drainChannels()
+	a.drainWebCommands()
+	a.publishWebStatus()
 }
 
 func (a *App) run(nextEvent func() event.Event) error {
@@ -440,17 +495,20 @@ func (a *App) run(nextEvent func() event.Event) error {
 			ops.Reset()
 			gtx := gioapp.NewContext(&ops, e)
 
-			// Draw the shared UI and process its input.
+			// Draw the shared UI and process its input. Frame can block
+			// while the display is handed off, so it runs unlocked.
+			a.mu.Lock()
 			a.Layout(gtx)
+			a.mu.Unlock()
 
 			e.Frame(gtx.Ops)
 
 		default:
 			// Invalidate wakes inactive/occluded windows without a FrameEvent.
 			// Keep remote commands and async playback results moving even then.
-			a.drainChannels()
-			a.drainWebCommands()
-			a.publishWebStatus()
+			a.mu.Lock()
+			a.processEvents()
+			a.mu.Unlock()
 		}
 	}
 }
