@@ -45,7 +45,7 @@ func playbackIPCPeer(t *testing.T, key string, onTitle func()) (*playbackTracker
 		t.Fatal(err)
 	}
 	scanner := bufio.NewScanner(conn)
-	for _, property := range []string{"time-pos", "eof-reached", "force-media-title"} {
+	for _, property := range []string{"time-pos", "eof-reached", "force-media-title", "metadata/by-key/title"} {
 		if !scanner.Scan() || !strings.Contains(scanner.Text(), `"`+property+`"`) {
 			t.Fatalf("missing %s subscription: %s, %v", property, scanner.Text(), scanner.Err())
 		}

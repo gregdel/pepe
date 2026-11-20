@@ -107,3 +107,28 @@ func TestPlaybackTitleInvalidAndDuplicateEvents(t *testing.T) {
 		t.Fatalf("title = %q, wake-ups = %d", tracker.resolvedTitle(), len(wakes))
 	}
 }
+
+// Current yt-dlp hooks publish the title as stream metadata; a forced title
+// (older hooks or user configs) takes precedence while it is set.
+func TestPlaybackTitleSources(t *testing.T) {
+	wakes := make(chan struct{}, 16)
+	tracker, peer := playbackIPCPeer(t, "", func() { wakes <- struct{}{} })
+	for _, step := range []struct{ name, data, want string }{
+		{"metadata/by-key/title", `"Me at the zoo"`, "Me at the zoo"},
+		{"force-media-title", `"Forced"`, "Forced"},
+		{"metadata/by-key/title", `"Other metadata"`, "Forced"},
+		{"force-media-title", `""`, "Other metadata"},
+		{"metadata/by-key/title", `null`, ""},
+	} {
+		if _, err := fmt.Fprintf(peer, "{\"event\":\"property-change\",\"name\":%q,\"data\":%s}\n", step.name, step.data); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(time.Second)
+		for tracker.resolvedTitle() != step.want && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if got := tracker.resolvedTitle(); got != step.want {
+			t.Fatalf("after %s=%s: title = %q, want %q", step.name, step.data, got, step.want)
+		}
+	}
+}

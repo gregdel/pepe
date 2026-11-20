@@ -710,9 +710,12 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 	// Send observe_property commands.
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 1, \"time-pos\"]}\n")
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 2, \"eof-reached\"]}\n")
-	// yt-dlp sets this file-local option, which supplies media-title. Observe
-	// it directly to avoid exposing media-title's URL/filename fallback.
+	// Observe the title sources directly to avoid exposing media-title's
+	// URL/filename fallback. Current yt-dlp hooks set the stream metadata;
+	// older ones (and user configs) set force-media-title, which wins.
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 3, \"force-media-title\"]}\n")
+	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 4, \"metadata/by-key/title\"]}\n")
+	titles := map[string]string{}
 
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
@@ -729,12 +732,19 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 			continue
 		}
 		switch ev.Name {
-		case "force-media-title":
+		case "force-media-title", "metadata/by-key/title":
 			if title, ok := ev.Data.(string); ok {
-				tracker.updateTitle(title)
+				titles[ev.Name] = strings.TrimSpace(title)
 			} else if ev.Data == nil {
-				tracker.updateTitle("")
+				titles[ev.Name] = ""
+			} else {
+				continue
 			}
+			title := titles["force-media-title"]
+			if title == "" {
+				title = titles["metadata/by-key/title"]
+			}
+			tracker.updateTitle(title)
 		case "time-pos":
 			if pos, ok := ev.Data.(float64); ok && pos > minimumResumePosition {
 				tracker.updatePos(pos)
