@@ -13,6 +13,8 @@ are required, even to run `pepe install` or `pepe uninstall`.
 
 ## Install
 
+On macOS, see [macOS installation](packaging/macos/README.md). On Linux:
+
 Copy the native `pepe` binary to a temporary location (`~/Downloads`, `/tmp`, etc.).
 Run these commands from the directory containing `pepe`:
 

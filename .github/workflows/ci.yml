@@ -152,9 +152,41 @@ jobs:
           path: dist/pepe-*.tar.gz
           if-no-files-found: error
 
+  package-macos:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            packaging/embed
+            internal/app/embed
+          key: embed-${{ hashFiles('packaging/assets.txt', 'packaging/fonts.txt') }}
+      - name: Package
+        shell: sh
+        run: |
+          dmg=$(scripts/package-macos.sh "$VERSION")
+          printf 'DMG=%s\n' "$dmg" >> "$GITHUB_ENV"
+      - run: scripts/test-package-macos.sh "$DMG"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package-${{ matrix.runner }}
+          path: dist/pepe-*.dmg
+          if-no-files-found: error
+
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs: [version, linux, macos, nix, package-linux]
+    needs: [version, linux, macos, nix, package-linux, package-macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

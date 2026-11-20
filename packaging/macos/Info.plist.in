@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>pépé</string>
+	<key>CFBundleExecutable</key>
+	<string>pepe</string>
+	<key>CFBundleIconFile</key>
+	<string>pepe</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.gregdel.pepe</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>pépé</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@BUNDLE_VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@BUNDLE_VERSION@</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.entertainment</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>pépé connects to your polochon server and, when enabled, accepts web remote connections on your local network.</string>
+</dict>
+</plist>
