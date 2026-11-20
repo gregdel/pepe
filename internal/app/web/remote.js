@@ -1,17 +1,38 @@
 "use strict";
 
-const statusText = document.getElementById("status");
+const app = document.getElementById("app");
 const nowPlaying = document.getElementById("now-playing");
+const statusText = document.getElementById("status");
+const source = document.getElementById("source");
 const feedback = document.getElementById("feedback");
 const urlInput = document.getElementById("url");
+const playLabel = document.getElementById("play-label");
+const siteChips = document.querySelectorAll("[data-site]");
+const commandButtons = document.querySelectorAll("[data-command]");
 let requests = Promise.resolve();
 let pending = 0;
+let toastTimer = 0;
+let shownCommandError = "";
+
+const sites = [
+  {name: "YouTube", hosts: ["youtube.com", "youtu.be", "youtube-nocookie.com"]},
+  {name: "arte.tv", hosts: ["arte.tv"]},
+  {name: "france.tv", hosts: ["france.tv", "francetvinfo.fr"]},
+];
+
+function toast(text, error = false) {
+  window.clearTimeout(toastTimer);
+  feedback.textContent = text;
+  feedback.classList.toggle("error", error);
+  feedback.hidden = false;
+  toastTimer = window.setTimeout(() => { feedback.hidden = true; }, error ? 6000 : 2500);
+}
 
 // Serialize mutations so rapid taps retain their order. A 202 means queued,
 // not that the Gio event loop or mpv has executed the request yet.
-function send(path, body) {
+function send(path, body, onQueued) {
   if (pending >= 32) {
-    feedback.textContent = "Too many pending commands; wait a moment.";
+    toast("Too many pending commands; wait a moment.", true);
     return;
   }
   pending++;
@@ -22,25 +43,59 @@ function send(path, body) {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Command failed.");
-    feedback.textContent = "Command queued.";
+    if (onQueued) onQueued();
   }).catch(error => {
-    feedback.textContent = error.message || "Remote unavailable.";
+    toast(error.message || "Remote unavailable.", true);
   }).finally(() => { pending--; });
 }
 
-function navigate(action) {
-  send("/api/action", {action});
+// Share sheets often add a title around the link; keep the first URL and
+// accept a bare "youtu.be/…" by assuming HTTPS.
+function linkFrom(text) {
+  text = text.trim();
+  const url = text.match(/https?:\/\/[^\s<>"']+/i);
+  if (url) return url[0];
+  if (/^[\w-]+(\.[\w-]+)+([/?#]\S*)?$/.test(text)) return "https://" + text;
+  return text;
+}
+
+function siteFor(link) {
+  let host;
+  try { host = new URL(link).hostname.toLowerCase(); } catch (_) { return null; }
+  return sites.find(site => site.hosts.some(h => host === h || host.endsWith("." + h))) || null;
+}
+
+function updateSite() {
+  const site = urlInput.value.trim() ? siteFor(linkFrom(urlInput.value)) : null;
+  siteChips.forEach(chip => chip.classList.toggle("match", site !== null && chip.dataset.site === site.name));
+  playLabel.textContent = site ? "Play on TV · " + site.name : "Play on TV";
+}
+
+function press() {
+  if (navigator.vibrate) navigator.vibrate(8);
 }
 
 document.querySelectorAll("[data-action]").forEach(button => {
-  button.addEventListener("click", () => navigate(button.dataset.action));
+  button.addEventListener("click", () => { press(); send("/api/action", {action: button.dataset.action}); });
 });
-document.querySelectorAll("[data-command]").forEach(button => {
-  button.addEventListener("click", () => send("/api/player", {command: button.dataset.command}));
+commandButtons.forEach(button => {
+  button.addEventListener("click", () => { press(); send("/api/player", {command: button.dataset.command}); });
 });
+urlInput.addEventListener("input", updateSite);
 document.getElementById("url-form").addEventListener("submit", event => {
   event.preventDefault();
-  send("/api/play", {url: urlInput.value.trim()});
+  const url = linkFrom(urlInput.value);
+  if (!url) {
+    toast("Paste a link first.", true);
+    urlInput.focus();
+    return;
+  }
+  send("/api/play", {url}, () => {
+    urlInput.value = "";
+    urlInput.blur();
+    updateSite();
+    toast("Sent to TV");
+  });
 });
 
 document.addEventListener("keydown", event => {
@@ -49,9 +104,28 @@ document.addEventListener("keydown", event => {
   const actions = {ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", Escape: "back", Home: "home"};
   if (actions[event.key]) {
     event.preventDefault();
-    navigate(actions[event.key]);
+    send("/api/action", {action: actions[event.key]});
   }
 });
+
+function setText(element, text) {
+  if (element.textContent !== text) element.textContent = text;
+  element.hidden = text === "";
+}
+
+// The now-playing card moves first while playing, but never while the link
+// field is in use: reordering would move it under the user's finger.
+function render(state, title, status, badge, controls) {
+  app.dataset.state = state;
+  const layout = state === "running" || state === "offline" ? "playing" : "idle";
+  if (app.dataset.layout !== layout && document.activeElement !== urlInput && !urlInput.value) {
+    app.dataset.layout = layout;
+  }
+  setText(nowPlaying, title);
+  setText(statusText, status);
+  setText(source, badge);
+  commandButtons.forEach(button => { button.disabled = !controls(button.dataset.command); });
+}
 
 async function poll() {
   try {
@@ -60,23 +134,18 @@ async function poll() {
     const status = await response.json();
     const running = status.state === "Running";
     const title = running ? (status.title || "Untitled video") : "Nothing playing";
-    if (nowPlaying.textContent !== title) nowPlaying.textContent = title;
-    document.title = running ? title + " · pépé remote" : "pépé remote";
-    let text = status.state === "Idle" ? "Ready to play" : status.state;
-    if (status.stopping) text = "Stopping playback";
-    else if (running) text = status.source === "web" ? "Playing from Web UI" : "Now playing";
-    if (status.queued_commands) text += " — " + status.queued_commands + " queued";
-    if (statusText.textContent !== text) statusText.textContent = text;
-    if (status.error || status.command_error) feedback.textContent = status.command_error || status.error;
-    else if (!pending && !status.queued_commands && feedback.textContent === "Command queued.") feedback.textContent = "";
-    document.querySelectorAll("[data-command]").forEach(button => {
-      button.disabled = status.state !== "Running" || (status.stopping && button.dataset.command !== "stop");
-    });
+    let text = running ? "" : (status.error || "");
+    if (status.stopping) text = "Stopping…";
+    if (status.queued_commands) text += (text ? " · " : "") + status.queued_commands + " queued";
+    const state = running ? "running" : status.state === "Error" ? "error" : "idle";
+    const badge = running ? (status.source === "web" ? "Link" : "Library") : "";
+    render(state, title, text, badge, command => running && (!status.stopping || command === "stop"));
+    document.title = running ? title + " · pépé" : "pépé";
+    if (status.command_error && status.command_error !== shownCommandError) toast(status.command_error, true);
+    shownCommandError = status.command_error || "";
   } catch (_) {
-    nowPlaying.textContent = "pépé remote";
-    document.title = "pépé remote";
-    statusText.textContent = "Disconnected — check that pépé is running.";
-    document.querySelectorAll("[data-command]").forEach(button => { button.disabled = true; });
+    render("offline", "Can't reach pépé", "Check that pépé is running on the TV.", "", () => false);
+    document.title = "pépé";
   } finally {
     window.setTimeout(poll, 1000);
   }

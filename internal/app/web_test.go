@@ -32,15 +32,15 @@ func TestWebPageControlsAndCopy(t *testing.T) {
 		">Pause / Resume<", ">−10 seconds<", ">+10 seconds<",
 		"Right opens details. OK plays from details.",
 		"Replaces current playback. Website support depends on your existing mpv setup.",
-		"HTTP or HTTPS video URL",
+		"HTTP or HTTPS video URL", "pépé remote", `class="brand"`,
 	} {
 		if strings.Contains(page, removed) {
 			t.Errorf("page still contains %q", removed)
 		}
 	}
 	for _, retained := range []string{
-		`<title>pépé remote</title>`, `<p class="brand">pépé remote</p>`,
-		`aria-label="Video URL"`, `id="url-form"`, `data-action="right"`, `data-command="stop"`,
+		`<title>pépé</title>`, `placeholder="Paste a video link"`, `data-site="arte.tv"`,
+		`aria-label="Video link"`, `+ direct links`, `id="url-form"`, `data-action="right"`, `data-command="stop"`,
 		`id="now-playing"`, `class="playback-bar"`, `aria-label="Playback controls"`,
 		`aria-label="Seek back 10 seconds"`, `aria-label="Pause or resume"`,
 		`aria-label="Seek forward 10 seconds"`, `aria-label="Stop playback"`,
@@ -49,8 +49,8 @@ func TestWebPageControlsAndCopy(t *testing.T) {
 			t.Errorf("page is missing %q", retained)
 		}
 	}
-	if got := strings.Count(page, `aria-hidden="true" focusable="false"`); got != 4 {
-		t.Errorf("decorative playback SVG icons = %d, want 4", got)
+	if icons, hidden := strings.Count(page, "<svg"), strings.Count(page, `aria-hidden="true" focusable="false"`); icons != hidden {
+		t.Errorf("decorative SVG icons hidden = %d, want all %d", hidden, icons)
 	}
 }
 

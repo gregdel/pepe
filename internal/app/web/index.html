@@ -2,21 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>pépé remote</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0b10">
+  <title>pépé</title>
   <link rel="stylesheet" href="/remote.css">
   <script src="/remote.js" defer></script>
 </head>
 <body>
-  <main>
-    <header>
-      <p class="brand">pépé remote</p>
-      <h1 id="now-playing">Nothing playing</h1>
-      <p id="status" role="status">Connecting…</p>
-      <p id="feedback" role="alert"></p>
-    </header>
-    <section class="playback" aria-labelledby="playback-heading">
-      <h2 id="playback-heading">Playback</h2>
+  <main id="app" data-layout="idle" data-state="connecting">
+    <section class="now" aria-labelledby="now-heading">
+      <h2 id="now-heading" class="visually-hidden">Now playing</h2>
+      <div class="now-info">
+        <span id="source" class="badge" hidden></span>
+        <h1 id="now-playing">Nothing playing</h1>
+        <p id="status">Connecting…</p>
+      </div>
       <div class="playback-bar" role="group" aria-label="Playback controls">
         <button data-command="seek-back" aria-label="Seek back 10 seconds" title="Seek back 10 seconds" disabled>
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -42,29 +42,67 @@
         </button>
       </div>
     </section>
-    <section aria-labelledby="navigation-heading">
-      <h2 id="navigation-heading">Navigation</h2>
-      <div class="dpad">
-        <button class="up" data-action="up" aria-label="Up">↑</button>
-        <button class="left" data-action="left" aria-label="Left">←</button>
-        <button class="ok" data-action="ok">OK</button>
-        <button class="right" data-action="right" aria-label="Right">→</button>
-        <button class="down" data-action="down" aria-label="Down">↓</button>
-      </div>
-      <div class="buttons">
-        <button data-action="back">Back</button>
-        <button data-action="home">Home</button>
-        <button data-action="section">Movies / Shows</button>
-        <button data-action="subtitles">Subtitles</button>
-      </div>
-    </section>
-    <section aria-labelledby="url-heading">
-      <h2 id="url-heading">Play a URL</h2>
-      <form id="url-form">
-        <input id="url" aria-label="Video URL" name="url" type="url" inputmode="url" placeholder="https://…" required maxlength="8192" autocomplete="off" autocapitalize="none" spellcheck="false">
-        <button type="submit">Play URL</button>
+
+    <section class="link" aria-labelledby="url-heading">
+      <h2 id="url-heading" class="visually-hidden">Play a link on the TV</h2>
+      <form id="url-form" novalidate>
+        <div class="field">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"/>
+          </svg>
+          <input id="url" aria-label="Video link" aria-describedby="sites" name="url" type="url" inputmode="url" enterkeyhint="go" placeholder="Paste a video link" maxlength="8192" autocomplete="off" autocapitalize="none" spellcheck="false">
+        </div>
+        <ul id="sites" class="sites" aria-label="Supported links">
+          <li data-site="YouTube">YouTube</li>
+          <li data-site="arte.tv">arte.tv</li>
+          <li data-site="france.tv">france.tv</li>
+          <li>+ direct links</li>
+        </ul>
+        <button type="submit" class="primary">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="solid" d="M8 5v14l11-7z"/></svg>
+          <span id="play-label">Play on TV</span>
+        </button>
       </form>
     </section>
+
+    <section class="remote" aria-labelledby="remote-heading">
+      <h2 id="remote-heading" class="visually-hidden">Remote</h2>
+      <div class="dpad" role="group" aria-label="Directions">
+        <button class="up" data-action="up" aria-label="Up">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 15 6-6 6 6"/></svg>
+        </button>
+        <button class="left" data-action="left" aria-label="Left">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m15 6-6 6 6 6"/></svg>
+        </button>
+        <button class="ok" data-action="ok">OK</button>
+        <button class="right" data-action="right" aria-label="Right">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>
+        </button>
+        <button class="down" data-action="down" aria-label="Down">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+      </div>
+      <div class="keys">
+        <button data-action="back">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+          <span>Back</span>
+        </button>
+        <button data-action="home">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 11 12 3l9 8M5 9.5V21h5v-6h4v6h5V9.5"/></svg>
+          <span>Home</span>
+        </button>
+        <button data-action="section">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4m4 4H7"/></svg>
+          <span>Movies / Shows</span>
+        </button>
+        <button data-action="subtitles">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h4m2 0h4"/></svg>
+          <span>Subtitles</span>
+        </button>
+      </div>
+    </section>
+
+    <p id="feedback" class="toast" role="status" aria-live="polite" hidden></p>
   </main>
 </body>
 </html>
