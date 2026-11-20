@@ -2,9 +2,12 @@ package app
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -194,6 +197,7 @@ func (a *App) setPlayerError(message string) {
 	if a.playerStatus == PlayerStatusRunning {
 		return
 	}
+	a.logger().Error("playback failed", "error", message)
 	a.playerStatus = PlayerStatusError
 	a.playerError = message
 }
@@ -316,7 +320,17 @@ func (a *App) startPlayer(command playerCommand) bool {
 
 	cmd := exec.Command(command.args[0], command.args[1:]...) //nolint:gosec
 	cmd.Env = mpvEnvironment(os.Environ())
-	if err := cmd.Start(); err != nil {
+	output, err := capturePlayerOutput(a.logger().With("source", "mpv"))
+	if err != nil {
+		a.logger().Warn("player output is not captured", "error", err)
+	} else {
+		cmd.Stdout, cmd.Stderr = output, output
+	}
+	err = cmd.Start()
+	if output != nil {
+		_ = output.Close() // the child holds its own copy
+	}
+	if err != nil {
 		_ = os.RemoveAll(command.runtimeDir)
 		if errors.Is(err, exec.ErrNotFound) {
 			a.setPlayerError("mpv not found: install mpv 0.41+ with Lua, or set mpv_path in the config")
@@ -326,6 +340,9 @@ func (a *App) startPlayer(command playerCommand) bool {
 		return false
 	}
 
+	started := time.Now()
+	a.logger().Info("player started", "player", command.args[0], "mode", command.mode,
+		"title", command.title, "media", command.args[len(command.args)-1])
 	done := make(chan playerResult, 1)
 	stop := make(chan struct{})
 	policy := a.playerPolicy.withDefaults()
@@ -377,6 +394,12 @@ func (a *App) startPlayer(command playerCommand) bool {
 			result.err = errors.Join(err, errors.New("managed launcher teardown is unconfirmed; private runtime retained"))
 		} else {
 			_ = os.RemoveAll(command.runtimeDir)
+		}
+		duration := time.Since(started).Round(time.Second)
+		if result.err != nil {
+			a.logger().Error("player failed", "error", result.err, "duration", duration)
+		} else {
+			a.logger().Info("player exited", "duration", duration)
 		}
 		done <- result
 		if a.invalidate != nil {
@@ -514,7 +537,7 @@ func buildMPVArgs(mpvPath, title, videoURL string, subtitleURLs []string, mode P
 	if strings.TrimSpace(mpvPath) == "" {
 		mpvPath = "mpv"
 	}
-	args := []string{mpvPath, "--include=" + configPath}
+	args := []string{mpvPath, "--include=" + configPath, "--msg-level=all=warn"}
 	if startPos > minimumResumePosition {
 		args = append(args, fmt.Sprintf("--start=%d", int(startPos)))
 	}
@@ -732,4 +755,34 @@ func formatResumePos(secs float64) string {
 		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
 	}
 	return fmt.Sprintf("%d:%02d", m, s)
+}
+
+// capturePlayerOutput logs each line mpv or its wrapper writes. The caller
+// passes the returned pipe to the child and closes its own copy. A separate
+// pipe, unlike an io.Writer, keeps cmd.Wait from also waiting for background
+// children that inherit it.
+func capturePlayerOutput(logger *slog.Logger) (*os.File, error) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		defer func() { _ = reader.Close() }()
+		scanner := bufio.NewScanner(reader)
+		scanner.Buffer(make([]byte, 4096), 64<<10)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			level := slog.LevelWarn // mpv runs with --msg-level=all=warn
+			if strings.Contains(strings.ToLower(line), "error") {
+				level = slog.LevelError
+			}
+			logger.Log(context.Background(), level, line)
+		}
+		// Keep draining after an overlong line so the player never blocks.
+		_, _ = io.Copy(io.Discard, reader)
+	}()
+	return writer, nil
 }

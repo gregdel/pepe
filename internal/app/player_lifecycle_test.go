@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -343,5 +344,56 @@ func TestPlayerIPCDeadlineAndCancellation(t *testing.T) {
 				t.Fatal("IPC timeout truncated to polling attempts")
 			}
 		})
+	}
+}
+
+// mpv and wrapper output reaches the redacted log, and a background child
+// holding the pipe open does not delay the playback result.
+func TestPlayerOutputIsLogged(t *testing.T) {
+	a := New(nil, nil, nil, nil, nil)
+	command := lifecycleCommand(t, a, `echo "Playing: https://cdn.example/v.mp4?sig=private-token"
+echo "[ytdl_hook] ERROR: Unsupported URL" >&2
+sleep 3 &
+exit 3
+`)
+	a.logs = NewLogBuffer("private-token")
+	a.client.log = slog.New(a.logs.Handler(nil))
+	started := time.Now()
+	startLifecyclePlayer(t, a, command)
+	select {
+	case <-a.playerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a background child holding the output pipe delayed the result")
+	}
+	want := []string{
+		"INFO pepe: player started",
+		"WARN mpv: Playing: https://cdn.example/v.mp4?…",
+		"ERROR mpv: [ytdl_hook] ERROR: Unsupported URL",
+		"ERROR pepe: player failed error=exit status 3",
+	}
+	var text string
+	for time.Since(started) < 2*time.Second {
+		entries, _, _ := a.logs.since(0)
+		var lines []string
+		for _, entry := range entries {
+			lines = append(lines, entry.String())
+		}
+		text = strings.Join(lines, "\n")
+		missing := false
+		for _, line := range want {
+			missing = missing || !strings.Contains(text, line)
+		}
+		if !missing {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for _, line := range want {
+		if !strings.Contains(text, line) {
+			t.Errorf("log is missing %q:\n%s", line, text)
+		}
+	}
+	if strings.Contains(text, "private-token") {
+		t.Fatalf("log leaked the token:\n%s", text)
 	}
 }

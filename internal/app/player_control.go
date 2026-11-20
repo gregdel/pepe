@@ -167,6 +167,7 @@ func (a *App) drainPlayerControls() {
 		case err := <-a.playerControls.results:
 			a.webCommandError = ""
 			if err != nil {
+				a.logger().Warn("player control failed", "error", err)
 				a.webCommandError = err.Error()
 			}
 		default:
