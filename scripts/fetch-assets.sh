@@ -1,9 +1,10 @@
 #!/usr/bin/env sh
-# Fetch build-time embedded artwork; never used during installation or launch.
+# Fetch SHA-pinned build-time inputs (artwork by default, or another manifest such as
+# packaging/fonts.txt); never used during installation or launch.
 set -eu
 ROOT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-if [ "$#" -ne 1 ]; then
-	printf 'Usage: %s DESTINATION\n' "$0" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+	printf 'Usage: %s DESTINATION [MANIFEST]\n' "$0" >&2
 	exit 2
 fi
 # sha256sum is not guaranteed on macOS; shasum ships with it.
@@ -15,6 +16,8 @@ else
 	printf 'Required command not found: sha256sum or shasum\n' >&2
 	exit 1
 fi
+MANIFEST=${2:-$ROOT_DIR/packaging/assets.txt}
+[ -f "$MANIFEST" ] || { printf 'Manifest not found: %s\n' "$MANIFEST" >&2; exit 1; }
 mkdir -p -- "$1"
 DEST=$(CDPATH='' cd -- "$1" && pwd)
 TMP=''
@@ -41,4 +44,4 @@ while read -r want name url; do
 	chmod 644 "$TMP"
 	mv -- "$TMP" "$file"
 	TMP=''
-done < "$ROOT_DIR/packaging/assets.txt"
+done < "$MANIFEST"

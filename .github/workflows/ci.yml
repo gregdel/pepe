@@ -11,7 +11,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel master runs: they publish releases.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   linux:
@@ -36,15 +37,15 @@ jobs:
         with:
           path: |
             packaging/embed
-            internal/app/embed/*.ttf
-          key: embed-${{ hashFiles('packaging/assets.txt', 'build.sh') }}
+            internal/app/embed
+          key: embed-${{ hashFiles('packaging/assets.txt', 'packaging/fonts.txt') }}
       - run: ./build.sh
       - run: go test ./...
       - run: go test -race ./...
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.15.0
-      - run: shellcheck build.sh scripts/fetch-assets.sh scripts/test-assets.sh scripts/test-install.sh packaging/linux/*.sh
+      - run: shellcheck build.sh scripts/*.sh packaging/linux/*.sh
       - run: scripts/test-assets.sh
       - run: scripts/test-install.sh
 
@@ -63,7 +64,90 @@ jobs:
         with:
           path: |
             packaging/embed
-            internal/app/embed/*.ttf
-          key: embed-${{ hashFiles('packaging/assets.txt', 'build.sh') }}
+            internal/app/embed
+          key: embed-${{ hashFiles('packaging/assets.txt', 'packaging/fonts.txt') }}
       - run: ./build.sh
       - run: go test ./...
+
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - id: version
+        name: Date tag on master, dev-SHA otherwise
+        shell: sh
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/master ]; then
+            version=$(date -u '+%Y%m%d-%H%M%S')
+          else
+            version=dev-$(printf '%s' "$GITHUB_SHA" | cut -c1-7)
+          fi
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+  package-linux:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest supported baseline: glibc 2.35, Wayland 1.20.
+        runner: [ubuntu-22.04, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Install Gio and install-test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
+            libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev \
+            libxcursor-dev libvulkan-dev desktop-file-utils libglib2.0-bin
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            packaging/embed
+            internal/app/embed
+          key: embed-${{ hashFiles('packaging/assets.txt', 'packaging/fonts.txt') }}
+      - name: Package
+        shell: sh
+        run: |
+          tarball=$(scripts/package-linux.sh "$VERSION")
+          mkdir -p tmp/package
+          tar -xzf "$tarball" -C tmp/package
+          printf 'BINARY=%s\n' "$(ls tmp/package/*/pepe)" >> "$GITHUB_ENV"
+      - run: scripts/check-linux-binary.sh "$BINARY"
+      - run: scripts/test-install.sh "$BINARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package-${{ matrix.runner }}
+          path: dist/pepe-*.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [version, linux, macos, package-linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: package-*
+          path: release
+          merge-multiple: true
+      - name: Publish
+        shell: sh
+        working-directory: release
+        run: |
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+          gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$VERSION" --generate-notes --latest -- *

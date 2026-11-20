@@ -65,4 +65,8 @@ ln -s "$TEST/outside" "$DEST/logo_1280x720.png"
 expect_failure "$FETCH" "$DEST"
 [ ! -e "$TEST/outside" ] || fail 'Downloader followed asset symlink'
 [ -z "$(find "$DEST" -name '.asset.*' -print)" ] || fail 'Download scratch files leaked'
+grep -F logo_1280x720.png "$REPO/packaging/assets.txt" > "$TEST/other.txt"
+"$FETCH" "$TEST/other" "$TEST/other.txt"
+[ "$(ls "$TEST/other")" = logo_1280x720.png ] || fail 'Explicit manifest not used'
+expect_failure "$FETCH" "$TEST/other" "$TEST/missing.txt"
 printf 'Artwork fetch tests passed.\n'

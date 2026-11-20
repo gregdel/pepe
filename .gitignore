@@ -4,7 +4,7 @@ pepe.log
 polochon-gio
 polochon-gio.log
 dist/
-internal/app/embed/*.ttf
+internal/app/embed/
 packaging/embed/
 .pi/tmp/
 /tmp/

@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 # Offline standalone-binary integration; no real desktop, server or player used.
+# Usage: test-install.sh [BINARY] (default: build from the checkout).
 set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 for tool in go desktop-file-validate gio sha256sum; do
@@ -13,7 +14,11 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 assert_line() { grep -Fx -- "$2" "$1" >/dev/null || fail "Missing line '$2' in $1"; }
 expect_failure() { if "$@" > "$TEST/output" 2>&1; then fail "Unexpected success: $*"; fi; }
 mkdir "$TEST/download" "$TEST/bin"
-(cd "$ROOT" && TMPDIR="$TEST" go build -o "$TEST/download/pepe" .)
+if [ "$#" -gt 0 ]; then
+	cp -- "$1" "$TEST/download/pepe"
+else
+	(cd "$ROOT" && TMPDIR="$TEST" go build -o "$TEST/download/pepe" .)
+fi
 # Never refresh the real desktop database, open a window or contact Polochon.
 cat > "$TEST/bin/update-desktop-database" <<'EOF'
 #!/bin/sh

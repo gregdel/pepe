@@ -2,6 +2,8 @@ module github.com/gregdel/pepe
 
 go 1.27.1
 
+toolchain go1.27.4
+
 require (
 	gioui.org v0.10.2
 	github.com/dustin/go-humanize v1.0.1
