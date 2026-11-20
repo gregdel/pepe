@@ -89,7 +89,7 @@ func renderDetailScrim(t *testing.T, size image.Point, scrim func(C)) image.Imag
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	img, err := png.Decode(file)
 	if err != nil {
 		t.Fatal(err)

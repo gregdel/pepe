@@ -181,8 +181,8 @@ func TestSwitchPlaybackStopsBeforeStartingNextPlayer(t *testing.T) {
 case " $* " in
   *--title=Second*) printf 'second\n' >> "$PEPE_TEST_LOG"; exit 0 ;;
 esac
-printf 'first\n' >> "$PEPE_TEST_LOG"
 trap 'printf "stopped\n" >> "$PEPE_TEST_LOG"; exit 0' TERM
+printf 'first\n' >> "$PEPE_TEST_LOG"
 while :; do sleep 0.1; done
 `
 	if err := os.WriteFile(playerPath, []byte(script), 0o700); err != nil {

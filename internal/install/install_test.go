@@ -18,7 +18,11 @@ const fakeExecutable = "fake executable v1\n"
 
 func newTestInstaller(t *testing.T) (installer, string) {
 	t.Helper()
-	base := t.TempDir()
+	// The installer refuses symlinked parents; macOS temp dirs live under the /var symlink.
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	home := filepath.Join(base, "home with spaces")
 	data := filepath.Join(base, "data")
 	config := filepath.Join(base, "config")
@@ -583,9 +587,10 @@ func TestInstallPreservesExistingData(t *testing.T) {
 			}
 			icon := filepath.Join(i.paths.root, "icon.png")
 			outside := filepath.Join(filepath.Dir(source), "user-file")
-			if kind == "source icon" {
+			switch kind {
+			case "source icon":
 				writeTestFile(t, icon, "source artwork", 0o640)
-			} else if kind == "unknown symlink" {
+			case "unknown symlink":
 				writeTestFile(t, outside, "user data", 0o640)
 				makeTestLink(t, outside, icon)
 			}

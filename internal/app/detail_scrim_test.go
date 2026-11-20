@@ -26,7 +26,7 @@ func detailScreenshot(t *testing.T, f *headlessFixture) image.Image {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	img, err := png.Decode(file)
 	if err != nil {
 		t.Fatal(err)

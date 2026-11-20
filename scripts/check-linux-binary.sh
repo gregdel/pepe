@@ -7,7 +7,8 @@ if [ "$#" -ne 1 ]; then
 	exit 2
 fi
 MAX_GLIBC=2.35
-ALLOWED='libc.so.6 libm.so.6 libresolv.so.2 libdl.so.2 libpthread.so.0
+ALLOWED='ld-linux-x86-64.so.2 ld-linux-aarch64.so.1
+libc.so.6 libm.so.6 libresolv.so.2 libdl.so.2 libpthread.so.0
 libEGL.so.1 libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1
 libxkbcommon.so.0 libxkbcommon-x11.so.0 libX11.so.6 libX11-xcb.so.1 libxcb.so.1
 libXcursor.so.1 libXfixes.so.3'

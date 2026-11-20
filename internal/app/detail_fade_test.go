@@ -62,7 +62,7 @@ func renderDetailFadeFrame(t *testing.T, window *headless.Window, router *input.
 }
 
 func detailFadeLuminance(c color.RGBA) float64 {
-	return linearLuminance(color.NRGBA{R: c.R, G: c.G, B: c.B, A: c.A})
+	return linearLuminance(color.NRGBA(c))
 }
 
 func detailFadePixelNear(a, b color.RGBA, tolerance int) bool {
@@ -81,7 +81,7 @@ func detailFadePixelNear(a, b color.RGBA, tolerance int) bool {
 // beneath them changes. Semantic bounds keep the samples on the real control.
 func assertDetailFadeForeground(t *testing.T, label string, col color.NRGBA, frames ...detailFadeFrame) {
 	t.Helper()
-	want := color.RGBA{R: col.R, G: col.G, B: col.B, A: col.A}
+	want := color.RGBA(col)
 	first := frames[0]
 	bounds := first.bounds[label]
 	count := 0
@@ -255,7 +255,7 @@ func TestDetailArtworkEntranceFade(t *testing.T) {
 			}
 			bg := end.pixels.RGBAAt(protected.X, protected.Y)
 			for _, fg := range []color.NRGBA{colorFg, colorSubtle, colorPrimary} {
-				l1 := detailFadeLuminance(color.RGBA{R: fg.R, G: fg.G, B: fg.B, A: fg.A})
+				l1 := detailFadeLuminance(color.RGBA(fg))
 				l2 := detailFadeLuminance(bg)
 				ratio := (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
 				if ratio < 4.5 {
