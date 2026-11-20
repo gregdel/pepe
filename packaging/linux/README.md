@@ -114,10 +114,9 @@ mkdir -p dist
 (cd dist && sha256sum pepe > pepe.sha256)
 ```
 
-In addition to pinned Roboto fonts, `build.sh` fetches artwork
-with `scripts/fetch-assets.sh packaging/embed`. The platform-independent
-`packaging/assets.txt` pins the five artwork attachments from
-[issue #1](https://git.quimbo.fr/gregdel/pepe/issues/1). Downloads use HTTPS and
+`build.sh` fetches the Roboto fonts pinned in `packaging/fonts.txt` and the artwork
+pinned in the platform-independent `packaging/assets.txt`, hosted in the
+[assets-v1 release](https://github.com/gregdel/pepe/releases/tag/assets-v1). Downloads use HTTPS and
 SHA-256 verification; failures abort the build. `packaging/embed` and embedded
 fonts are gitignored, and verified cached files work offline. Original artwork
 bytes/resolutions are retained; no images are committed. These downloads happen

@@ -1,4 +1,4 @@
-![pépé](https://git.quimbo.fr/attachments/d60c99c5-e49b-4931-bc29-4dac2df14488)
+![pépé](https://github.com/gregdel/pepe/releases/download/assets-v1/banner_1448x1086.png)
 
 # pépé
 
