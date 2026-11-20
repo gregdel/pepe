@@ -43,7 +43,7 @@ func (command playerControl) args() []any {
 // playerControls serializes commands for one immutable playback socket. It is
 // canceled and discarded before any replacement can start, including its replies.
 type playerControls struct {
-	commands chan playerControl
+	commands chan []any // mpv IPC commands
 	results  chan error
 	cancel   context.CancelFunc
 	done     chan struct{}
@@ -52,7 +52,7 @@ type playerControls struct {
 func newPlayerControls(socket string, invalidate func()) *playerControls {
 	ctx, cancel := context.WithCancel(context.Background())
 	controls := &playerControls{
-		commands: make(chan playerControl, 16), results: make(chan error, 16),
+		commands: make(chan []any, 16), results: make(chan error, 16),
 		cancel: cancel, done: make(chan struct{}),
 	}
 	go func() {
@@ -80,8 +80,7 @@ func newPlayerControls(socket string, invalidate func()) *playerControls {
 	return controls
 }
 
-func sendPlayerControl(parent context.Context, socket string, command playerControl) error {
-	args := command.args()
+func sendPlayerControl(parent context.Context, socket string, args []any) error {
 	if args == nil {
 		return fmt.Errorf("unknown playback command")
 	}
@@ -137,6 +136,10 @@ func (a *App) handlePlayerControl(command playerControl) {
 		a.requestPlayerStop()
 		return
 	}
+	a.queuePlayerCommand(command.args())
+}
+
+func (a *App) queuePlayerCommand(args []any) {
 	if a.playerStopping || a.pendingPlayback != nil {
 		a.webCommandError = "Playback is stopping."
 		return
@@ -145,7 +148,7 @@ func (a *App) handlePlayerControl(command playerControl) {
 		a.playerControls = newPlayerControls(a.playerSocket, a.invalidate)
 	}
 	select {
-	case a.playerControls.commands <- command:
+	case a.playerControls.commands <- args:
 	default:
 		a.webCommandError = "Playback controls are busy; try again."
 	}
@@ -174,4 +177,61 @@ func (a *App) drainPlayerControls() {
 			return
 		}
 	}
+}
+
+// remoteActions name the web remote actions that drive mpv while it plays.
+var remoteActions = map[inputAction]string{
+	actionUp: "up", actionDown: "down", actionLeft: "left", actionRight: "right",
+	actionActivate: "ok", actionBack: "back", actionSubtitles: "subtitles",
+}
+
+// remoteActionArgs maps a remote action to mpv. pepe.lua handles it when
+// loaded, so its subtitle selector receives the arrows; otherwise it maps to
+// fixed player commands.
+func remoteActionArgs(action inputAction, scripted bool) []any {
+	name, ok := remoteActions[action]
+	switch {
+	case !ok:
+		return nil
+	case scripted:
+		return []any{"script-message-to", "pepe", "remote", name}
+	}
+	switch action {
+	case actionLeft:
+		return playerControlBack.args()
+	case actionRight:
+		return playerControlNext.args()
+	case actionActivate:
+		return playerControlPause.args()
+	case actionSubtitles:
+		return []any{"cycle", "sub"}
+	case actionUp:
+		return []any{"keypress", "UP"}
+	case actionDown:
+		return []any{"keypress", "DOWN"}
+	}
+	return nil
+}
+
+// handleRemoteAction sends web remote navigation to mpv while it plays, so the
+// remote never moves the hidden library UI. It reports whether it handled it.
+func (a *App) handleRemoteAction(action inputAction) bool {
+	if a.playerStatus != PlayerStatusRunning {
+		return false
+	}
+	if action == actionToggleSection {
+		a.webCommandError = "Not available during playback."
+		return true
+	}
+	// Without pepe.lua there is no player menu for Back to close.
+	if action == actionHome || action == actionBack && !a.playerScripted {
+		a.handlePlayerControl(playerControlStop)
+		return true
+	}
+	args := remoteActionArgs(action, a.playerScripted)
+	if args == nil {
+		return false
+	}
+	a.queuePlayerCommand(args)
+	return true
 }

@@ -326,7 +326,9 @@ func (a *App) drainWebCommands() {
 					a.handlePlayerControl(command.control)
 				}
 			default:
-				a.dispatchAction(command.action)
+				if !a.handleRemoteAction(command.action) {
+					a.dispatchAction(command.action)
+				}
 			}
 		default:
 			return

@@ -51,6 +51,7 @@ type playerCommand struct {
 	args       []string
 	mode       PlayerMode
 	fromWeb    bool
+	scripted   bool // pepe.lua handles remote actions
 }
 
 type playerResult struct {
@@ -275,6 +276,7 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 		_ = os.RemoveAll(runtimeDir)
 		return playerCommand{}, err
 	}
+	command.scripted = len(interfaceArgs) > 0
 	// Keep the media URL last for wrappers that add platform options before it.
 	last := len(command.args) - 1
 	command.args = append(append(command.args[:last:last], interfaceArgs...), command.args[last])
@@ -341,7 +343,7 @@ func (a *App) startPlayer(command playerCommand) bool {
 	}
 
 	started := time.Now()
-	a.logger().Info("player started", "player", command.args[0], "mode", command.mode,
+	a.logger().Info("player started", "player", command.args[0], "mode", command.mode, "script", command.scripted,
 		"title", command.title, "media", command.args[len(command.args)-1])
 	done := make(chan playerResult, 1)
 	stop := make(chan struct{})
@@ -356,6 +358,7 @@ func (a *App) startPlayer(command playerCommand) bool {
 	a.playerSocket = command.sockPath
 	a.playerSession++
 	a.playerFromWeb = command.fromWeb
+	a.playerScripted = command.scripted
 	a.playerStopping = false
 	a.playerError = ""
 	if a.invalidate != nil {

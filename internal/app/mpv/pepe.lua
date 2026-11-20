@@ -268,6 +268,20 @@ end
 
 mp.add_key_binding(nil, "toggle-help", toggle_help)
 mp.add_key_binding(opts.controls == "keyboard" and "TAB" or nil, "subtitles", select_subtitles)
+
+-- pépé forwards web remote actions here while playing. Open menus get the
+-- keys; otherwise OK/Back act like a TV remote and Up/Down keep mpv's bindings.
+local remote_keys = {up = "UP", down = "DOWN", left = "LEFT", right = "RIGHT", ok = "ENTER", back = "ESC"}
+mp.register_script_message("remote", function(action)
+    if selecting or action == "up" or action == "down" then
+        if remote_keys[action] then mp.commandv("keypress", remote_keys[action]) end
+    elseif action == "left" then mp.command("seek -10")
+    elseif action == "right" then mp.command("seek 10")
+    elseif action == "ok" then mp.command("cycle pause")
+    elseif action == "back" then mp.command("quit")
+    elseif action == "subtitles" then select_subtitles()
+    end
+end)
 if opts.controls == "hdmi-cec" then
     if opts.volume_keys then
         mp.set_property_native("volume-max", 100)

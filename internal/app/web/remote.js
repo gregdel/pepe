@@ -9,6 +9,7 @@ const urlInput = document.getElementById("url");
 const playLabel = document.getElementById("play-label");
 const siteChips = document.querySelectorAll("[data-site]");
 const commandButtons = document.querySelectorAll("[data-command]");
+const sectionButton = document.querySelector('[data-action="section"]');
 const logsLink = document.getElementById("logs-link");
 let requests = Promise.resolve();
 let pending = 0;
@@ -126,6 +127,7 @@ function render(state, title, status, badge, controls) {
   setText(statusText, status);
   setText(source, badge);
   commandButtons.forEach(button => { button.disabled = !controls(button.dataset.command); });
+  sectionButton.disabled = state === "running";
   logsLink.hidden = state !== "error";
 }
 

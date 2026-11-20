@@ -108,6 +108,7 @@ type App struct {
 	playerTitle      string
 	playerError      string
 	playerFromWeb    bool
+	playerScripted   bool
 	playerStopping   bool
 	playerSocket     string
 	playerSession    uint64

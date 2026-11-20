@@ -69,7 +69,7 @@ func TestPlayerControlCommandsAndReplies(t *testing.T) {
 					_, err = fmt.Fprintf(conn, "not json\n{\"event\":\"property-change\"}\n{\"request_id\":99,\"error\":\"failure\"}\n{\"request_id\":1,\"error\":%q}\n", result)
 					peerDone <- err
 				}()
-				err := sendPlayerControl(context.Background(), socket, command)
+				err := sendPlayerControl(context.Background(), socket, command.args())
 				if (err == nil) != success {
 					t.Fatalf("control result = %v", err)
 				}
@@ -79,7 +79,7 @@ func TestPlayerControlCommandsAndReplies(t *testing.T) {
 			})
 		}
 	}
-	if err := sendPlayerControl(context.Background(), "", "run"); err == nil {
+	if playerControl("run").args() != nil || sendPlayerControl(context.Background(), "", nil) == nil {
 		t.Fatal("arbitrary IPC command accepted")
 	}
 }
@@ -117,7 +117,7 @@ func TestPlayerControlTimeoutCancellationAndUnavailable(t *testing.T) {
 					}
 				}()
 			}
-			err := sendPlayerControl(ctx, socket, playerControlPause)
+			err := sendPlayerControl(ctx, socket, playerControlPause.args())
 			if err == nil || strings.Contains(err.Error(), socket) {
 				t.Fatalf("timeout/cancel result = %v", err)
 			}
@@ -125,7 +125,7 @@ func TestPlayerControlTimeoutCancellationAndUnavailable(t *testing.T) {
 		})
 	}
 	_, socket := controlListener(t)
-	if err := sendPlayerControl(context.Background(), socket+"-missing", playerControlPause); err == nil || strings.Contains(err.Error(), socket) {
+	if err := sendPlayerControl(context.Background(), socket+"-missing", playerControlPause.args()); err == nil || strings.Contains(err.Error(), socket) {
 		t.Fatalf("unavailable result = %v", err)
 	}
 }
@@ -162,7 +162,7 @@ func TestPlayerControlsSerializeAndCancelQueuedCommands(t *testing.T) {
 	controls := newPlayerControls(socket, nil)
 	defer func() { controls.cancel(); <-controls.done }()
 	for _, command := range commands {
-		controls.commands <- command
+		controls.commands <- command.args()
 	}
 	for _, command := range commands {
 		want, _ := json.Marshal(command.args())
@@ -189,7 +189,7 @@ func TestPlayerControlsSerializeAndCancelQueuedCommands(t *testing.T) {
 	controls.cancel()
 	<-controls.done
 	// Even if a command arrives after cancellation, this session cannot execute it.
-	controls.commands <- playerControlPause
+	controls.commands <- playerControlPause.args()
 	if len(controls.commands) != 1 {
 		t.Fatal("canceled session consumed a late command")
 	}
@@ -223,4 +223,63 @@ func TestPlayerControlStateAndStop(t *testing.T) {
 	}
 	<-controls.done
 	a.handlePlayerControl(playerControlStop) // no double-close panic
+}
+
+func TestRemoteActionsDrivePlayer(t *testing.T) {
+	a := New(nil, nil, nil, nil, nil)
+	defer a.Close()
+	if a.handleRemoteAction(actionUp) {
+		t.Fatal("idle remote action did not go to the library UI")
+	}
+	queued := func() []any {
+		t.Helper()
+		select {
+		case args := <-a.playerControls.commands:
+			return args
+		default:
+			t.Fatal("remote action was not queued for mpv")
+			return nil
+		}
+	}
+	done := make(chan struct{})
+	close(done)
+	a.playerStatus = PlayerStatusRunning
+	a.playerControls = &playerControls{commands: make(chan []any, 16), cancel: func() {}, done: done}
+	for _, scripted := range []bool{true, false} {
+		a.playerScripted = scripted
+		for action, want := range map[inputAction]string{
+			actionUp:        `["script-message-to","pepe","remote","up"]`,
+			actionActivate:  `["script-message-to","pepe","remote","ok"]`,
+			actionBack:      `["script-message-to","pepe","remote","back"]`,
+			actionSubtitles: `["script-message-to","pepe","remote","subtitles"]`,
+			actionRefresh:   "",
+			actionQuit:      "",
+		} {
+			if !scripted {
+				want = map[inputAction]string{
+					actionUp: `["keypress","UP"]`, actionActivate: `["cycle","pause"]`,
+					actionSubtitles: `["cycle","sub"]`,
+				}[action]
+				if action == actionBack {
+					continue // stops playback, checked below
+				}
+			}
+			if handled := a.handleRemoteAction(action); handled != (want != "") {
+				t.Fatalf("scripted=%t action %v handled = %t", scripted, action, handled)
+			}
+			if want == "" {
+				continue
+			}
+			if got, _ := json.Marshal(queued()); string(got) != want {
+				t.Fatalf("scripted=%t action %v sent %s, want %s", scripted, action, got, want)
+			}
+		}
+	}
+	if !a.handleRemoteAction(actionToggleSection) || len(a.playerControls.commands) != 0 || a.webCommandError == "" {
+		t.Fatal("section switch moved the hidden library UI during playback")
+	}
+	a.playerStop = make(chan struct{})
+	if !a.handleRemoteAction(actionBack) || !a.playerStopping {
+		t.Fatal("Back without the player script did not stop playback")
+	}
 }
