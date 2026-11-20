@@ -66,6 +66,9 @@ var (
 )
 
 func (a *App) contextHints() []hint {
+	if a.setup != nil {
+		return setupHints()
+	}
 	if p := a.subPopup; p != nil {
 		var hints []hint
 		if p.state == SubtitlePopupReady && len(p.entries) > 0 {

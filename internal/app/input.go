@@ -86,6 +86,10 @@ func (a *App) dispatchAction(action inputAction) {
 	if action == actionUnknown {
 		return
 	}
+	if a.setup != nil {
+		a.handleSetupAction(action)
+		return
+	}
 	if a.subPopup != nil {
 		a.handlePopupAction(action)
 		return

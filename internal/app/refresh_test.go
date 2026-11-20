@@ -404,3 +404,116 @@ func TestSSEClosedChannelStopsForwarder(t *testing.T) {
 		t.Fatal("closed SSE channel started a refresh")
 	}
 }
+
+func TestInitialLoadFailureRetriesUntilSuccess(t *testing.T) {
+	invalidated := make(chan struct{}, 8)
+	a := New(NewEmptyAPIClient(nil), nil, nil, func() { invalidated <- struct{}{} }, nil)
+	defer a.Close()
+	var calls atomic.Int32
+	a.refreshLibraryFn = func() error {
+		if calls.Add(1) < 3 {
+			return errors.New("server down")
+		}
+		return nil
+	}
+	a.loadRetryDelay = time.Millisecond
+	a.startWithLoadError(errors.New("initial failure"))
+	if a.refreshError == nil || !a.loadPending || a.loadRetryDue == nil {
+		t.Fatalf("initial state = (%v, %t, retry scheduled %t)", a.refreshError, a.loadPending, a.loadRetryDue != nil)
+	}
+	waitFor(t, func() bool {
+		a.drainChannels()
+		return !a.loadPending
+	})
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("fetch attempts = %d, want 3", got)
+	}
+	if a.refreshError != nil || a.loadRetryDue != nil || a.loadRetryTimer != nil || a.refreshing {
+		t.Fatalf("after success = (%v, retry %t, refreshing %t)", a.refreshError, a.loadRetryDue != nil, a.refreshing)
+	}
+}
+
+func TestInitialLoadRetryBackoffIsCapped(t *testing.T) {
+	a := New(NewEmptyAPIClient(nil), nil, nil, nil, nil)
+	defer a.Close()
+	// loadRetryDelay holds the next delay; the first retry waits initialLoadRetryMin.
+	var next []time.Duration
+	for range 6 {
+		a.scheduleLoadRetry()
+		a.stopLoadRetry()
+		next = append(next, a.loadRetryDelay)
+	}
+	want := []time.Duration{10 * time.Second, 20 * time.Second, 40 * time.Second, time.Minute, time.Minute, time.Minute}
+	if !reflect.DeepEqual(next, want) {
+		t.Fatalf("next retry delays = %v, want %v", next, want)
+	}
+}
+
+func TestManualRefreshSuccessCancelsLoadRetry(t *testing.T) {
+	a := New(NewEmptyAPIClient(nil), nil, nil, nil, nil)
+	defer a.Close()
+	a.refreshLibraryFn = func() error { return nil }
+	a.startWithLoadError(errors.New("initial failure")) // first retry in 5s
+	a.startRefresh()
+	waitFor(t, func() bool {
+		a.drainChannels()
+		return !a.refreshing
+	})
+	if a.loadPending || a.loadRetryDue != nil || a.loadRetryTimer != nil || a.refreshError != nil {
+		t.Fatalf("manual success left retry state = (%t, %t, %v)", a.loadPending, a.loadRetryDue != nil, a.refreshError)
+	}
+}
+
+func TestDisplayServerHidesCredentials(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://polochon.example":                                  "https://polochon.example",
+		"http://user:secret@polochon.example:8080/api?token=x#frag": "http://polochon.example:8080/api",
+		"not a url": "",
+	} {
+		if got := displayServer(in); got != want {
+			t.Errorf("displayServer(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestHeadlessInitialLoadFailureExplainsServer(t *testing.T) {
+	client := NewEmptyAPIClient(nil)
+	client.server = displayServer("https://user:secret@polochon.example")
+	a := New(client, nil, &Config{MPVPath: "mpv"}, nil, nil)
+	defer a.Close()
+	a.refreshLibraryFn = func() error { return nil }
+	a.startWithLoadError(errors.New("dial tcp: connection refused"))
+	d, err := driver.New(driver.Config{Width: 1024, Height: 768, PxPerDp: 1, PxPerSp: 1}, a.Layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	tree := d.Tree()
+	for _, label := range []string{"Server unreachable · retrying", "Can't reach the polochon server", "https://polochon.example", "dial tcp: connection refused", "Retrying in 5s"} {
+		if !headlessHasLabel(tree, label) {
+			t.Fatalf("load failure screen missing %q", label)
+		}
+	}
+	if headlessHasLabel(tree, "0 items in the library") || headlessHasLabel(tree, "Refresh failed") {
+		t.Fatal("load failure still looks like an empty library")
+	}
+	a.loadRetryAt = time.Now().Add(1500 * time.Millisecond)
+	if err := d.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	if !headlessHasLabel(d.Tree(), "Retrying in 2s") {
+		t.Fatal("countdown does not round up to whole seconds")
+	}
+
+	a.startRefresh()
+	waitFor(t, func() bool {
+		a.drainChannels()
+		return !a.loadPending
+	})
+	if err := d.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	if tree := d.Tree(); headlessHasLabel(tree, "Can't reach the polochon server") || !headlessHasLabel(tree, "0 items in the library") {
+		t.Fatal("successful load did not restore the normal section hero")
+	}
+}

@@ -256,7 +256,7 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 		mpvTitle = ""
 	}
 	command.args = buildMPVArgs(
-		a.mpvPath,
+		resolveMPVPath(a.mpvPath, runtime.GOOS, exec.LookPath, isExecutableFile),
 		mpvTitle,
 		videoURL,
 		subtitleURLs,
@@ -318,6 +318,10 @@ func (a *App) startPlayer(command playerCommand) bool {
 	cmd.Env = mpvEnvironment(os.Environ())
 	if err := cmd.Start(); err != nil {
 		_ = os.RemoveAll(command.runtimeDir)
+		if errors.Is(err, exec.ErrNotFound) {
+			a.setPlayerError("mpv not found: install mpv 0.41+ with Lua, or set mpv_path in the config")
+			return false
+		}
 		a.setPlayerError(err.Error())
 		return false
 	}
@@ -397,6 +401,38 @@ func (a *App) applyPlaybackSnapshot(tracker *playbackTracker) {
 	if pos > minimumResumePosition {
 		a.resumePos[mediaKey] = pos
 	}
+}
+
+// macOSMPVFallbacks are tried when the default "mpv" is not on PATH, as for apps
+// opened from Finder (PATH=/usr/bin:/bin:/usr/sbin:/sbin): Homebrew on Apple
+// Silicon and Intel, MacPorts, then the mpv.app bundle.
+var macOSMPVFallbacks = []string{
+	"/opt/homebrew/bin/mpv",
+	"/usr/local/bin/mpv",
+	"/opt/local/bin/mpv",
+	"/Applications/mpv.app/Contents/MacOS/mpv",
+}
+
+// resolveMPVPath returns the player to execute. Configured paths and other
+// platforms are left to exec; only the default name gets macOS fallbacks.
+func resolveMPVPath(path, goos string, lookPath func(string) (string, error), isExecutable func(string) bool) string {
+	if path != "mpv" || goos != "darwin" {
+		return path
+	}
+	if _, err := lookPath(path); err == nil {
+		return path
+	}
+	for _, candidate := range macOSMPVFallbacks {
+		if isExecutable(candidate) {
+			return candidate
+		}
+	}
+	return path
+}
+
+func isExecutableFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
 func detectPlayerMode() PlayerMode {

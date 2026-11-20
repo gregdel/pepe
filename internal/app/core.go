@@ -38,6 +38,7 @@ const (
 type APIClient struct {
 	client        *papi.Client
 	token         string
+	server        string // polochon_url without credentials or query, for display
 	artworkClient *http.Client
 
 	mu         sync.RWMutex
@@ -77,6 +78,7 @@ func NewAPIClient(endpoint, token string, log *slog.Logger) (*APIClient, error) 
 
 	c := NewEmptyAPIClient(log)
 	c.client, c.token = papiClient, token
+	c.server = displayServer(endpoint)
 	if endpointURL, err := url.Parse(endpoint); err == nil && strings.EqualFold(endpointURL.Scheme, "http") {
 		c.log.Warn("polochon_url uses unencrypted HTTP; use the canonical HTTPS URL if available: HTTP-to-HTTPS artwork redirects are blocked")
 	}
@@ -418,4 +420,15 @@ func artworkOriginPort(u *url.URL) string {
 // Internally the papi client reconnects with exponential backoff.
 func (c *APIClient) Events(ctx context.Context) <-chan struct{} {
 	return c.client.Events(ctx)
+}
+
+// displayServer strips credentials, query and fragment from polochon_url so it
+// can be shown on screen.
+func displayServer(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	u.User, u.RawQuery, u.Fragment = nil, "", ""
+	return u.String()
 }

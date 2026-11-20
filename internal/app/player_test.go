@@ -3,7 +3,9 @@ package app
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -307,6 +309,66 @@ func TestSwitchPlaybackUsesLatestSelection(t *testing.T) {
 	case <-stop:
 	default:
 		t.Fatal("player stop not requested")
+	}
+}
+
+func TestResolveMPVPath(t *testing.T) {
+	onPath := func(string) (string, error) { return "/usr/bin/mpv", nil }
+	notOnPath := func(string) (string, error) { return "", exec.ErrNotFound }
+	only := func(paths ...string) func(string) bool {
+		return func(path string) bool { return slices.Contains(paths, path) }
+	}
+	for _, tc := range []struct {
+		name, path, goos string
+		lookPath         func(string) (string, error)
+		executable       func(string) bool
+		want             string
+	}{
+		{"linux keeps default", "mpv", "linux", notOnPath, only("/opt/homebrew/bin/mpv"), "mpv"},
+		{"configured path kept", "/my/mpv", "darwin", notOnPath, only("/opt/homebrew/bin/mpv"), "/my/mpv"},
+		{"configured name kept", "mpv-wrapper", "darwin", notOnPath, only("/opt/homebrew/bin/mpv"), "mpv-wrapper"},
+		{"PATH wins", "mpv", "darwin", onPath, only("/opt/homebrew/bin/mpv"), "mpv"},
+		{"homebrew arm64", "mpv", "darwin", notOnPath, only("/opt/homebrew/bin/mpv", "/usr/local/bin/mpv"), "/opt/homebrew/bin/mpv"},
+		{"homebrew intel", "mpv", "darwin", notOnPath, only("/usr/local/bin/mpv", "/Applications/mpv.app/Contents/MacOS/mpv"), "/usr/local/bin/mpv"},
+		{"macports", "mpv", "darwin", notOnPath, only("/opt/local/bin/mpv"), "/opt/local/bin/mpv"},
+		{"mpv.app", "mpv", "darwin", notOnPath, only("/Applications/mpv.app/Contents/MacOS/mpv"), "/Applications/mpv.app/Contents/MacOS/mpv"},
+		{"nothing found", "mpv", "darwin", notOnPath, only(), "mpv"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveMPVPath(tc.path, tc.goos, tc.lookPath, tc.executable); got != tc.want {
+				t.Fatalf("resolveMPVPath(%q, %q) = %q, want %q", tc.path, tc.goos, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsExecutableFile(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "exe")
+	plain := filepath.Join(dir, "plain")
+	if err := os.WriteFile(exe, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plain, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !isExecutableFile(exe) || isExecutableFile(plain) || isExecutableFile(dir) || isExecutableFile(filepath.Join(dir, "missing")) {
+		t.Fatal("isExecutableFile misclassified exe, plain file, directory or missing path")
+	}
+}
+
+func TestPlayerNotFoundOnPath(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	runtimeDir, _, _, err := createPlayerRuntime("secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &App{resumePos: make(map[string]float64), images: newAsyncCache[paint.ImageOp](1, 0)}
+	if a.startPlayer(playerCommand{runtimeDir: runtimeDir, args: []string{"mpv"}}) {
+		t.Fatal("startPlayer succeeded without mpv on PATH")
+	}
+	if a.playerStatus != PlayerStatusError || !strings.HasPrefix(a.playerError, "mpv not found: ") {
+		t.Fatalf("missing mpv state = (%q, %q)", a.playerStatus, a.playerError)
 	}
 }
 

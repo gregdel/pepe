@@ -130,9 +130,15 @@ type App struct {
 	refreshPending   bool
 	refreshError     error
 	refreshDone      chan refreshResult // goroutine → event loop
-	refreshLibraryFn func() error       // optional fetch override for tests
-	sseCh            <-chan struct{}    // SSE events from server
-	sseSignal        chan struct{}      // bounded wakeup for the event loop
+	loadPending      bool               // the first library load has not succeeded yet
+	loadErr          error              // last first-load failure; kept while retrying
+	loadRetryDelay   time.Duration
+	loadRetryTimer   *time.Timer
+	loadRetryAt      time.Time       // when the scheduled retry fires; zero when none
+	loadRetryDue     chan struct{}   // timer → event loop
+	refreshLibraryFn func() error    // optional fetch override for tests
+	sseCh            <-chan struct{} // SSE events from server
+	sseSignal        chan struct{}   // bounded wakeup for the event loop
 	sseCancel        context.CancelFunc
 	sseDone          <-chan struct{}
 
@@ -141,6 +147,9 @@ type App struct {
 
 	// subtitle search popup (nil = closed)
 	subPopup *SubtitlePopup
+
+	// configuration problem screen; replaces the whole UI (nil = normal app)
+	setup *setupScreen
 
 	// Gio persistent list state (must survive between frames)
 	clickables   map[string]*widget.Clickable
@@ -353,6 +362,7 @@ func (a *App) forwardSSE(ctx context.Context, done chan<- struct{}) {
 // Run calls it when the window exits;
 // headless users should call it when their driver/app lifetime ends.
 func (a *App) Close() {
+	a.stopLoadRetry()
 	if a.webUI != nil {
 		a.webUI.close()
 	}
@@ -370,10 +380,14 @@ func (a *App) Close() {
 
 // ── Main event loop ───────────────────────────────────────────────────────────
 
-// Run drives the application in a normal Gio window.
-func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Config) error {
+// Run drives the application in a normal Gio window. A non-nil loadErr means
+// the initial library fetch failed: start empty and keep retrying.
+func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Config, loadErr error) error {
 	a := New(client, sseCh, config, w.Invalidate, func() { w.Perform(system.ActionClose) })
 	defer a.Close()
+	if loadErr != nil {
+		a.startWithLoadError(loadErr)
+	}
 	if config != nil {
 		if err := a.startWebUI(config.WebUIAddr); err != nil {
 			return err
@@ -453,6 +467,7 @@ func (a *App) drainChannels() {
 	}
 
 	a.drainRefresh()
+	a.drainLoadRetry()
 
 	a.drainSubtitlePopup()
 
@@ -565,6 +580,9 @@ func (a *App) layout(gtx C) D {
 					return a.layoutPlayingBar(gtx)
 				}),
 				layout.Flexed(1, func(gtx C) D {
+					if a.setup != nil {
+						return a.layoutSetup(gtx)
+					}
 					a.selectionHidden = a.subPopup != nil
 					defer func() { a.selectionHidden = false }()
 					if a.detail != nil {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	yaml "github.com/goccy/go-yaml"
+
+	"github.com/gregdel/pepe/packaging"
 )
 
 const (
@@ -99,6 +102,38 @@ func DefaultConfigPath() string {
 	return filepath.Join(".", "pepe.yaml")
 }
 
+// exampleToken is the placeholder in packaging/linux/config.example.yaml.
+const exampleToken = "replace-me"
+
+// WriteConfigTemplate creates a private config file from the example when
+// none exists. It never replaces an existing file or symlink.
+func WriteConfigTemplate(path string) (created bool, err error) {
+	data, err := packaging.Files.ReadFile("linux/config.example.yaml")
+	if err != nil {
+		return false, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return false, err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return false, err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return false, err
+	}
+	return true, nil
+}
+
 func LoadConfig(path string) (*Config, error) {
 	cfg := DefaultConfig()
 	if path != "" {
@@ -126,13 +161,16 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.PolochonURL = strings.TrimSpace(value)
 	}
 	if cfg.PolochonURL == "" {
-		return nil, fmt.Errorf("POLOCHON_URL environment variable is required")
+		return nil, fmt.Errorf("polochon_url is not set (config file or POLOCHON_URL)")
 	}
 	if value := os.Getenv("POLOCHON_TOKEN"); value != "" {
 		cfg.Token = strings.TrimSpace(value)
 	}
 	if cfg.Token == "" {
-		return nil, fmt.Errorf("POLOCHON_TOKEN environment variable is required")
+		return nil, fmt.Errorf("polochon_token is not set (config file or POLOCHON_TOKEN)")
+	}
+	if cfg.Token == exampleToken {
+		return nil, fmt.Errorf("polochon_token still has the example value")
 	}
 	if value := strings.TrimSpace(os.Getenv("POLOCHON_MPV")); value != "" {
 		cfg.MPVPath = value

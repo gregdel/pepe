@@ -45,7 +45,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nRequired configuration:\n")
 		fmt.Fprintf(os.Stderr, "  %s with polochon_url and polochon_token\n", *configPath)
 		fmt.Fprintf(os.Stderr, "  or POLOCHON_URL and POLOCHON_TOKEN environment variables\n")
-		os.Exit(1)
+		showSetup(*configPath, err)
 	}
 	if *mpvPath != "" {
 		config.MPVPath = *mpvPath
@@ -89,10 +89,11 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sseCh := apiClient.Events(ctx)
-	if err := apiClient.FetchLibrary(); err != nil {
-		log.Error("failed to fetch library", "error", err)
-		fmt.Fprintf(os.Stderr, "Failed to fetch library: %v\n", err)
-		os.Exit(1)
+	// A server that is down at startup is retried from the window, not fatal.
+	loadErr := apiClient.FetchLibrary()
+	if loadErr != nil {
+		log.Error("failed to fetch library", "error", loadErr)
+		fmt.Fprintf(os.Stderr, "Failed to fetch library, retrying in the background: %v\n", loadErr)
 	}
 
 	go func() {
@@ -101,7 +102,7 @@ func main() {
 		if config.Fullscreen {
 			w.Option(gioapp.Decorated(false), gioapp.Fullscreen.Option())
 		}
-		if err := app.Run(w, apiClient, sseCh, config); err != nil {
+		if err := app.Run(w, apiClient, sseCh, config, loadErr); err != nil {
 			log.Error("error running app", "error", err)
 			fmt.Fprintf(os.Stderr, "Error running app: %v\n", err)
 			os.Exit(1)
@@ -176,6 +177,30 @@ func applyWebUIAddr(config *app.Config, flags *flag.FlagSet, addr string) error 
 		}
 	})
 	return config.ValidateWebUI()
+}
+
+// showSetup explains a configuration problem in a window, since desktop
+// launches have no visible stderr, then exits with status 1.
+func showSetup(path string, problem error) {
+	created := false
+	// Environment-only setups keep relying on the environment.
+	if os.Getenv("POLOCHON_URL") == "" && os.Getenv("POLOCHON_TOKEN") == "" {
+		var err error
+		if created, err = app.WriteConfigTemplate(path); err != nil {
+			fmt.Fprintf(os.Stderr, "Could not create %s: %v\n", path, err)
+		} else if created {
+			fmt.Fprintf(os.Stderr, "Created %s from the example; edit it and start pépé again.\n", path)
+		}
+	}
+	go func() {
+		w := new(gioapp.Window)
+		w.Option(gioapp.Title("pépé"), gioapp.Size(unit.Dp(1200), unit.Dp(700)))
+		if err := app.RunSetup(w, path, problem, created); err != nil {
+			fmt.Fprintf(os.Stderr, "Error running app: %v\n", err)
+		}
+		os.Exit(1)
+	}()
+	gioapp.Main()
 }
 
 func configureLogging(path string) (*os.File, error) {

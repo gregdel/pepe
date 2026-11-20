@@ -226,8 +226,12 @@ func (a *App) layoutHeaderStatus(gtx C) D {
 		}))
 		parts = append(parts, layout.Rigid(layout.Spacer{Width: dp16}.Layout))
 	} else if a.refreshError != nil {
+		status := "Refresh failed"
+		if a.loadPending {
+			status = "Server unreachable · retrying"
+		}
 		parts = append(parts, layout.Rigid(func(gtx C) D {
-			return a.label(gtx, spTiny, "Refresh failed", colorTerminal, font.Medium)
+			return a.label(gtx, spTiny, status, colorTerminal, font.Medium)
 		}))
 		parts = append(parts, layout.Rigid(layout.Spacer{Width: dp16}.Layout))
 	}

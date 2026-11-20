@@ -3,7 +3,9 @@ package app
 import (
 	"fmt"
 	"image"
+	"math"
 	"strings"
+	"time"
 
 	"gioui.org/font"
 	"gioui.org/layout"
@@ -48,6 +50,9 @@ func (a *App) previewRoot(gtx C) D {
 		name, count = "Shows", a.browse.library.showCount
 	}
 
+	if a.loadPending && a.loadErr != nil {
+		return a.previewLoadError(gtx, name)
+	}
 	return layout.UniformInset(dp32).Layout(gtx, func(gtx C) D {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
@@ -58,6 +63,49 @@ func (a *App) previewRoot(gtx C) D {
 				return a.label(gtx, spBody, fmt.Sprintf("%d items in the library", count), colorSubtle, 0)
 			}),
 		)
+	})
+}
+
+// loadRetryStatus counts down to the next first-load retry and schedules the
+// frame that shows the next second.
+func (a *App) loadRetryStatus(gtx C) string {
+	if a.refreshing {
+		return "Retrying now…"
+	}
+	if a.loadRetryAt.IsZero() {
+		return "Retrying automatically."
+	}
+	remaining := time.Until(a.loadRetryAt)
+	seconds := max(int(math.Ceil(remaining.Seconds())), 1)
+	gtx.Execute(op.InvalidateCmd{At: a.loadRetryAt.Add(-time.Duration(seconds-1) * time.Second)})
+	return fmt.Sprintf("Retrying in %ds", seconds)
+}
+
+// previewLoadError replaces the empty section hero until the first library
+// load succeeds, so an unreachable server is not mistaken for an empty library.
+func (a *App) previewLoadError(gtx C, name string) D {
+	rows := []layout.FlexChild{
+		layout.Rigid(func(gtx C) D { return a.label(gtx, spTitle, name, colorFg, font.Bold) }),
+		layout.Rigid(layout.Spacer{Height: dp8}.Layout),
+		layout.Rigid(func(gtx C) D { return a.label(gtx, spBody, "Can't reach the polochon server", colorFg, font.Medium) }),
+	}
+	if server := a.client.server; server != "" {
+		rows = append(rows,
+			layout.Rigid(layout.Spacer{Height: dp8}.Layout),
+			layout.Rigid(func(gtx C) D { return a.body(gtx, spBody, server, colorSubtle, 0) }),
+		)
+	}
+	rows = append(rows,
+		layout.Rigid(layout.Spacer{Height: dp24}.Layout),
+		layout.Rigid(func(gtx C) D {
+			gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(proseWidth))
+			return a.body(gtx, spMeta, a.loadErr.Error(), colorSubtle, 4)
+		}),
+		layout.Rigid(layout.Spacer{Height: dp24}.Layout),
+		layout.Rigid(func(gtx C) D { return a.body(gtx, spBody, a.loadRetryStatus(gtx), colorSubtle, 0) }),
+	)
+	return layout.UniformInset(dp32).Layout(gtx, func(gtx C) D {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 	})
 }
 
