@@ -49,10 +49,10 @@ cp "$DESKTOP" "$TEST/checkout.desktop"
 expect_failure "$DOWNLOAD" install
 grep -F 'unregister the checkout first' "$TEST/output" >/dev/null || fail 'Missing checkout unregistration guidance'
 cmp "$TEST/checkout.desktop" "$DESKTOP" || fail 'Install changed the checkout entry'
-[ ! -e "$APP" ] && [ ! -e "$BIN" ] || fail 'Refused install created payload or launcher'
+{ [ ! -e "$APP" ] && [ ! -e "$BIN" ]; } || fail 'Refused install created payload or launcher'
 rm "$DESKTOP" # Simulate manual unregistration using the old checkout script.
 "$DOWNLOAD" install > "$TEST/output"
-[ -d "$APP" ] && [ ! -L "$APP" ] || fail 'Installation is not a real directory'
+{ [ -d "$APP" ] && [ ! -L "$APP" ]; } || fail 'Installation is not a real directory'
 for path in app current releases; do [ ! -e "$APP/$path" ] || fail "Installation created $path nesting"; done
 [ "$(stat -c %a "$CONFIG")" = 600 ] || fail 'Configuration is not private'
 player=$(printf '%s' "$APP/mpv-auto.sh" | sed "s/'/''/g")
@@ -63,12 +63,12 @@ desktop-file-validate "$DESKTOP"
 # All assets/wrappers must be independent copies, including after download removal.
 rm -rf "$TEST/download"
 for script in mpv-auto.sh mpv-inhibit.sh mpv-keepawake.sh; do
-	[ -x "$APP/$script" ] && [ ! -L "$APP/$script" ] || fail "Missing copied wrapper: $script"
+	{ [ -x "$APP/$script" ] && [ ! -L "$APP/$script" ]; } || fail "Missing copied wrapper: $script"
 	cmp "$ROOT/packaging/linux/$script" "$APP/$script"
 done
 while read -r digest name _url; do
 	case "$digest" in ''|'#'*) continue ;; esac
-	[ -f "$APP/assets/$name" ] && [ ! -L "$APP/assets/$name" ] || fail "Missing copied artwork: $name"
+	{ [ -f "$APP/assets/$name" ] && [ ! -L "$APP/assets/$name" ]; } || fail "Missing copied artwork: $name"
 done < "$ROOT/packaging/assets.txt"
 (cd "$APP" && sha256sum --check --strict SHA256SUMS)
 [ -z "$(find "$APP/" -type l -print)" ] || fail 'Installed payload contains symlinks'
@@ -95,7 +95,7 @@ for path in app current releases; do [ ! -e "$APP/$path" ] || fail "Reinstall cr
 assert_line "$CONFIG" 'mpv_path: /my/custom/player'
 [ "$(stat -c %a "$CONFIG")" = 640 ] || fail 'Existing config permissions changed'
 "$BIN" uninstall > "$TEST/output"
-[ ! -e "$APP" ] && [ ! -e "$DESKTOP" ] && [ ! -L "$BIN" ] || fail 'Clean uninstall left installed files'
+{ [ ! -e "$APP" ] && [ ! -e "$DESKTOP" ] && [ ! -L "$BIN" ]; } || fail 'Clean uninstall left installed files'
 assert_line "$CONFIG" 'mpv_path: /my/custom/player'
 
 # Helper tests use only fake Flatpak/mpv. Never execute the keepawake worker.

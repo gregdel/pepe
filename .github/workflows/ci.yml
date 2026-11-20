@@ -32,7 +32,7 @@ jobs:
             gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
             libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev \
             libxcursor-dev libvulkan-dev libegl-mesa0 libgl1-mesa-dri \
-            desktop-file-utils libglib2.0-bin shellcheck
+            desktop-file-utils libglib2.0-bin
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -45,7 +45,16 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.15.0
-      - run: shellcheck build.sh scripts/*.sh packaging/linux/*.sh
+      # Ubuntu ships an older shellcheck; pin the release developers use.
+      - name: shellcheck v0.11.0
+        shell: sh
+        run: |
+          curl -fsSL --retry 3 -o tmp-shellcheck.tar.xz \
+            https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+          echo "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  tmp-shellcheck.tar.xz" | sha256sum --check --strict
+          tar -xJf tmp-shellcheck.tar.xz -C "$RUNNER_TEMP"
+          rm tmp-shellcheck.tar.xz
+          "$RUNNER_TEMP/shellcheck-v0.11.0/shellcheck" build.sh scripts/*.sh packaging/linux/*.sh
       - run: scripts/test-assets.sh
       - run: scripts/test-install.sh
 
