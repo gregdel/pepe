@@ -13,16 +13,10 @@ are required, even to run `pepe install` or `pepe uninstall`.
 
 ## Install
 
-On macOS, see [macOS installation](packaging/macos/README.md). On Linux:
-
-Copy the native `pepe` binary to a temporary location (`~/Downloads`, `/tmp`, etc.).
-Run these commands from the directory containing `pepe`:
-
-```sh
-chmod +x ./pepe && ./pepe install
-```
-
-This installs pépé and its menu entry, preserving existing config.
+- Linux and Steam Deck: [Linux installation](packaging/linux/README.md#native-binary-installation)
+- macOS: [macOS installation](packaging/macos/README.md)
+- NixOS: add the flake input `github:gregdel/pepe` and install
+  `packages.${system}.default` (do not run `pepe install`)
 
 ## Configure
 

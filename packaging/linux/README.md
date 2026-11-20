@@ -2,12 +2,18 @@
 
 ## Native binary installation
 
-Obtain the native Linux `pepe` binary for your architecture (amd64 for Steam Deck),
-not a tar archive. Optionally verify it alongside the supplied `pepe.sha256`:
+Download `pepe-…-linux-amd64.tar.gz` (most PCs and the Steam Deck) or
+`pepe-…-linux-arm64.tar.gz`, and optionally `SHA256SUMS`, from the
+[latest release](https://github.com/gregdel/pepe/releases/latest), then:
 
 ```sh
-sha256sum -c pepe.sha256
+sha256sum -c --ignore-missing SHA256SUMS
+tar -xzf pepe-*-linux-*.tar.gz
+cd pepe-*-linux-*/
+./pepe install
 ```
+
+To upgrade, do the same with a newer release.
 
 Checkout desktop registration is no longer supported. If an older checkout owns
 the desktop entry, unregister it **before updating the checkout** using its old
@@ -20,13 +26,6 @@ scripts/install-desktop.sh --uninstall
 If you have already updated, use the script from the older checkout or revision.
 The copied installer refuses to overwrite the old entry; it does not migrate or
 remove it automatically. The old script preserves unverified icons.
-
-Install for the current user:
-
-```sh
-chmod +x ./pepe
-./pepe install
-```
 
 No sudo, compiler or network is needed. Installation runs before configuration
 loading, Polochon server access or UI startup. mpv is external and is not installed.
