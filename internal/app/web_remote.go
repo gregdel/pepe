@@ -17,8 +17,6 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 )
 
-// The remote is a rail page, not a catalog sort order. Keep the underlying
-// listing and navigation intact while it is displayed.
 type webRemotePage struct {
 	urls    []string
 	cursor  int
@@ -26,19 +24,10 @@ type webRemotePage struct {
 	message string
 }
 
-func (a *App) railOption() ListingMode {
-	if a.browse.remote != nil {
-		return listingModeCount
-	}
-	return a.browse.library.mode
-}
-
-func (a *App) selectRailOption(option ListingMode) {
-	if option != listingModeCount {
-		a.applyListingMode(option)
-		return
-	}
+// openWebRemote shows the QR page without changing the catalog listing.
+func (a *App) openWebRemote() {
 	page := &webRemotePage{}
+	a.browse.closePage()
 	a.browse.remote = page
 	if a.webUI == nil {
 		page.message = "Enable the web remote with web_ui_addr: \":8081\" or -web-ui-addr=:8081."

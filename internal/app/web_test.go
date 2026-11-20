@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -64,6 +65,11 @@ func TestWebHTTPValidationAndAssets(t *testing.T) {
 		{"GET", "/", "", 200},
 		{"GET", "/remote.css", "", 200},
 		{"GET", "/remote.js", "", 200},
+		{"GET", "/logs", "", 200},
+		{"GET", "/logs.js", "", 200},
+		{"GET", "/api/logs", "", 200},
+		{"GET", "/api/logs?after=-1", "", 400},
+		{"POST", "/api/logs", "{}", 405},
 		{"GET", "/roboto.ttf", "", 200},
 		{"GET", "/symbols.ttf", "", 404},
 		{"GET", "/api/status", "", 200},
@@ -398,5 +404,58 @@ func TestWebStatusDoesNotExposePlayerErrorDetails(t *testing.T) {
 	data, err := io.ReadAll(response.Body)
 	if err != nil || strings.Contains(string(data), "secret") || strings.Contains(string(data), "/private") {
 		t.Fatal("player details leaked")
+	}
+}
+
+func TestWebLogs(t *testing.T) {
+	logs := NewLogBuffer("polochon-secret")
+	logger := slog.New(logs.Handler(nil))
+	web := &webUI{commands: make(chan webCommand, webQueueSize), logs: logs}
+	handler := web.handler()
+	read := func(after uint64) (result struct {
+		Entries   []logEntry `json:"entries"`
+		Next      uint64     `json:"next"`
+		Truncated bool       `json:"truncated"`
+	}) {
+		t.Helper()
+		response := webRequest(handler, "GET", fmt.Sprintf("/api/logs?after=%d", after), "")
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || result.Entries == nil {
+			t.Fatalf("logs response %s: %v", response.Body.String(), err)
+		}
+		return result
+	}
+	if result := read(0); len(result.Entries) != 0 || result.Next != 0 || result.Truncated {
+		t.Fatalf("empty log = %+v", result)
+	}
+	logger.Info("player started", "media", "https://cdn.example/v.mp4?token=polochon-secret")
+	logger.With("source", "mpv").Error("[ytdl_hook] ERROR: Unsupported URL")
+	first := read(0)
+	if len(first.Entries) != 2 || first.Next != 2 || first.Entries[1].Source != "mpv" || first.Entries[1].Level != "ERROR" {
+		t.Fatalf("log entries = %+v", first)
+	}
+	if got := first.Entries[0].Message; got != "player started media=https://cdn.example/v.mp4?…" {
+		t.Fatalf("redacted message = %q", got)
+	}
+	if result := read(first.Next); len(result.Entries) != 0 || result.Next != first.Next {
+		t.Fatalf("incremental read = %+v", result)
+	}
+	response := webRequest(handler, "GET", "/api/logs", "")
+	if strings.Contains(response.Body.String(), "polochon-secret") {
+		t.Fatal("logs API leaked a secret")
+	}
+}
+
+func TestWebLogsFollowUseLogs(t *testing.T) {
+	a := New(nil, nil, nil, nil, nil)
+	if err := a.startWebUI("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.Close)
+	logs := NewLogBuffer()
+	a.UseLogs(logs)
+	slog.New(logs.Handler(nil)).Info("after start")
+	response := webRequest(a.webUI.handler(), "GET", "/api/logs", "")
+	if !strings.Contains(response.Body.String(), "after start") {
+		t.Fatalf("/api/logs ignored the buffer set after start: %s", response.Body.String())
 	}
 }

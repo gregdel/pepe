@@ -4,12 +4,16 @@ package app
 // from Gio event delivery.
 func (a *App) navigateUp() {
 	if a.browse.focus == browseFocusModeRail {
-		a.selectRailOption((a.railOption() + listingModeCount) % (listingModeCount + 1))
+		a.selectRailOption((a.railOption() + railEntryCount - 1) % railEntryCount)
 		a.browse.focus = browseFocusModeRail
 		return
 	}
 	if a.browse.remote != nil {
 		a.browse.remote.move(-1)
+		return
+	}
+	if a.browse.logs != nil {
+		a.browse.logs.scroll(-1)
 		return
 	}
 	if a.browse.nav.isAtRoot() {
@@ -21,12 +25,16 @@ func (a *App) navigateUp() {
 
 func (a *App) navigateDown() {
 	if a.browse.focus == browseFocusModeRail {
-		a.selectRailOption((a.railOption() + 1) % (listingModeCount + 1))
+		a.selectRailOption((a.railOption() + 1) % railEntryCount)
 		a.browse.focus = browseFocusModeRail
 		return
 	}
 	if a.browse.remote != nil {
 		a.browse.remote.move(1)
+		return
+	}
+	if a.browse.logs != nil {
+		a.browse.logs.scroll(1)
 		return
 	}
 	if a.browse.nav.isAtRoot() {
@@ -40,7 +48,7 @@ func (a *App) navigateLeft() {
 	if a.browse.focus == browseFocusModeRail {
 		return
 	}
-	if a.browse.remote != nil || a.browse.nav.isAtRoot() {
+	if a.browse.onPage() || a.browse.nav.isAtRoot() {
 		a.browse.focus = browseFocusModeRail
 		return
 	}
@@ -54,14 +62,14 @@ func (a *App) navigateLeft() {
 // navigateHome leaves details and restores the browse home, retaining the listing.
 func (a *App) navigateHome() {
 	a.popDetail()
-	a.browse.remote = nil
+	a.browse.closePage()
 	a.browse.nav.returnToHome()
 	a.browse.focus = browseFocusContent
 }
 
 func (a *App) navigateEscape() {
-	if a.browse.remote != nil {
-		a.browse.remote = nil
+	if a.browse.onPage() {
+		a.browse.closePage()
 		a.browse.focus = browseFocusModeRail
 		return
 	}
@@ -93,7 +101,7 @@ func (a *App) activateBrowseSelection() {
 }
 
 func (a *App) navigateForward(openTerminal bool) {
-	if a.browse.remote != nil {
+	if a.browse.onPage() {
 		return
 	}
 	if a.browse.nav.isAtRoot() {
@@ -129,7 +137,7 @@ func (a *App) navigateForward(openTerminal bool) {
 }
 
 func (a *App) toggleSection() {
-	a.browse.remote = nil
+	a.browse.closePage()
 	a.browse.focus = browseFocusContent
 	section := SectionMovies
 	if a.browse.nav.section == SectionMovies {

@@ -15,7 +15,7 @@ import (
 	"github.com/gregdel/pepe/internal/app"
 )
 
-func TestLoggingDisabledByDefault(t *testing.T) {
+func TestLoggingInMemoryByDefault(t *testing.T) {
 	original := slog.Default()
 	t.Cleanup(func() { slog.SetDefault(original) })
 	var output bytes.Buffer
@@ -23,18 +23,18 @@ func TestLoggingDisabledByDefault(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", stateDir)
 
-	file, err := configureLogging("")
+	file, err := configureLogging("", app.NewLogBuffer())
 	if err != nil || file != nil {
-		t.Fatalf("disabled logging returned file %v, error %v", file, err)
+		t.Fatalf("default logging returned file %v, error %v", file, err)
 	}
 	slog.Info("should be discarded")
 	log.Print("standard logging should also be discarded")
 	if output.Len() != 0 {
-		t.Fatalf("logging was not disabled: %s", output.String())
+		t.Fatalf("default logging wrote outside memory: %s", output.String())
 	}
 	entries, err := os.ReadDir(stateDir)
 	if err != nil || len(entries) != 0 {
-		t.Fatalf("disabled logging created state entries: %v, error %v", entries, err)
+		t.Fatalf("default logging created state entries: %v, error %v", entries, err)
 	}
 }
 
@@ -45,7 +45,7 @@ func TestLoggingToExplicitFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("existing entry\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	file, err := configureLogging(path)
+	file, err := configureLogging(path, app.NewLogBuffer())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestLoggingToExplicitFile(t *testing.T) {
 
 func TestLoggingInvalidPath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing", "pepe.log")
-	file, err := configureLogging(path)
+	file, err := configureLogging(path, app.NewLogBuffer())
 	if err == nil || file != nil {
 		t.Fatalf("invalid path returned file %v, error %v", file, err)
 	}

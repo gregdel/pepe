@@ -27,6 +27,7 @@ var (
 	colorSelectBg = color.NRGBA{R: 0x6a, G: 0x4f, B: 0xe0, A: 0xff} // selection pill (5.5:1 on white)
 	colorSelectFg = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
 	colorTerminal = color.NRGBA{R: 0xff, G: 0x69, B: 0xb4, A: 0xff} // playable items (kept pink)
+	colorWarn     = color.NRGBA{R: 0xff, G: 0xb4, B: 0x68, A: 0xff} // log warnings
 )
 
 // ── Type scale — calibrated for 10-foot / TV viewing distance at 1080p ──────

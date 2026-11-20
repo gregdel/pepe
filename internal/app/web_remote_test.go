@@ -68,22 +68,27 @@ func TestWebRemoteNavigationPreservesListing(t *testing.T) {
 		t.Fatal("Left did not return to the remote's rail entry")
 	}
 	a.navigateEscape()
-	if a.browse.remote != nil || a.browse.nav != nav || a.railOption() != ListingModeDateAdded {
+	if a.browse.remote != nil || a.browse.nav != nav || a.railOption() != railLastAdded {
 		t.Fatal("Back did not restore the existing listing")
 	}
 	a.navigateUp()
-	if a.railOption() != ListingModeTitle {
+	if a.railOption() != railSmartList {
 		t.Fatal("Up from Last added did not select Smart list")
 	}
 	a.navigateUp()
-	if a.browse.remote == nil {
-		t.Fatal("Up from Smart list did not wrap to Web remote")
+	if a.browse.logs == nil || a.browse.remote != nil {
+		t.Fatal("Up from Smart list did not wrap to Logs")
+	}
+	a.navigateUp()
+	if a.browse.remote == nil || a.browse.logs != nil {
+		t.Fatal("Up from Logs did not select Web remote")
 	}
 	a.navigateDown()
-	if a.railOption() != ListingModeTitle || a.browse.remote != nil {
-		t.Fatal("Down from Web remote did not wrap to Smart list")
+	a.navigateDown()
+	if a.railOption() != railSmartList || a.browse.onPage() {
+		t.Fatal("Down from Logs did not wrap to Smart list")
 	}
-	a.selectRailOption(listingModeCount)
+	a.selectRailOption(railWebRemote)
 	a.navigateHome()
 	if a.browse.remote != nil || !a.browse.nav.isAtRoot() || a.browse.focus != browseFocusContent {
 		t.Fatal("Home did not leave the QR page")
@@ -146,6 +151,7 @@ func TestHeadlessWebRemoteSetup(t *testing.T) {
 	f := newHeadlessFixture(t)
 	headlessKey(t, f, "LeftArrow")
 	headlessKey(t, f, "UpArrow")
+	headlessKey(t, f, "UpArrow") // past Logs
 	if !headlessHasLabel(f.driver.Tree(), "Web remote") || !headlessHasLabel(f.driver.Tree(), f.app.browse.remote.message) {
 		t.Fatal("disabled remote is missing its setup instructions")
 	}
@@ -156,7 +162,7 @@ func TestHeadlessWebRemoteSetup(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(f.app.Close)
-	f.app.selectRailOption(listingModeCount)
+	f.app.selectRailOption(railWebRemote)
 	if len(f.app.browse.remote.urls) != 0 || !strings.Contains(f.app.browse.remote.message, "instead of localhost") {
 		t.Fatal("loopback listener was advertised to a phone")
 	}

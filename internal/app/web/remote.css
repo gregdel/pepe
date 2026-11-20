@@ -19,6 +19,7 @@
   --accent-light: #b8a3ff;
   --accent-soft: #2e2560;
   --error: #ffb4b4;
+  --warn: #ffcf8a;
   --radius: 1.25rem;
 }
 * { box-sizing: border-box; }
@@ -41,20 +42,21 @@ main {
   max-width: 30rem; margin: 0 auto;
   padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
     calc(5rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
-  grid-template-areas: "link" "now" "remote";
+  grid-template-areas: "link" "now" "remote" "footer";
 }
-main[data-layout="playing"] { grid-template-areas: "now" "link" "remote"; }
+main[data-layout="playing"] { grid-template-areas: "now" "link" "remote" "footer"; }
 .now { grid-area: now; }
 .link { grid-area: link; }
 .remote { grid-area: remote; }
+.footer { grid-area: footer; display: flex; justify-content: center; }
 @media (min-width: 720px) {
   main {
     max-width: 62rem; gap: 1.5rem; padding-top: max(2rem, env(safe-area-inset-top));
     grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
-    grid-template-rows: auto 1fr;
-    grid-template-areas: "link remote" "now remote";
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas: "link remote" "now remote" ". footer";
   }
-  main[data-layout="playing"] { grid-template-areas: "now remote" "link remote"; }
+  main[data-layout="playing"] { grid-template-areas: "now remote" "link remote" ". footer"; }
 }
 
 section {
@@ -157,6 +159,37 @@ input:focus { border-color: var(--accent-light); }
   font-size: .8rem; line-height: 1.2; text-align: center;
 }
 .keys svg { color: var(--accent-light); }
+
+/* Links */
+.icon-button {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 3rem; height: 3rem; border-radius: 50%; color: var(--muted); text-decoration: none;
+  transition: background-color .15s, color .15s;
+}
+.icon-button:active { background: var(--surface-3); color: var(--text); }
+@media (hover: hover) { .icon-button:hover { background: var(--surface-2); color: var(--text); } }
+.icon-button:focus-visible, .text-link:focus-visible { outline: 3px solid var(--accent-light); outline-offset: 3px; }
+.text-link { display: inline-block; margin-top: .4rem; color: var(--accent-light); font-size: .9rem; font-weight: 500; }
+
+/* Logs page */
+main.logs-page { display: block; max-width: 56rem; padding-top: 0; }
+.logs-header {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: .75rem;
+  margin: 0 -.25rem; padding: max(.75rem, env(safe-area-inset-top)) .25rem .75rem;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+}
+.logs-title { flex: 1; min-width: 0; }
+.logs-title h1 { font-size: 1.25rem; font-weight: 700; }
+#log-count { margin: .1rem 0 0; color: var(--muted); font-size: .85rem; }
+.logs-note { margin: 1.5rem 0; color: var(--muted); text-align: center; }
+.log-list { margin: 0; padding: 0; list-style: none; }
+.log-entry { padding: .75rem 0; border-bottom: 1px solid var(--border); }
+.log-meta { display: flex; gap: .6rem; margin: 0 0 .25rem; color: var(--muted); font-size: .8rem; }
+.log-level { font-weight: 700; letter-spacing: .03em; }
+.level-error .log-level { color: var(--error); }
+.level-warn .log-level { color: var(--warn); }
+.log-message { margin: 0; font-size: .95rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.copy-buffer { position: fixed; top: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; }
 
 /* Feedback */
 .toast {

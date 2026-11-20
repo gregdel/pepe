@@ -21,6 +21,7 @@ import (
 // the left, contextual preview on the right.
 
 func (a *App) layoutBrowse(gtx C) D {
+	a.syncLogs()
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(a.layoutHeader),
 		layout.Rigid(hairline),
@@ -31,6 +32,9 @@ func (a *App) layoutBrowse(gtx C) D {
 				layout.Flexed(1, func(gtx C) D {
 					if a.browse.remote != nil {
 						return a.layoutWebRemote(gtx)
+					}
+					if a.browse.logs != nil {
+						return a.layoutLogs(gtx)
 					}
 					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 						layout.Flexed(navFlex, a.layoutNavPanel),
@@ -56,7 +60,51 @@ var (
 	radixModeIcon     = mustIcon(icons.ActionList)
 	dateAddedModeIcon = mustIcon(icons.ActionSchedule)
 	webRemoteIcon     = mustIcon(icons.CommunicationPhoneLinkRing)
+	logsIcon          = mustIcon(icons.ActionBugReport)
 )
+
+// railEntry is a mode rail row: the catalog listings, then pages that replace
+// the catalog without changing its listing or navigation.
+type railEntry int
+
+const (
+	railSmartList  = railEntry(ListingModeTitle)
+	railLastAdded  = railEntry(ListingModeDateAdded)
+	railWebRemote  = railLastAdded + 1
+	railLogs       = railWebRemote + 1
+	railEntryCount = railLogs + 1
+)
+
+func (a *App) railOption() railEntry {
+	switch {
+	case a.browse.remote != nil:
+		return railWebRemote
+	case a.browse.logs != nil:
+		return railLogs
+	}
+	return railEntry(a.browse.library.mode)
+}
+
+func (a *App) selectRailOption(entry railEntry) {
+	switch entry {
+	case railWebRemote:
+		a.openWebRemote()
+	case railLogs:
+		a.openLogs()
+	default:
+		a.applyListingMode(ListingMode(entry))
+	}
+}
+
+func railLabel(entry railEntry) string {
+	switch entry {
+	case railWebRemote:
+		return "Web remote"
+	case railLogs:
+		return "Logs"
+	}
+	return listingModeLabel(ListingMode(entry))
+}
 
 func mustIcon(data []byte) *widget.Icon {
 	icon, err := widget.NewIcon(data)
@@ -90,17 +138,11 @@ func (a *App) layoutModeRail(gtx C) D {
 			}
 			return inset.Layout(gtx, func(gtx C) D {
 				return layout.Center.Layout(gtx, func(gtx C) D {
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-						layout.Rigid(func(gtx C) D {
-							return a.layoutModeOption(gtx, ListingModeTitle)
-						}),
-						layout.Rigid(func(gtx C) D {
-							return a.layoutModeOption(gtx, ListingModeDateAdded)
-						}),
-						layout.Rigid(func(gtx C) D {
-							return a.layoutModeOption(gtx, listingModeCount)
-						}),
-					)
+					var entries [railEntryCount]layout.FlexChild
+					for entry := range railEntryCount {
+						entries[entry] = layout.Rigid(func(gtx C) D { return a.layoutModeOption(gtx, entry) })
+					}
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx, entries[:]...)
 				})
 			})
 		}),
@@ -113,18 +155,20 @@ const (
 	railRowInset = 2 * (dp8 + dp12)
 )
 
-func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
+func (a *App) layoutModeOption(gtx C, mode railEntry) D {
 	active := a.railOption() == mode
 	focused := a.browse.focus == browseFocusModeRail && active
 	icon := radixModeIcon
 	switch mode {
-	case ListingModeDateAdded:
+	case railLastAdded:
 		icon = dateAddedModeIcon
-	case listingModeCount:
+	case railWebRemote:
 		icon = webRemoteIcon
+	case railLogs:
+		icon = logsIcon
 	}
 
-	return a.clickableLayout(gtx, "mode:"+listingModeLabel(mode), listingModeLabel(mode), func(gtx C) D {
+	return a.clickableLayout(gtx, "mode:"+railLabel(mode), railLabel(mode), func(gtx C) D {
 		return a.rowShell(gtx, focused, active, unit.Dp(64), func(gtx C) D {
 			iconColor := colorSubtle
 			if active {
@@ -146,7 +190,7 @@ func (a *App) layoutModeOption(gtx C, mode ListingMode) D {
 							return D{}
 						}
 						return layout.Inset{Left: dp12}.Layout(gtx, func(gtx C) D {
-							return a.label(gtx, sp, listingModeLabel(mode), iconColor, font.Medium)
+							return a.label(gtx, sp, railLabel(mode), iconColor, font.Medium)
 						})
 					}),
 				)
@@ -174,7 +218,7 @@ func (a *App) layoutHeader(gtx C) D {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			// Active listing mode.
 			layout.Rigid(func(gtx C) D {
-				return a.label(gtx, spHero, listingModeLabel(a.railOption()), colorPrimary, font.Bold)
+				return a.label(gtx, spHero, railLabel(a.railOption()), colorPrimary, font.Bold)
 			}),
 			layout.Rigid(layout.Spacer{Width: dp16}.Layout),
 			layout.Rigid(func(gtx C) D {
@@ -204,6 +248,9 @@ func (a *App) layoutSectionLabel(gtx C) D {
 			status = "Scan to connect"
 		}
 		return a.label(gtx, spMeta, status, colorFg, font.Medium)
+	}
+	if a.browse.logs != nil {
+		return a.label(gtx, spMeta, a.browse.logs.summary(), colorFg, font.Medium)
 	}
 	section := "Movies"
 	if a.browse.nav.isAtRoot() {
@@ -245,9 +292,6 @@ func (a *App) layoutHeaderStatus(gtx C) D {
 }
 
 func listingModeLabel(mode ListingMode) string {
-	if mode == listingModeCount {
-		return "Web remote"
-	}
 	if mode == ListingModeDateAdded {
 		return "Last added"
 	}

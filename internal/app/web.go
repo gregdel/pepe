@@ -7,10 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"mime"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +24,12 @@ var webCSS []byte
 
 //go:embed web/remote.js
 var webJS []byte
+
+//go:embed web/logs.html
+var webLogsHTML []byte
+
+//go:embed web/logs.js
+var webLogsJS []byte
 
 const webQueueSize = 32
 
@@ -48,6 +54,7 @@ type webStatus struct {
 // webUI owns only transport state. Handlers never access mutable App state.
 type webUI struct {
 	commands   chan webCommand
+	logs       *LogBuffer // guarded by mu; concurrency-safe, entries are already redacted
 	invalidate func()
 	server     *http.Server
 	listener   net.Listener
@@ -56,6 +63,18 @@ type webUI struct {
 	mu         sync.RWMutex
 	closing    bool
 	status     webStatus
+}
+
+func (web *webUI) logBuffer() *LogBuffer {
+	web.mu.RLock()
+	defer web.mu.RUnlock()
+	return web.logs
+}
+
+func (web *webUI) setLogs(logs *LogBuffer) {
+	web.mu.Lock()
+	web.logs = logs
+	web.mu.Unlock()
 }
 
 func (a *App) startWebUI(addr string) error {
@@ -75,6 +94,7 @@ func (a *App) startWebUI(addr string) error {
 	}
 	web := &webUI{
 		commands: make(chan webCommand, webQueueSize), invalidate: a.invalidate,
+		logs:     a.logs,
 		listener: listener, serveDone: make(chan struct{}),
 	}
 	web.server = &http.Server{
@@ -84,10 +104,7 @@ func (a *App) startWebUI(addr string) error {
 	}
 	a.webUI = web
 	a.publishWebStatus()
-	logger := slog.Default()
-	if a.client != nil && a.client.log != nil {
-		logger = a.client.log
-	}
+	logger := a.logger()
 	logger.Warn("web remote enabled without authentication; use only on trusted networks", "address", listener.Addr().String())
 	go func() {
 		defer close(web.serveDone)
@@ -143,6 +160,8 @@ func (web *webUI) handler() http.Handler {
 		"/{$}":        {"text/html; charset=utf-8", webHTML},
 		"/remote.css": {"text/css; charset=utf-8", webCSS},
 		"/remote.js":  {"text/javascript; charset=utf-8", webJS},
+		"/logs":       {"text/html; charset=utf-8", webLogsHTML},
+		"/logs.js":    {"text/javascript; charset=utf-8", webLogsJS},
 		"/roboto.ttf": {"font/ttf", embeddedRoboto},
 	} {
 		mux.HandleFunc("GET "+path, func(w http.ResponseWriter, r *http.Request) {
@@ -156,6 +175,28 @@ func (web *webUI) handler() http.Handler {
 		web.mu.RUnlock()
 		status.QueuedCommands = len(web.commands)
 		writeWebJSON(w, http.StatusOK, status)
+	})
+	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
+		var after uint64
+		if value := r.URL.Query().Get("after"); value != "" {
+			var err error
+			if after, err = strconv.ParseUint(value, 10, 64); err != nil {
+				writeWebError(w, http.StatusBadRequest, "invalid log position")
+				return
+			}
+		}
+		var response struct {
+			Entries   []logEntry `json:"entries"`
+			Next      uint64     `json:"next"`
+			Truncated bool       `json:"truncated"`
+		}
+		if logs := web.logBuffer(); logs != nil {
+			response.Entries, response.Next, response.Truncated = logs.since(after)
+		}
+		if response.Entries == nil {
+			response.Entries = []logEntry{}
+		}
+		writeWebJSON(w, http.StatusOK, response)
 	})
 	mux.HandleFunc("POST /api/action", func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
@@ -310,7 +351,7 @@ func (a *App) publishWebStatus() {
 	}
 	if a.playerError != "" {
 		// Player errors can contain private URLs or runtime paths.
-		status.Error = "Playback failed; check pépé on the display or its log."
+		status.Error = "Playback failed; see Logs."
 	}
 	a.webUI.mu.Lock()
 	a.webUI.status = status

@@ -37,7 +37,7 @@ func (a *App) currentVideo() polochon.Video {
 		return nil
 	}
 
-	if a.browse.remote != nil {
+	if a.browse.onPage() {
 		return nil
 	}
 	media := a.selectedBrowseMedia()

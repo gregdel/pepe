@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"image"
+	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	gioapp "gioui.org/app"
@@ -27,7 +29,6 @@ type ListingMode int
 const (
 	ListingModeTitle ListingMode = iota
 	ListingModeDateAdded
-	listingModeCount
 )
 
 type browseFocus int
@@ -125,6 +126,10 @@ type App struct {
 	webUI           *webUI
 	webCommandError string
 
+	// in-memory, redacted log; logsVisible lets other goroutines wake the UI
+	logs        *LogBuffer
+	logsVisible atomic.Bool
+
 	// library refresh
 	refreshing       bool
 	refreshPending   bool
@@ -178,8 +183,14 @@ type browseState struct {
 	library libraryView
 	nav     *NavigationState
 	focus   browseFocus
-	remote  *webRemotePage // separate from the catalog's listing mode
+	// Rail pages replace the catalog without changing its listing or navigation.
+	remote *webRemotePage
+	logs   *logsPage
 }
+
+func (b *browseState) onPage() bool { return b.remote != nil || b.logs != nil }
+
+func (b *browseState) closePage() { b.remote, b.logs = nil, nil }
 
 // savedSelection captures the identity of the currently selected media item so
 // navigation can be restored after a library refresh.
@@ -261,7 +272,7 @@ func (a *App) snapshotForMode(mode ListingMode) LibrarySnapshot {
 }
 
 func (a *App) applyListingMode(mode ListingMode) {
-	a.browse.remote = nil
+	a.browse.closePage()
 	wasAtRoot := a.browse.nav.isAtRoot()
 	section := a.browse.nav.section
 	homeCursor := a.browse.nav.cursor
@@ -314,6 +325,7 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		detailList:       layout.List{Axis: layout.Vertical},
 		images:           newWeightedAsyncCache[paint.ImageOp](3, 24, imageCacheBudget, imageOpWeight),
 		sseCh:            sseCh,
+		logs:             NewLogBuffer(),
 	}
 	if config != nil {
 		app.controls = config.Controls
@@ -358,11 +370,29 @@ func (a *App) forwardSSE(ctx context.Context, done chan<- struct{}) {
 	}
 }
 
+// UseLogs shows logs, the buffer the App's logger writes to, instead of the
+// App's own empty buffer. New entries redraw only the visible Logs page.
+func (a *App) UseLogs(logs *LogBuffer) {
+	if logs == nil {
+		return
+	}
+	a.logs = logs
+	if a.webUI != nil {
+		a.webUI.setLogs(logs)
+	}
+	logs.setNotify(func() {
+		if a.logsVisible.Load() && a.invalidate != nil {
+			a.invalidate()
+		}
+	})
+}
+
 // Close stops the web server, control worker, and background event forwarding.
 // Run calls it when the window exits;
 // headless users should call it when their driver/app lifetime ends.
 func (a *App) Close() {
 	a.stopLoadRetry()
+	a.logs.setNotify(nil)
 	if a.webUI != nil {
 		a.webUI.close()
 	}
@@ -380,11 +410,13 @@ func (a *App) Close() {
 
 // ── Main event loop ───────────────────────────────────────────────────────────
 
-// Run drives the application in a normal Gio window. A non-nil loadErr means
-// the initial library fetch failed: start empty and keep retrying.
-func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Config, loadErr error) error {
+// Run drives the application in a normal Gio window and shows logs, the buffer
+// the default slog handler writes to. A non-nil loadErr means the initial
+// library fetch failed: start empty and keep retrying.
+func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Config, loadErr error, logs *LogBuffer) error {
 	a := New(client, sseCh, config, w.Invalidate, func() { w.Perform(system.ActionClose) })
 	defer a.Close()
+	a.UseLogs(logs)
 	if loadErr != nil {
 		a.startWithLoadError(loadErr)
 	}
@@ -499,6 +531,7 @@ func (a *App) Loading() bool {
 
 func (a *App) Layout(gtx C) D {
 	defer a.publishWebStatus()
+	a.logsVisible.Store(false) // layoutLogs sets it while the page is drawn
 	gtx = scaleContext(gtx)
 	a.metric = gtx.Metric
 	// Run the last frame's click first: its closure captured that frame's
@@ -622,3 +655,11 @@ func (a *App) layout(gtx C) D {
 // ── Format helpers (ported from ui.go, no lipgloss) ──────────────────────────
 
 // ── MPV helpers (ported from ui.go) ──────────────────────────────────────────
+
+// logger is the client's logger, which the default handler stores in logs.
+func (a *App) logger() *slog.Logger {
+	if a.client != nil && a.client.log != nil {
+		return a.client.log
+	}
+	return slog.Default()
+}

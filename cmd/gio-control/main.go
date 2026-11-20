@@ -164,8 +164,14 @@ func writeReady(w interface{ Write([]byte) (int, error) }, width, height int) er
 	return err
 }
 
+// newLogger mirrors pépé: redacted entries go to the Logs page and stderr.
+func newLogger(secrets ...string) (*app.LogBuffer, *slog.Logger) {
+	logs := app.NewLogBuffer(secrets...)
+	return logs, slog.New(logs.Handler(slog.NewTextHandler(os.Stderr, nil)))
+}
+
 func newUI() (*app.App, func(), error) {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{}))
+	logs, logger := newLogger()
 	if os.Getenv("GIO_CONTROL_MOCK_MPV") == "1" {
 		path, err := os.Executable()
 		if err != nil {
@@ -175,7 +181,9 @@ func newUI() (*app.App, func(), error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		return app.New(client, nil, &app.Config{MPVPath: path}, nil, nil), func() {}, nil
+		ui := app.New(client, nil, &app.Config{MPVPath: path}, nil, nil)
+		ui.UseLogs(logs)
+		return ui, func() {}, nil
 	}
 	configPath := os.Getenv("GIO_CONTROL_CONFIG")
 	if configPath == "" {
@@ -190,13 +198,16 @@ func newUI() (*app.App, func(), error) {
 	}
 
 	if !configured {
-		return app.New(app.NewEmptyAPIClient(logger), nil, &app.Config{MPVPath: "mpv"}, nil, nil), func() {}, nil
+		ui := app.New(app.NewEmptyAPIClient(logger), nil, &app.Config{MPVPath: "mpv"}, nil, nil)
+		ui.UseLogs(logs)
+		return ui, func() {}, nil
 	}
 
 	config, err := app.LoadConfig(configPath)
 	if err != nil {
 		return nil, nil, err
 	}
+	logs, logger = newLogger(config.Token)
 	client, err := app.NewAPIClient(config.PolochonURL, config.Token, logger)
 	if err != nil {
 		return nil, nil, err
@@ -205,6 +216,7 @@ func newUI() (*app.App, func(), error) {
 		return nil, nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	app := app.New(client, client.Events(ctx), config, nil, nil)
-	return app, cancel, nil
+	ui := app.New(client, client.Events(ctx), config, nil, nil)
+	ui.UseLogs(logs)
+	return ui, cancel, nil
 }

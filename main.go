@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -70,10 +69,11 @@ func main() {
 		config.Fullscreen = false
 	}
 
-	logFile, err := configureLogging(*logFilePath)
+	logs := app.NewLogBuffer(config.Token)
+	logFile, err := configureLogging(*logFilePath, logs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to open log file '%s': %v\n", *logFilePath, err)
-		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+		slog.SetDefault(slog.New(logs.Handler(slog.NewTextHandler(os.Stderr, nil))))
 	} else if logFile != nil {
 		defer func() { _ = logFile.Close() }()
 	}
@@ -102,7 +102,7 @@ func main() {
 		if config.Fullscreen {
 			w.Option(gioapp.Decorated(false), gioapp.Fullscreen.Option())
 		}
-		if err := app.Run(w, apiClient, sseCh, config, loadErr); err != nil {
+		if err := app.Run(w, apiClient, sseCh, config, loadErr, logs); err != nil {
 			log.Error("error running app", "error", err)
 			fmt.Fprintf(os.Stderr, "Error running app: %v\n", err)
 			os.Exit(1)
@@ -203,18 +203,20 @@ func showSetup(path string, problem error) {
 	gioapp.Main()
 }
 
-func configureLogging(path string) (*os.File, error) {
-	output := io.Discard
+// configureLogging always keeps recent entries in memory for the TV and web
+// UIs; a log file is optional and receives the same redacted records.
+func configureLogging(path string, logs *app.LogBuffer) (*os.File, error) {
 	var file *os.File
+	var next slog.Handler
 	if path != "" {
 		var err error
 		file, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 		if err != nil {
 			return nil, err
 		}
-		output = file
+		next = slog.NewTextHandler(file, nil)
 	}
 	// SetDefault also routes standard-library log calls through this handler.
-	slog.SetDefault(slog.New(slog.NewTextHandler(output, nil)))
+	slog.SetDefault(slog.New(logs.Handler(next)))
 	return file, nil
 }

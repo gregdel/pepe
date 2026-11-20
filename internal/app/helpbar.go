@@ -101,12 +101,14 @@ func (a *App) contextHints() []hint {
 		return append(hints, hint{key: "esc", label: "back"})
 	}
 
-	if a.browse.remote != nil {
+	if a.browse.onPage() {
 		hints := []hint{{key: "←", label: "menu"}, {key: "esc", label: "back"}, {key: "home", label: "browse"}}
 		if a.browse.focus == browseFocusModeRail {
 			hints = append([]hint{{key: "↑↓", label: "change mode"}, {key: "→/enter", label: "content"}}, hints[1:]...)
-		} else if len(a.browse.remote.urls) > 1 {
+		} else if a.browse.remote != nil && len(a.browse.remote.urls) > 1 {
 			hints = append([]hint{{key: "↑↓", label: "address"}}, hints...)
+		} else if a.browse.logs != nil {
+			hints = append([]hint{{key: "↑↓", label: "scroll"}}, hints...)
 		}
 		return append(hints, hint{key: "q", label: "quit"})
 	}
