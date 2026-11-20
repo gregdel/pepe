@@ -23,6 +23,11 @@ type installer struct {
 
 func (i installer) install(source string) error {
 	p := i.paths
+	// A copied Nix build keeps store library paths that garbage collection can
+	// remove, and the Nix package already provides the menu entry.
+	if strings.HasPrefix(source, "/nix/store/") {
+		return errors.New("this pépé comes from a Nix package, which already provides the menu entry; installing a copy is not supported")
+	}
 	if err := p.validate(); err != nil {
 		return err
 	}

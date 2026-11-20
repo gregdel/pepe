@@ -2,9 +2,12 @@
 
 # pépé
 
-**pépé** (*Polochon Player* -> “PP” -> pépé, I know that's a stretch) is a Polochon player for TVs, remotes and Steam Deck, with playback through mpv.
+**pépé** (*Polochon Player* → “PP” → pépé, I know that's a stretch) is a player
+for movies and shows from a [polochon](https://github.com/odwrtw/polochon) media server.
+It runs on the desktop, on a TV (controlled with its own remote over HDMI-CEC, or with a
+keyboard or controller), and on the Steam Deck. Playback goes through mpv.
 
-You need a Polochon server URL/token and mpv **0.41+ with Lua**.
+You need a polochon server URL/token and mpv **0.41+ with Lua**.
 pépé is **not a static binary**: [Gio's native dependencies](https://gioui.org/doc/install)
 are required, even to run `pepe install` or `pepe uninstall`.
 

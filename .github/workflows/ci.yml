@@ -69,17 +69,32 @@ jobs:
       - run: ./build.sh
       - run: go test ./...
 
+  nix:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+      # Fails when go.sum changed without updating vendorHash in packaging/nix/package.nix.
+      - run: nix build -L
+      - run: nix flake check
+
   version:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: version
-        name: Date tag on master, dev-SHA otherwise
+        # The commit time matches the Nix flake version (lastModifiedDate).
+        name: Commit-time tag on master, dev-SHA otherwise
         shell: sh
         run: |
           if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/master ]; then
-            version=$(date -u '+%Y%m%d-%H%M%S')
+            version=$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y%m%d-%H%M%S)
           else
             version=dev-$(printf '%s' "$GITHUB_SHA" | cut -c1-7)
           fi
@@ -130,7 +145,7 @@ jobs:
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs: [version, linux, macos, package-linux]
+    needs: [version, linux, macos, nix, package-linux]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

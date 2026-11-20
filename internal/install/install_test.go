@@ -342,6 +342,17 @@ func TestCheckoutDesktopEntryRefused(t *testing.T) {
 	}
 }
 
+func TestNixStoreExecutableRefused(t *testing.T) {
+	i, _ := newTestInstaller(t)
+	err := i.install("/nix/store/0000000000000000000000000000000-pepe/bin/.pepe-wrapped")
+	if err == nil || !strings.Contains(err.Error(), "Nix package") {
+		t.Fatalf("want Nix package refusal, got %v", err)
+	}
+	checkAbsent(t, i.paths.root)
+	checkAbsent(t, i.paths.bin)
+	checkAbsent(t, i.paths.desktop)
+}
+
 func TestSymlinkParentsRefused(t *testing.T) {
 	for _, kind := range []string{"root", "bin", "desktop", "config"} {
 		t.Run(kind, func(t *testing.T) {
