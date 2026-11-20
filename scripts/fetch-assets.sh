@@ -6,7 +6,15 @@ if [ "$#" -ne 1 ]; then
 	printf 'Usage: %s DESTINATION\n' "$0" >&2
 	exit 2
 fi
-command -v sha256sum >/dev/null 2>&1 || { printf 'Required command not found: sha256sum\n' >&2; exit 1; }
+# sha256sum is not guaranteed on macOS; shasum ships with it.
+if command -v sha256sum >/dev/null 2>&1; then
+	digest() { sha256sum; }
+elif command -v shasum >/dev/null 2>&1; then
+	digest() { shasum -a 256; }
+else
+	printf 'Required command not found: sha256sum or shasum\n' >&2
+	exit 1
+fi
 mkdir -p -- "$1"
 DEST=$(CDPATH='' cd -- "$1" && pwd)
 TMP=''
@@ -20,15 +28,15 @@ while read -r want name url; do
 	file="$DEST/$name"
 	[ ! -L "$file" ] || { printf 'Refusing asset symlink: %s\n' "$file" >&2; exit 1; }
 	if [ -f "$file" ]; then
-		hash=$(sha256sum < "$file")
+		hash=$(digest < "$file")
 		[ "${hash%% *}" != "$want" ] || continue
 	fi
 	command -v curl >/dev/null 2>&1 || { printf 'Required command not found: curl\n' >&2; exit 1; }
 	TMP=$(mktemp "$DEST/.asset.XXXXXX")
 	printf 'Downloading %s...\n' "$name" >&2
-	curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+	curl --fail --retry 3 --silent --show-error --location --proto '=https' --proto-redir '=https' \
 		--connect-timeout 5 --max-time 30 --max-filesize 8388608 --output "$TMP" "$url"
-	hash=$(sha256sum < "$TMP")
+	hash=$(digest < "$TMP")
 	[ "${hash%% *}" = "$want" ] || { printf 'Asset checksum mismatch: %s\n' "$name" >&2; exit 1; }
 	chmod 644 "$TMP"
 	mv -- "$TMP" "$file"

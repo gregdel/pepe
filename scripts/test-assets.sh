@@ -45,7 +45,7 @@ FETCH="$REPO/scripts/fetch-assets.sh"
 DEST="$REPO/packaging/embed"
 expect_failure "$FETCH"
 "$FETCH" "$DEST"
-for arg in --fail --location --proto --proto-redir '=https' --connect-timeout --max-time --max-filesize; do assert_line "$TEST_CURL_ARGS" "$arg"; done
+for arg in --fail --retry --location --proto --proto-redir '=https' --connect-timeout --max-time --max-filesize; do assert_line "$TEST_CURL_ARGS" "$arg"; done
 cp "$TEST_CURL_LOG" "$TEST/downloads-before"
 TEST_CURL_MODE=offline
 "$FETCH" "$DEST"

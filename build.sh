@@ -19,12 +19,20 @@ require_command() {
 	fi
 }
 
+# sha256sum is not guaranteed on macOS; shasum ships with it.
+if command -v sha256sum >/dev/null 2>&1; then
+	digest() { sha256sum; }
+elif command -v shasum >/dev/null 2>&1; then
+	digest() { shasum -a 256; }
+else
+	printf 'Required command not found: sha256sum or shasum\n' >&2
+	exit 1
+fi
+
 sha256() {
-	hash=$(sha256sum "$1") || return
+	hash=$(digest < "$1") || return
 	printf '%s\n' "${hash%% *}"
 }
-
-require_command sha256sum
 
 mkdir -p "$FONT_DIR"
 rm -f "$FONT_DIR/font.ttf" # Remove the legacy generated Fira Code asset.
