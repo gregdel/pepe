@@ -382,11 +382,12 @@ func (a *App) startPlayer(command playerCommand) bool {
 				err = <-waited
 			}
 		}
-		// An ordinary mpv terminated by our Stop request is not a playback failure.
+		// An ordinary mpv terminated by our Stop request is not a playback failure:
+		// mpv handles SIGTERM and exits with status 4 ("quit due to a signal").
 		// Managed launcher failures and forced termination must remain visible.
 		var exitErr *exec.ExitError
 		if stopped && !policy.managedLauncher && errors.As(err, &exitErr) {
-			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signal() == syscall.SIGTERM {
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && (status.Signal() == syscall.SIGTERM || status.Exited() && status.ExitStatus() == 4) {
 				err = nil
 			}
 		}

@@ -397,3 +397,30 @@ exit 3
 		t.Fatalf("log leaked the token:\n%s", text)
 	}
 }
+
+// mpv handles SIGTERM and exits with status 4; after our Stop request that is
+// a clean stop, but the same status without a Stop request remains a failure.
+func TestPlayerStopWithMPVExitStatus(t *testing.T) {
+	for _, stop := range []bool{true, false} {
+		t.Run(fmt.Sprintf("stop=%t", stop), func(t *testing.T) {
+			a := New(nil, nil, nil, nil, nil)
+			ready := filepath.Join(t.TempDir(), "ready")
+			t.Setenv("PEPE_TEST_READY", ready)
+			body := "trap 'exit 4' TERM\n: > \"$PEPE_TEST_READY\"\nwhile :; do sleep 0.05; done\n"
+			if !stop {
+				body = ": > \"$PEPE_TEST_READY\"\nexit 4\n"
+			}
+			command := lifecycleCommand(t, a, body)
+			startLifecyclePlayer(t, a, command)
+			waitForCache(t, func() bool { _, err := os.Stat(ready); return err == nil })
+			if stop {
+				close(a.playerStop)
+				a.playerStop = nil
+			}
+			result := lifecycleResult(t, a)
+			if (result.err == nil) != stop {
+				t.Fatalf("stop=%t: result error = %v", stop, result.err)
+			}
+		})
+	}
+}
