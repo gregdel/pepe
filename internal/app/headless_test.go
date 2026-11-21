@@ -368,7 +368,7 @@ func TestHeadlessMovieDetailScrollBoundaries(t *testing.T) {
 				// Use finite offline artwork; no network or player is needed.
 				img := image.NewNRGBA(image.Rect(0, 0, 64, 64))
 				draw.Draw(img, img.Bounds(), art, image.Point{}, draw.Src)
-				f.app.images.store("fanart:movie-new", paint.NewImageOp(img))
+				storeArtwork(f.app, "fanart:movie-new", img)
 				f.app.images.store("thumb:movie-new", paint.NewImageOp(img))
 				f.app.pushMovieDetail(&MediaItem{ID: "movie-new", Title: "New Movie", Type: mediaKindMovie})
 				f.app.detail.enteredAt = time.Now().Add(-detailFadeDuration)

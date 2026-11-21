@@ -203,6 +203,7 @@ func TestRefreshCompletionRebuildsActiveModeAndRestoresMedia(t *testing.T) {
 	a.refreshDone <- refreshResult{snapshot: defaultSnapshot}
 	a.refreshing = true
 	a.images = newAsyncCache[paint.ImageOp](1, 0)
+	a.backdrops = newAsyncCache[backdrop](1, 0)
 
 	a.drainChannels()
 
@@ -222,6 +223,7 @@ func TestDateAddedSnapshotIsReusedUntilSuccessfulRefresh(t *testing.T) {
 	old := newMovieListingItem(testMovie("old", "Old", 2001))
 	a := newModeTestApp([]*listingItem{old}, nil)
 	a.images = newAsyncCache[paint.ImageOp](1, 0)
+	a.backdrops = newAsyncCache[backdrop](1, 0)
 	a.applyListingMode(ListingModeDateAdded)
 	first := a.browse.library.movieRadix
 

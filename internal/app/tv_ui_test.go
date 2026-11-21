@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"gioui.org/layout"
-	"gioui.org/op/paint"
 	"github.com/gregdel/pepe/internal/driver"
 	"github.com/odwrtw/polochon/lib/papi"
 )
@@ -232,9 +231,11 @@ func TestTVDelayedArtworkAndMissingSynopsis(t *testing.T) {
 	f := newHeadlessFixture(t)
 	release := make(chan struct{})
 	art := image.NewNRGBA(image.Rect(0, 0, 64, 64))
-	f.app.images.fetch("fanart:movie-new", func() (paint.ImageOp, error) {
+	// The catalog backdrop already tried the fixture's offline fanart.
+	f.app.backdrops.reset()
+	f.app.backdrops.fetch("fanart:movie-new", func() (backdrop, error) {
 		<-release
-		return paint.NewImageOp(art), nil
+		return newBackdrop(art), nil
 	})
 	f.app.pushMovieDetail(&MediaItem{ID: "movie-new", Title: "New Movie", Type: mediaKindMovie})
 	if err := f.driver.Resize(1280, 720); err != nil {
@@ -249,8 +250,8 @@ func TestTVDelayedArtworkAndMissingSynopsis(t *testing.T) {
 		if err := f.driver.Refresh(); err != nil {
 			t.Fatal(err)
 		}
-		img, ok := f.app.images.get("fanart:movie-new")
-		return ok && img.Size().X == 64
+		bd, ok := f.app.backdrops.get("fanart:movie-new")
+		return ok && bd.sharp.Size().X == 64
 	})
 	tvCapture(t, f, "movie-loaded-art-1280")
 	f.app.client.shows["show-one"].Seasons[1].Episodes[1].Plot = ""
@@ -276,7 +277,7 @@ func TestTVDetailsAndOverlays(t *testing.T) {
 					}
 				}
 				for _, key := range []string{"fanart:movie-new", "thumb:movie-new", "fanart:show-one", "poster:show-one"} {
-					f.app.images.store(key, paint.NewImageOp(art))
+					storeArtwork(f.app, key, art)
 				}
 				f.app.resumePos[movieMediaKey("movie-new")] = 300
 				f.app.pushMovieDetail(&MediaItem{ID: "movie-new", Title: "A longer movie title that must remain readable from the sofa", Type: mediaKindMovie})

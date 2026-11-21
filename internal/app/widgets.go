@@ -116,28 +116,31 @@ const (
 	// Gio blends in linear light: 0xe2 keeps colorFg at 4.5:1 even over white
 	// artwork. Darker values hide the fanart without improving readability.
 	scrimTextAlpha = 0xe2
-	scrimTopAlpha  = 0x40
 	scrimSegments  = 8
+	// scrimFade is how far above the band the scrim eases in; the fanart
+	// above it is left untouched.
+	scrimFade = unit.Dp(200)
 )
 
 // scrim paints the browse preview gradient: an even band from just above
-// textTop to the bottom, eased into the lightly tinted fanart above.
+// textTop to the bottom, eased in over scrimFade above it.
 // Full-screen details use the independently tuned detailScrim.
 func scrim(gtx C, textTop int) {
 	size := gtx.Constraints.Max
 	band := min(max(textTop-gtx.Dp(dp16), 0), size.Y)
+	top := max(band-gtx.Dp(scrimFade), 0)
 	tint := func(a float32) color.NRGBA {
 		return color.NRGBA{R: 0x08, G: 0x08, B: 0x0a, A: uint8(a + 0.5)}
 	}
 	paint.FillShape(gtx.Ops, tint(scrimTextAlpha), clip.Rect(image.Rect(0, band, size.X, size.Y)).Op())
-	// 2t²−t⁴ keeps the upper fanart light and flattens out before the band,
-	// so its edge does not show as a line.
+	// 2t²−t⁴ leaves the fanart gently and flattens out before the band, so
+	// neither edge shows as a line.
 	alpha := func(i int) float32 {
 		t := float32(i) / scrimSegments
-		return scrimTopAlpha + (scrimTextAlpha-scrimTopAlpha)*t*t*(2-t*t)
+		return scrimTextAlpha * t * t * (2 - t*t)
 	}
 	for i := range scrimSegments {
-		y0, y1 := band*i/scrimSegments, band*(i+1)/scrimSegments
+		y0, y1 := top+(band-top)*i/scrimSegments, top+(band-top)*(i+1)/scrimSegments
 		if y1 <= y0 {
 			continue
 		}
@@ -336,11 +339,17 @@ func resizeArtwork(img image.Image, maxWidth, maxHeight int) image.Image {
 func (a *App) fetchArtwork(cacheKey string, fetchFn func() (image.Image, error), maxWidth, maxHeight int) {
 	a.images.fetch(cacheKey, func() (paint.ImageOp, error) {
 		img, err := fetchImageOp(fetchFn, maxWidth, maxHeight)
-		if err != nil && a.client != nil && a.client.log != nil {
-			a.client.log.Warn("failed to load artwork", "key", cacheKey, "error", artworkLogReason(err))
+		if err != nil {
+			a.logArtworkError(cacheKey, err)
 		}
 		return img, err
 	})
+}
+
+func (a *App) logArtworkError(cacheKey string, err error) {
+	if a.client != nil && a.client.log != nil {
+		a.client.log.Warn("failed to load artwork", "key", cacheKey, "error", artworkLogReason(err))
+	}
 }
 
 // scheduleArtworkRetry redraws when a visible transient failure may be
@@ -395,20 +404,23 @@ func posterPlaceholder(gtx C, size image.Point) {
 	posterPlaceholderIcon.Layout(gtx, colorOutline)
 }
 
-// fanart renders a full-bleed cover image filling the constraints.
+// fanart renders a full-bleed cover image filling the constraints. It shares
+// the catalog backdrop's cache entry.
 func (a *App) fanart(gtx C, cacheKey string, fetchFn func() (image.Image, error)) D {
-	if img, ok := a.images.get(cacheKey); ok {
-		if img.Size().X != 0 && img.Size().Y != 0 {
+	if bd, ok := a.backdrops.get(cacheKey); ok {
+		if img := bd.sharp; img.Size().X != 0 && img.Size().Y != 0 {
 			widget.Image{
 				Src:      img,
 				Fit:      widget.Cover,
 				Position: layout.Center,
 			}.Layout(gtx)
 		}
-		a.scheduleArtworkRetry(gtx, cacheKey)
+		if at, ok := a.backdrops.retryAt(cacheKey); ok {
+			gtx.Execute(op.InvalidateCmd{At: at})
+		}
 		return D{Size: gtx.Constraints.Max}
 	}
-	a.fetchArtwork(cacheKey, fetchFn, fanartMaxWidth, fanartMaxHeight)
+	a.fetchBackdrop(cacheKey, fetchFn)
 	return D{Size: gtx.Constraints.Max}
 }
 
@@ -435,15 +447,13 @@ func (a *App) showPosterFile(id string) func() (image.Image, error) {
 }
 
 func (a *App) movieFanart(gtx C, id string) D {
-	return a.fanart(gtx, "fanart:"+id, func() (image.Image, error) {
-		return a.client.fetchMovieImage(id, func(m *papi.Movie) *papi.File { return m.FanartFile })
-	})
+	key, fetchFn := a.fanartSource(&MediaItem{ID: id, Type: mediaKindMovie})
+	return a.fanart(gtx, key, fetchFn)
 }
 
 func (a *App) showFanart(gtx C, id string) D {
-	return a.fanart(gtx, "fanart:"+id, func() (image.Image, error) {
-		return a.client.fetchShowImage(id, func(s *papi.Show) *papi.File { return s.FanartFile })
-	})
+	key, fetchFn := a.fanartSource(&MediaItem{ID: id, Type: mediaKindShow})
+	return a.fanart(gtx, key, fetchFn)
 }
 
 // ── Count pill ────────────────────────────────────────────────────────────────

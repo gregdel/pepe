@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"math"
 	"strings"
 
+	"gioui.org/f32"
 	"gioui.org/font"
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
@@ -17,11 +20,15 @@ import (
 
 // ── Browse screen ─────────────────────────────────────────────────────────────
 //
-// Header (wordmark + radix query + counts) on top, mode rail and nav list on
-// the left, contextual preview on the right.
+// The catalog floats on the backdrop (backdrop.go): header, mode rail and nav
+// list share the left column, the preview takes the rest. Rail pages keep a
+// full-width header above the rail and the page.
 
 func (a *App) layoutBrowse(gtx C) D {
 	a.syncLogs()
+	if !a.browse.onPage() {
+		return a.layoutCatalog(gtx)
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(a.layoutHeader),
 		layout.Rigid(hairline),
@@ -36,18 +43,56 @@ func (a *App) layoutBrowse(gtx C) D {
 					if a.browse.logs != nil {
 						return a.layoutLogs(gtx)
 					}
-					if a.browse.settings != nil {
-						return a.layoutSettingsPage(gtx)
-					}
-					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-						layout.Flexed(navFlex, a.layoutNavPanel),
-						layout.Rigid(verticalHairline),
-						layout.Flexed(previewFlex, a.layoutPreview),
-					)
+					return a.layoutSettingsPage(gtx)
 				}),
 			)
 		}),
 	)
+}
+
+// layoutCatalog keeps the header, rail and list inside the backdrop veil's
+// opaque left region; the preview covers the rest. The preview is laid out
+// first: its text block places the scrim, which spans the whole window under
+// the list too, so it has no edges over the full-bleed fanart.
+func (a *App) layoutCatalog(gtx C) D {
+	size := gtx.Constraints.Max
+	rail := min(gtx.Dp(a.modeRailWidth()), size.X)
+	left := int(catalogLeftWidth(float32(size.X), float32(rail)))
+
+	a.browse.previewTextTop = -1
+	pgtx := gtx
+	pgtx.Constraints = layout.Exact(image.Pt(max(size.X-left, 0), size.Y))
+	macro := op.Record(gtx.Ops)
+	a.layoutPreview(pgtx)
+	preview := macro.Stop()
+
+	if top := a.browse.previewTextTop; top >= 0 {
+		insets := a.viewportInsets
+		area := image.Rect(-gtx.Dp(insets.Left), -gtx.Dp(insets.Top), size.X+gtx.Dp(insets.Right), size.Y)
+		stack := op.Offset(area.Min).Push(gtx.Ops)
+		sgtx := gtx
+		sgtx.Constraints = layout.Exact(area.Size())
+		scrim(sgtx, top-area.Min.Y)
+		stack.Pop()
+	}
+
+	lgtx := gtx
+	lgtx.Constraints = layout.Exact(image.Pt(left, size.Y))
+	layout.Flex{Axis: layout.Vertical}.Layout(lgtx,
+		layout.Rigid(a.layoutHeader),
+		layout.Flexed(1, func(gtx C) D {
+			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+				layout.Rigid(a.layoutModeRail),
+				layout.Flexed(1, func(gtx C) D {
+					return layout.Inset{Top: dp8}.Layout(gtx, a.layoutNavList)
+				}),
+			)
+		}),
+	)
+	stack := op.Offset(image.Pt(left, 0)).Push(gtx.Ops)
+	preview.Add(gtx.Ops)
+	stack.Pop()
+	return D{Size: size}
 }
 
 func verticalHairline(gtx C) D {
@@ -125,39 +170,43 @@ func mustIcon(data []byte) *widget.Icon {
 	return icon
 }
 
-func (a *App) layoutModeRail(gtx C) D {
-	railWidth := modeRailWidth
+// catalogLeftWidth is the width of the catalog's left column (rail, header
+// and list) in a catalog of the given width; catalogListEdge shares it.
+func catalogLeftWidth(width, rail float32) float32 {
+	return rail + navFlex*(width-rail)
+}
+
+const modeRailExpandedWidth = unit.Dp(240)
+
+// modeRailWidth widens the rail to show labels while it has focus.
+func (a *App) modeRailWidth() unit.Dp {
 	if a.browse.focus == browseFocusModeRail {
-		railWidth = unit.Dp(240)
+		return modeRailExpandedWidth
 	}
-	width := min(gtx.Dp(railWidth), gtx.Constraints.Max.X)
+	return modeRailWidth
+}
+
+// layoutModeRail draws no background: the window or the backdrop shows
+// through.
+func (a *App) layoutModeRail(gtx C) D {
+	width := min(gtx.Dp(a.modeRailWidth()), gtx.Constraints.Max.X)
 	gtx.Constraints.Min.X = width
 	gtx.Constraints.Max.X = width
-
-	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(func(gtx C) D {
-			defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
-			paint.Fill(gtx.Ops, colorBg)
-			return D{Size: gtx.Constraints.Max}
-		}),
-		layout.Stacked(func(gtx C) D {
-			gtx.Constraints.Min = gtx.Constraints.Max
-			// Expanded, keep the selected pill clear of the divider.
-			var inset layout.Inset
-			if a.browse.focus == browseFocusModeRail {
-				inset.Right = dp8
+	gtx.Constraints.Min.Y = gtx.Constraints.Max.Y
+	// Expanded, keep the selected pill clear of the divider.
+	var inset layout.Inset
+	if a.browse.focus == browseFocusModeRail {
+		inset.Right = dp8
+	}
+	return inset.Layout(gtx, func(gtx C) D {
+		return layout.Center.Layout(gtx, func(gtx C) D {
+			var entries [railEntryCount]layout.FlexChild
+			for entry := range railEntryCount {
+				entries[entry] = layout.Rigid(func(gtx C) D { return a.layoutModeOption(gtx, entry) })
 			}
-			return inset.Layout(gtx, func(gtx C) D {
-				return layout.Center.Layout(gtx, func(gtx C) D {
-					var entries [railEntryCount]layout.FlexChild
-					for entry := range railEntryCount {
-						entries[entry] = layout.Rigid(func(gtx C) D { return a.layoutModeOption(gtx, entry) })
-					}
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx, entries[:]...)
-				})
-			})
-		}),
-	)
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, entries[:]...)
+		})
+	})
 }
 
 const (
@@ -301,7 +350,7 @@ func (a *App) layoutHeaderStatus(gtx C) D {
 	parts = append(parts, layout.Rigid(func(gtx C) D {
 		return a.label(gtx, spTiny,
 			fmt.Sprintf("%d movies · %d shows", a.browse.library.movieCount, a.browse.library.showCount),
-			colorMuted, 0)
+			colorSubtle, 0)
 	}))
 
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, parts...)
@@ -315,19 +364,6 @@ func listingModeLabel(mode ListingMode) string {
 }
 
 // ── Nav panel ─────────────────────────────────────────────────────────────────
-
-func (a *App) layoutNavPanel(gtx C) D {
-	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(func(gtx C) D {
-			defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
-			paint.Fill(gtx.Ops, colorSurface)
-			return D{Size: gtx.Constraints.Max}
-		}),
-		layout.Stacked(func(gtx C) D {
-			return layout.Inset{Top: dp8}.Layout(gtx, a.layoutNavList)
-		}),
-	)
-}
 
 func (a *App) layoutNavList(gtx C) D {
 	// Keep cursor centered in the visible area (like scrolloff=999).
@@ -416,9 +452,70 @@ func (a *App) rowFrame(gtx C, minHeight unit.Dp, fill color.NRGBA, focused bool,
 	})
 }
 
+// catalogRowShell is rowShell for catalog list rows: the selection, without a
+// focus ring, fades out to the right into the backdrop instead of ending on a
+// hard edge.
+func (a *App) catalogRowShell(gtx C, selected bool, minHeight unit.Dp, content layout.Widget) D {
+	if !selected {
+		return a.rowShell(gtx, false, false, minHeight, content)
+	}
+	return layout.Inset{Left: dp8, Right: dp8, Top: dp2, Bottom: dp2}.Layout(gtx, func(gtx C) D {
+		gtx.Constraints.Min.X = gtx.Constraints.Max.X
+		if h := gtx.Dp(minHeight); gtx.Constraints.Min.Y < h {
+			gtx.Constraints.Min.Y = h
+		}
+		macro := op.Record(gtx.Ops)
+		dims := layout.Center.Layout(gtx, func(gtx C) D {
+			return layout.Inset{Left: dp12, Right: dp12, Top: dp6, Bottom: dp6}.Layout(gtx, content)
+		})
+		call := macro.Stop()
+
+		defer a.markSelected(gtx, dims.Size).Pop()
+		size := dims.Size
+		r := gtx.Dp(radiusRow)
+		rr := clip.RRect{Rect: image.Rectangle{Max: size}, NE: r, NW: r, SE: r, SW: r}
+		fill := rr.Push(gtx.Ops)
+		paintSelectionFade(gtx, size, colorSelectBg)
+		fill.Pop()
+		call.Add(gtx.Ops)
+		return dims
+	})
+}
+
+const (
+	// The selection is solid up to selectionFadeStart of its width, then
+	// fades out by its right edge.
+	selectionFadeStart    = 0.45
+	selectionFadeSegments = 8
+)
+
+// paintSelectionFade fills size with col fading out horizontally. Gio blends
+// in linear light, where a fading colour over a dark background lingers and
+// then drops; squaring the ramp's complement (gamma 2.2) makes the perceived
+// fade even.
+func paintSelectionFade(gtx C, size image.Point, col color.NRGBA) {
+	x0 := int(selectionFadeStart * float32(size.X))
+	paint.FillShape(gtx.Ops, col, clip.Rect(image.Rect(0, 0, x0, size.Y)).Op())
+	tint := func(i int) color.NRGBA {
+		t := float64(i) / selectionFadeSegments
+		c := col
+		c.A = uint8(float64(col.A)*math.Pow(1-t, 2.2) + 0.5)
+		return c
+	}
+	width := size.X - x0
+	for i := range selectionFadeSegments {
+		xa, xb := x0+width*i/selectionFadeSegments, x0+width*(i+1)/selectionFadeSegments
+		if xb <= xa {
+			continue
+		}
+		paintGradient(gtx, image.Rect(xa, 0, xb, size.Y),
+			f32.Pt(float32(xa), 0), f32.Pt(float32(xb), 0), tint(i), tint(i+1))
+	}
+}
+
 // groupRow renders a radix prefix group: two-tone label + count pill.
 func (a *App) groupRow(gtx C, prefix, label string, count int, selected bool) D {
-	return a.rowShell(gtx, selected, false, browseRowHeight, func(gtx C) D {
+	return a.catalogRowShell(gtx, selected, browseRowHeight, func(gtx C) D {
 		fg := colorFg
 		prefixCol := colorPrimary
 		if selected {
@@ -452,7 +549,7 @@ func (a *App) terminalRow(gtx C, node *RadixNode, currentPath string, selected b
 	const thumbW = unit.Dp(44)
 	fullString := node.FullString
 
-	return a.rowShell(gtx, selected, false, thumbW*3/2, func(gtx C) D {
+	return a.catalogRowShell(gtx, selected, thumbW*3/2, func(gtx C) D {
 		titleCol := colorFg
 		if selected {
 			titleCol = colorSelectFg

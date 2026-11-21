@@ -169,9 +169,10 @@ func (a *App) previewTerminal(gtx C, media *MediaItem) D {
 	return a.previewMovie(gtx, media)
 }
 
-// previewShell draws fanart + scrim behind bottom-left anchored content. The
-// content is measured first so the scrim protects exactly the text block.
-func (a *App) previewShell(gtx C, fanart layout.Widget, content layout.Widget) D {
+// previewShell anchors content to the bottom-left over the catalog
+// backdrop's fanart. The content is measured first so the scrim, which
+// layoutCatalog draws from previewTextTop, protects exactly the text block.
+func (a *App) previewShell(gtx C, content layout.Widget) D {
 	size := gtx.Constraints.Max
 	inset := gtx.Dp(dp32)
 	cgtx := gtx
@@ -181,10 +182,7 @@ func (a *App) previewShell(gtx C, fanart layout.Widget, content layout.Widget) D
 	call := macro.Stop()
 	top := size.Y - inset - dims.Size.Y
 
-	fgtx := gtx
-	fgtx.Constraints = layout.Exact(size)
-	fanart(fgtx)
-	scrim(gtx, top)
+	a.browse.previewTextTop = top
 	defer op.Offset(image.Pt(inset, top)).Push(gtx.Ops).Pop()
 	call.Add(gtx.Ops)
 	return D{Size: size}
@@ -195,12 +193,9 @@ func (a *App) previewMovie(gtx C, media *MediaItem) D {
 	if !ok {
 		return a.previewMessage(gtx, "Movie details not available")
 	}
-	movieID := movie.ImdbID
 	id := media.ID
 
 	return a.previewShell(gtx, func(gtx C) D {
-		return a.movieFanart(gtx, movieID)
-	}, func(gtx C) D {
 		meta := buildMetaLine(movie.Year, movie.Runtime, formatQualityBadge(movie.Quality), float64(movie.Rating), movie.Genres)
 		return a.previewMediaContent(gtx, media, meta, func(gtx C) D {
 			return a.movieThumb(gtx, id, unit.Dp(140), radiusPoster)
@@ -216,8 +211,6 @@ func (a *App) previewShow(gtx C, media *MediaItem) D {
 	showID := show.ImdbID
 
 	return a.previewShell(gtx, func(gtx C) D {
-		return a.showFanart(gtx, showID)
-	}, func(gtx C) D {
 		return a.previewMediaContent(gtx, media, buildShowSummary(show), func(gtx C) D {
 			return a.showPoster(gtx, showID, unit.Dp(140), radiusPoster)
 		})

@@ -128,7 +128,7 @@ func TestDetailArtworkEntranceFade(t *testing.T) {
 			white := image.NewNRGBA(image.Rect(0, 0, 8, 12))
 			draw.Draw(white, white.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
 			art := paint.NewImageOp(white)
-			a.images.store("fanart:"+tc.id, art)
+			a.backdrops.store("fanart:"+tc.id, backdrop{sharp: art})
 			a.images.store(tc.posterKey, art)
 			media := &MediaItem{ID: tc.id, Title: tc.title, Type: tc.kind}
 			if tc.kind == mediaKindMovie {
@@ -171,12 +171,13 @@ func TestDetailArtworkEntranceFade(t *testing.T) {
 
 			// Render the same entry frame with resolved, empty artwork. This
 			// distinguishes zero opacity from a merely dim initial image.
-			images := a.images
+			images, backdrops := a.images, a.backdrops
 			a.images = newWeightedAsyncCache[paint.ImageOp](1, 0, imageCacheBudget, imageOpWeight)
-			a.images.store("fanart:"+tc.id, paint.ImageOp{})
+			a.backdrops = newWeightedAsyncCache[backdrop](1, 0, backdropCacheBudget, backdropWeight)
+			a.backdrops.store("fanart:"+tc.id, backdrop{})
 			a.images.store(tc.posterKey, paint.ImageOp{})
 			noArtwork := frame(0)
-			a.images = images
+			a.images, a.backdrops = images, backdrops
 
 			// Render the detail with explicit full artwork opacity as a
 			// reference independent of layoutDetail's transition clock.

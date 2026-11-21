@@ -29,6 +29,20 @@ func waitForArtwork(t *testing.T, a *App, completed <-chan struct{}) {
 	waitForCache(t, func() bool { return len(completed) > 0 })
 	<-completed
 	a.images.drain()
+	if a.backdrops != nil {
+		a.backdrops.drain()
+	}
+}
+
+// cachedArtSize reads posters from the image cache and fanart from the
+// backdrop cache.
+func cachedArtSize(a *App, key string) (image.Point, bool) {
+	if strings.HasPrefix(key, "fanart:") {
+		bd, ok := a.backdrops.get(key)
+		return bd.sharp.Size(), ok
+	}
+	img, ok := a.images.get(key)
+	return img.Size(), ok
 }
 
 func artworkContext() C {
@@ -111,27 +125,28 @@ func TestArtworkClientAndRendering(t *testing.T) {
 					client.movies["tt001"] = movie
 					client.shows["tt001"], client.shows["tt002"] = show, show2
 				}
-				a := &App{client: client, images: newAsyncCache[paint.ImageOp](1, 0)}
+				a := &App{client: client, images: newAsyncCache[paint.ImageOp](1, 0), backdrops: newAsyncCache[backdrop](1, 0)}
 				completed := make(chan struct{}, 1)
 				a.images.onDone = func() { completed <- struct{}{} }
+				a.backdrops.onDone = a.images.onDone
 				if dims := art.render(a, artworkContext()); dims.Size != image.Pt(300, 450) {
 					t.Fatalf("loading artwork changed layout size: %v", dims.Size)
 				}
 				waitForArtwork(t, a, completed)
-				cached, ok := a.images.get(art.key)
+				cached, ok := cachedArtSize(a, art.key)
 				wantSize := image.Pt(2, 3)
 				if tc.want != "" {
 					wantSize = image.Point{}
 				}
-				if !ok || cached.Size() != wantSize {
-					t.Fatalf("cached image = (%v, %v), want %v", cached.Size(), ok, wantSize)
+				if !ok || cached != wantSize {
+					t.Fatalf("cached image = (%v, %v), want %v", cached, ok, wantSize)
 				}
 				for range 3 {
 					if dims := art.render(a, artworkContext()); dims.Size != image.Pt(300, 450) {
 						t.Fatalf("resolved artwork changed layout size: %v", dims.Size)
 					}
 				}
-				if a.images.active != 0 {
+				if a.images.active != 0 || a.backdrops.active != 0 {
 					t.Fatal("resolved artwork was fetched again")
 				}
 				if tc.want == "" {

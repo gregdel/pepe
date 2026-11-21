@@ -73,5 +73,4 @@ const (
 	modeRailWidth   = unit.Dp(80)
 	browseRowHeight = unit.Dp(64)
 	navFlex         = 0.38 // browse: nav list share of the width
-	previewFlex     = 0.62 // browse: preview panel share
 )

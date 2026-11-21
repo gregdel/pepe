@@ -134,7 +134,7 @@ func TestPlayerRuntimeKeepsTokenOutOfArgumentsAndCleansUp(t *testing.T) {
 	}
 
 	invalidated := make(chan struct{}, 2)
-	a := &App{playerStatus: PlayerStatusIdle, resumePos: make(map[string]float64), images: newAsyncCache[paint.ImageOp](1, 0), invalidate: func() { invalidated <- struct{}{} }}
+	a := &App{playerStatus: PlayerStatusIdle, resumePos: make(map[string]float64), images: newAsyncCache[paint.ImageOp](1, 0), backdrops: newAsyncCache[backdrop](1, 0), invalidate: func() { invalidated <- struct{}{} }}
 	if !a.startPlayer(playerCommand{mediaKey: "movie:tt123", sockPath: sockPath, runtimeDir: runtimeDir, args: args, mode: PlayerModeGUI}) {
 		t.Fatalf("startPlayer failed: %s", a.playerError)
 	}
@@ -363,7 +363,7 @@ func TestPlayerNotFoundOnPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &App{resumePos: make(map[string]float64), images: newAsyncCache[paint.ImageOp](1, 0)}
+	a := &App{resumePos: make(map[string]float64), images: newAsyncCache[paint.ImageOp](1, 0), backdrops: newAsyncCache[backdrop](1, 0)}
 	if a.startPlayer(playerCommand{runtimeDir: runtimeDir, args: []string{"mpv"}}) {
 		t.Fatal("startPlayer succeeded without mpv on PATH")
 	}
@@ -377,7 +377,7 @@ func TestPlayerLaunchFailureAndNonzeroExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &App{resumePos: make(map[string]float64), images: newAsyncCache[paint.ImageOp](1, 0)}
+	a := &App{resumePos: make(map[string]float64), images: newAsyncCache[paint.ImageOp](1, 0), backdrops: newAsyncCache[backdrop](1, 0)}
 	if a.startPlayer(playerCommand{runtimeDir: runtimeDir, args: []string{filepath.Join(t.TempDir(), "missing-mpv")}}) {
 		t.Fatal("startPlayer succeeded for missing executable")
 	}
@@ -509,6 +509,7 @@ func TestPlayerCompletionAppliesItsLaunchResumeTracker(t *testing.T) {
 		playerDone:   done,
 		resumePos:    make(map[string]float64),
 		images:       newAsyncCache[paint.ImageOp](1, 0),
+		backdrops:    newAsyncCache[backdrop](1, 0),
 	}
 	a.drainChannels()
 	if got := a.resumePos[key]; got != 180 {

@@ -486,8 +486,12 @@ func TestAsyncCacheRetryBackoffIsCapped(t *testing.T) {
 }
 
 func TestArtworkSchedulesRedrawForTransientRetry(t *testing.T) {
-	a := &App{images: newWeightedAsyncCache[paint.ImageOp](2, 0, imageCacheBudget, imageOpWeight)}
+	a := &App{
+		images:    newWeightedAsyncCache[paint.ImageOp](2, 0, imageCacheBudget, imageOpWeight),
+		backdrops: newWeightedAsyncCache[backdrop](2, 0, backdropCacheBudget, backdropWeight),
+	}
 	a.images.retryable = isTransientArtworkError
+	a.backdrops.retryable = isTransientArtworkError
 	failure := func() (image.Image, error) {
 		return nil, transientError{&artworkError{"artwork request timed out", errors.New("timeout")}}
 	}
@@ -501,7 +505,8 @@ func TestArtworkSchedulesRedrawForTransientRetry(t *testing.T) {
 	resolve := func() {
 		waitForCache(t, func() bool {
 			a.images.drain()
-			return !a.images.busy()
+			a.backdrops.drain()
+			return !a.images.busy() && !a.backdrops.busy()
 		})
 	}
 

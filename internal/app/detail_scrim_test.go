@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"gioui.org/op/paint"
 	"github.com/odwrtw/polochon/lib/papi"
 )
 
@@ -51,7 +50,7 @@ func TestShowScrimStaysFullHeight(t *testing.T) {
 			white := image.NewNRGBA(image.Rect(0, 0, 16, 16))
 			draw.Draw(white, white.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
 			for _, key := range []string{"fanart:show-one", "poster:show-one"} {
-				f.app.images.store(key, paint.NewImageOp(white))
+				storeArtwork(f.app, key, white)
 			}
 			f.app.pushShowDetail(&MediaItem{ID: "show-one", Title: "Fixture Show", Type: mediaKindShow})
 			f.app.detail.enteredAt = time.Now().Add(-detailFadeDuration)

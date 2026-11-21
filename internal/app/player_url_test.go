@@ -11,8 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"gioui.org/op/paint"
 )
 
 func TestValidatePlaybackURL(t *testing.T) {
@@ -211,7 +209,7 @@ func TestHeadlessWebPlayingBar(t *testing.T) {
 				art := image.NewNRGBA(image.Rect(0, 0, 64, 64))
 				draw.Draw(art, art.Bounds(), image.NewUniform(color.NRGBA{R: shade, G: shade, B: shade, A: 255}), image.Point{}, draw.Src)
 				for _, key := range []string{"fanart:movie-new", "thumb:movie-new", "fanart:show-one", "poster:show-one"} {
-					f.app.images.store(key, paint.NewImageOp(art))
+					storeArtwork(f.app, key, art)
 				}
 				f.app.playerStatus = PlayerStatusRunning
 				f.app.playerFromWeb = true

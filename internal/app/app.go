@@ -75,7 +75,12 @@ type SubtitlePopup struct {
 
 // ── App ──────────────────────────────────────────────────────────────────────
 
-const imageCacheBudget int64 = 128 << 20
+// Posters and fanart backdrops are cached separately so browsing titles'
+// fanart does not evict the posters on screen.
+const (
+	imageCacheBudget    int64 = 48 << 20
+	backdropCacheBudget int64 = 80 << 20
+)
 
 func imageOpWeight(imageOp paint.ImageOp) int64 {
 	size := imageOp.Size()
@@ -152,6 +157,8 @@ type App struct {
 
 	// image cache (thumbs, fanarts, posters — all media types)
 	images *asyncCache[paint.ImageOp]
+	// fanart for the catalog backdrop and detail pages
+	backdrops *asyncCache[backdrop]
 
 	// subtitle search popup (nil = closed)
 	subPopup *SubtitlePopup
@@ -190,9 +197,13 @@ type libraryView struct {
 }
 
 type browseState struct {
-	library libraryView
-	nav     *NavigationState
-	focus   browseFocus
+	library  libraryView
+	nav      *NavigationState
+	focus    browseFocus
+	backdrop backdropState
+	// previewTextTop is where the terminal preview's text starts, set while
+	// laying it out; -1 without one.
+	previewTextTop int
 	// Rail pages replace the catalog without changing its listing or navigation.
 	remote   *webRemotePage
 	logs     *logsPage
@@ -347,6 +358,7 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		leftList:         layout.List{Axis: layout.Vertical},
 		detailList:       layout.List{Axis: layout.Vertical},
 		images:           newWeightedAsyncCache[paint.ImageOp](3, 24, imageCacheBudget, imageOpWeight),
+		backdrops:        newWeightedAsyncCache[backdrop](2, 4, backdropCacheBudget, backdropWeight),
 		sseCh:            sseCh,
 		logs:             NewLogBuffer(),
 	}
@@ -364,8 +376,10 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		go app.forwardSSE(ctx, done)
 	}
 	app.images.retryable = isTransientArtworkError
+	app.backdrops.retryable = isTransientArtworkError
 	if invalidate != nil {
 		app.images.onDone = invalidate
+		app.backdrops.onDone = invalidate
 	}
 	return app
 }
@@ -592,6 +606,7 @@ func (a *App) drainChannels() {
 
 	// Drain all pending image fetch results.
 	a.images.drain()
+	a.backdrops.drain()
 }
 
 // detailScrollStep is how far one Up/Down moves the movie detail page.
@@ -613,7 +628,7 @@ func (a *App) scrollDetail(dir int) {
 // the headless driver can wait for it before a screenshot. Call it from the
 // goroutine that runs Layout.
 func (a *App) Loading() bool {
-	return a.refreshing || a.images.busy()
+	return a.refreshing || a.images.busy() || a.backdrops.busy()
 }
 
 func (a *App) Layout(gtx C) D {
@@ -688,9 +703,22 @@ func (a *App) layoutPlayingBar(gtx C) D {
 	)
 }
 
+// catalogShown reports whether the catalog, with its backdrop, fills the
+// window.
+func (a *App) catalogShown() bool {
+	return a.setup == nil && a.detail == nil && !a.browse.onPage()
+}
+
 func (a *App) layout(gtx C) D {
 	a.viewportInsets = layout.UniformInset(dp24)
+	catalog := a.catalogShown()
 	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx C) D {
+			if !catalog {
+				return D{}
+			}
+			return a.layoutBackdrop(gtx)
+		}),
 		layout.Expanded(func(gtx C) D {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx C) D {

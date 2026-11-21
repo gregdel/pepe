@@ -12,7 +12,6 @@ import (
 
 	"gioui.org/layout"
 	"gioui.org/op"
-	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"github.com/gregdel/pepe/internal/driver"
 )
@@ -271,7 +270,7 @@ func TestHelpDetailsArtwork(t *testing.T) {
 						}
 					}
 					for _, key := range []string{"fanart:movie-new", "thumb:movie-new", "fanart:show-one", "poster:show-one"} {
-						f.app.images.store(key, paint.NewImageOp(art))
+						storeArtwork(f.app, key, art)
 					}
 					f.app.pushMovieDetail(&MediaItem{ID: "movie-new", Title: "New Movie", Type: mediaKindMovie})
 					if err := f.driver.Resize(width, width*9/16); err != nil {
