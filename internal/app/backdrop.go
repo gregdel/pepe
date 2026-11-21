@@ -29,11 +29,10 @@ import (
 // artwork as possible stays visible; there is one veil per rail width.
 
 const (
-	// Window-relative geometry; the sharp fanart covers the box right of
-	// backdropBoxLeft and above backdropBoxBottom, cropped to fit.
-	backdropBoxLeft   = 0.40
-	backdropBoxBottom = 1.0
-	veilFadeWidth     = 0.05
+	// Window-relative geometry; the sharp fanart covers the full-height box
+	// right of backdropBoxLeft, cropped to fit.
+	backdropBoxLeft = 0.40
+	veilFadeWidth   = 0.05
 
 	// The ambient canvas is tiny: it is heavily blurred, and the GPU's linear
 	// filtering upscales it smoothly.
@@ -111,32 +110,32 @@ func newBackdrop(img image.Image) backdrop {
 // alpha.
 func ambientImages(img image.Image) (ambient *image.NRGBA, veils [2]*image.NRGBA) {
 	const w, h = ambientWidth, ambientHeight
-	boxLeft, boxBottom := float32(backdropBoxLeft), float32(backdropBoxBottom)
+	boxLeft := float32(backdropBoxLeft)
 	boxX := int(boxLeft*w + 0.5)
-	boxW, boxH := w-boxX, int(boxBottom*h+0.5)
+	boxW := w - boxX
 
 	// Cover-crop the source to the box's aspect ratio, then downscale it with
 	// a filter that averages every source pixel.
 	src := img.Bounds()
 	crop := src
-	if src.Dx()*boxH > src.Dy()*boxW {
-		cw := src.Dy() * boxW / boxH
+	if src.Dx()*h > src.Dy()*boxW {
+		cw := src.Dy() * boxW / h
 		crop.Min.X += (src.Dx() - cw) / 2
 		crop.Max.X = crop.Min.X + cw
 	} else {
-		ch := src.Dx() * boxH / boxW
+		ch := src.Dx() * h / boxW
 		crop.Min.Y += (src.Dy() - ch) / 2
 		crop.Max.Y = crop.Min.Y + ch
 	}
-	small := image.NewRGBA(image.Rect(0, 0, boxW, boxH))
+	small := image.NewRGBA(image.Rect(0, 0, boxW, h))
 	draw.BiLinear.Scale(small, small.Bounds(), img, crop, draw.Src, nil)
 
-	// Linear-light canvas: the box holds the image, the rest extends its
-	// nearest edge and eases towards its mean colour with distance, so the
-	// extension does not streak.
+	// Linear-light canvas: the box holds the image, the rest extends its left
+	// edge and eases towards its mean colour with distance, so the extension
+	// does not streak.
 	canvas := make([][3]float32, w*h)
 	var mean [3]float32
-	for y := range boxH {
+	for y := range h {
 		for x := range boxW {
 			c := small.RGBAAt(x, y)
 			px := [3]float32{srgb8ToLinear(c.R), srgb8ToLinear(c.G), srgb8ToLinear(c.B)}
@@ -147,17 +146,12 @@ func ambientImages(img image.Image) (ambient *image.NRGBA, veils [2]*image.NRGBA
 		}
 	}
 	for i := range mean {
-		mean[i] /= float32(boxW * boxH)
+		mean[i] /= float32(boxW * h)
 	}
 	for y := range h {
-		for x := range w {
-			cx, cy := min(max(x, boxX), w-1), min(y, boxH-1)
-			if cx == x && cy == y {
-				continue
-			}
-			dist := max(float32(cx-x)/w, float32(y-cy)/h)
-			t := smoothstep(0, 0.25, dist)
-			edge := canvas[cy*w+cx]
+		edge := canvas[y*w+boxX]
+		for x := range boxX {
+			t := smoothstep(0, 0.25, float32(boxX-x)/w)
 			var px [3]float32
 			for i := range px {
 				px[i] = edge[i] + (mean[i]-edge[i])*t
@@ -178,13 +172,10 @@ func ambientImages(img image.Image) (ambient *image.NRGBA, veils [2]*image.NRGBA
 	for y := range h {
 		for x := range w {
 			px := canvas[y*w+x]
-			u, v := (float32(x)+0.5)/w, (float32(y)+0.5)/h
+			u := (float32(x) + 0.5) / w
 			if l := 0.2126*px[0] + 0.7152*px[1] + 0.0722*px[2]; l > 0 {
-				// Away from the box, towards the left and bottom edges.
+				// Away from the box, towards the left edge.
 				dist := (boxLeft - u) / boxLeft
-				if boxBottom < 1 {
-					dist = max(dist, (v-boxBottom)/(1-boxBottom))
-				}
 				target := ambientMaxLuminance * float32(1-math.Exp(float64(-l/ambientKnee)))
 				target *= 1 - ambientEdgeDarken*smoothstep(0, 1, dist)
 				// target < l: ambientMaxLuminance/ambientKnee < 1, so no
@@ -310,7 +301,8 @@ func (a *App) wantedBackdrop() (*MediaItem, bool) {
 	return a.firstMedia(child), false
 }
 
-// firstMedia follows the largest branches down to the first title.
+// firstMedia follows the first child of each node down to the first title
+// in display order.
 func (a *App) firstMedia(node *RadixNode) *MediaItem {
 	for node != nil {
 		if node.IsTerminal {
@@ -405,7 +397,7 @@ func (a *App) drawBackdrop(gtx C, view backdropView, bd backdrop, size image.Poi
 	}
 	full := image.Rectangle{Max: size}
 	if sharp {
-		box := image.Rect(int(backdropBoxLeft*float32(size.X)), 0, size.X, int(backdropBoxBottom*float32(size.Y)))
+		box := image.Rect(int(backdropBoxLeft*float32(size.X)), 0, size.X, size.Y)
 		drawImage(gtx, bd.sharp, box, true)
 		veil := bd.veils[0]
 		if a.browse.focus == browseFocusModeRail {
