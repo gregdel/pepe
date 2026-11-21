@@ -1,6 +1,7 @@
 package main
 
 import (
+	"image"
 	"path/filepath"
 	"testing"
 
@@ -22,14 +23,34 @@ func TestMockPlaybackUIUsesOfflineCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer drv.Close()
-	if !hasLabel(drv.Tree(), "2 movies · 0 shows") {
+	if !hasLabel(drv.Tree(), "17 movies · 2 shows") {
 		t.Fatal("mock UI did not load the offline catalog")
 	}
 	if err := drv.Key("RightArrow", nil); err != nil {
 		t.Fatal(err)
 	}
-	if !hasLabel(drv.Tree(), "First Movie (2025)") || !hasLabel(drv.Tree(), "Second Movie (2026)") {
-		t.Fatal("mock UI missing selectable movies")
+	// Titles sharing a prefix are grouped; this one stands alone.
+	const title = "Corrupt Artwork (2010)"
+	if !hasLabel(drv.Tree(), "Bright ") || !hasLabel(drv.Tree(), title) {
+		t.Fatal("mock UI missing its title groups and selectable movies")
+	}
+	viewport := image.Rect(0, 0, 1024, 768)
+	focused := func() string {
+		if selected := driver.Selected(drv.Tree(), viewport); len(selected) > 0 {
+			return selected[len(selected)-1].Label
+		}
+		return ""
+	}
+	for range 30 {
+		if focused() == title {
+			break
+		}
+		if err := drv.Key("DownArrow", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := focused(); got != title {
+		t.Fatalf("D-pad focus = %q, want %q", got, title)
 	}
 	if err := drv.Key("RightArrow", nil); err != nil {
 		t.Fatal(err)
