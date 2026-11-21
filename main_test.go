@@ -2,18 +2,81 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	gioapp "gioui.org/app"
+	"gioui.org/io/system"
+
 	"github.com/gregdel/pepe/internal/app"
 )
+
+// restartStageEnv makes the test binary act as pépé for TestRestartFromWindowGoroutine.
+const restartStageEnv = "PEPE_TEST_RESTART_STAGE"
+
+// TestMain runs on the main goroutine, which gioapp locks to the main thread,
+// so a helper stage can call gioapp.Main like main does.
+func TestMain(m *testing.M) {
+	switch os.Getenv(restartStageEnv) {
+	case "window":
+		go func() {
+			w := new(gioapp.Window)
+			for {
+				switch e := w.Event().(type) {
+				case gioapp.FrameEvent:
+					w.Perform(system.ActionClose)
+				case gioapp.DestroyEvent:
+					// Run returns ErrRestart once its window is destroyed.
+					fmt.Fprintf(os.Stderr, "window destroyed: %v\n", e.Err)
+					_ = os.Setenv(restartStageEnv, "restarted")
+					restart(app.ConfigSource{})
+				}
+			}
+		}()
+		gioapp.Main()
+	case "restarted":
+		fmt.Println("restarted")
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+// TestRestartFromWindowGoroutine re-execs from the window goroutine while
+// gioapp.Main runs the platform event loop (Cocoa's on macOS), like a save
+// in the settings form does.
+func TestRestartFromWindowGoroutine(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^$")
+	cmd.Env = append(os.Environ(), restartStageEnv+"=window")
+	if runtime.GOOS != "darwin" {
+		// Without a display server the window fails at once; the restart
+		// still runs from the window goroutine, and no window flashes.
+		cmd.Env = slices.DeleteFunc(cmd.Env, func(entry string) bool {
+			name, _, _ := strings.Cut(entry, "=")
+			return slices.Contains([]string{"WAYLAND_DISPLAY", "DISPLAY", "XDG_RUNTIME_DIR"}, name)
+		})
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	t.Logf("helper stderr:\n%s", stderr.String())
+	if err != nil || strings.TrimSpace(string(out)) != "restarted" {
+		t.Fatalf("restart helper: err=%v, stdout=%q", err, out)
+	}
+}
 
 func TestLoggingInMemoryByDefault(t *testing.T) {
 	original := slog.Default()
@@ -203,5 +266,49 @@ func TestMPVFlagsRejectInvalidDurations(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestConfigOverridesOnlyEffectiveFlags(t *testing.T) {
+	for _, env := range []string{"POLOCHON_URL", "POLOCHON_TOKEN", "POLOCHON_MPV"} {
+		t.Setenv(env, "")
+	}
+	for _, test := range []struct {
+		name string
+		args []string
+		want map[string]string
+	}{
+		{"none", nil, map[string]string{}},
+		{"fullscreen false", []string{"-fullscreen=false", "-windowed=false", "-mpv="}, map[string]string{}},
+		{"fullscreen", []string{"-fullscreen", "-mpv=/opt/mpv"}, map[string]string{
+			"fullscreen": "-fullscreen", "player_fullscreen": "-fullscreen", "mpv_path": "-mpv",
+		}},
+		{"windowed wins", []string{"-windowed", "-fullscreen"}, map[string]string{
+			"fullscreen": "-windowed", "player_fullscreen": "-fullscreen",
+		}},
+		{"explicit defaults", []string{"-controls=keyboard", "-help-bar=true", "-mpv-osd=pepe", "-web-ui-addr="}, map[string]string{
+			"controls": "-controls", "help_bar": "-help-bar", "mpv_osd": "-mpv-osd", "web_ui_addr": "-web-ui-addr",
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			flags := flag.NewFlagSet("pepe", flag.ContinueOnError)
+			flags.Bool("fullscreen", false, "")
+			flags.Bool("windowed", false, "")
+			flags.String("mpv", "", "")
+			flags.String("web-ui-addr", "", "")
+			registerInterfaceFlags(flags)
+			if err := flags.Parse(test.args); err != nil {
+				t.Fatal(err)
+			}
+			got := configOverrides(flags)
+			if len(got) != len(test.want) {
+				t.Fatalf("overrides = %v, want %v", got, test.want)
+			}
+			for key, source := range test.want {
+				if got[key] != source {
+					t.Fatalf("overrides = %v, want %v", got, test.want)
+				}
+			}
+		})
 	}
 }

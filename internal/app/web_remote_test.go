@@ -76,8 +76,12 @@ func TestWebRemoteNavigationPreservesListing(t *testing.T) {
 		t.Fatal("Up from Last added did not select Smart list")
 	}
 	a.navigateUp()
-	if a.browse.logs == nil || a.browse.remote != nil {
-		t.Fatal("Up from Smart list did not wrap to Logs")
+	if a.browse.settings == nil || a.browse.remote != nil {
+		t.Fatal("Up from Smart list did not wrap to Settings")
+	}
+	a.navigateUp()
+	if a.browse.logs == nil || a.browse.settings != nil {
+		t.Fatal("Up from Settings did not select Logs")
 	}
 	a.navigateUp()
 	if a.browse.remote == nil || a.browse.logs != nil {
@@ -85,8 +89,9 @@ func TestWebRemoteNavigationPreservesListing(t *testing.T) {
 	}
 	a.navigateDown()
 	a.navigateDown()
+	a.navigateDown()
 	if a.railOption() != railSmartList || a.browse.onPage() {
-		t.Fatal("Down from Logs did not wrap to Smart list")
+		t.Fatal("Down from Settings did not wrap to Smart list")
 	}
 	a.selectRailOption(railWebRemote)
 	a.navigateHome()
@@ -151,7 +156,8 @@ func TestHeadlessWebRemoteSetup(t *testing.T) {
 	f := newHeadlessFixture(t)
 	headlessKey(t, f, "LeftArrow")
 	headlessKey(t, f, "UpArrow")
-	headlessKey(t, f, "UpArrow") // past Logs
+	headlessKey(t, f, "UpArrow")
+	headlessKey(t, f, "UpArrow") // past Settings and Logs
 	if !headlessHasLabel(f.driver.Tree(), "Web remote") || !headlessHasLabel(f.driver.Tree(), f.app.browse.remote.message) {
 		t.Fatal("disabled remote is missing its setup instructions")
 	}
@@ -232,5 +238,23 @@ func TestHeadlessWebRemoteQR(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestConfiguredWebUIBindFailureIsNotFatal(t *testing.T) {
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = busy.Close() }()
+	a := New(nil, nil, nil, nil, nil)
+	defer a.Close()
+	a.startConfiguredWebUI(busy.Addr().String())
+	if a.webUI != nil || a.webUIStartError == "" {
+		t.Fatal("bind failure was not recorded")
+	}
+	a.openWebRemote()
+	if message := a.browse.remote.message; !strings.Contains(message, "could not start") || !strings.Contains(message, "Settings") {
+		t.Fatalf("message = %q", message)
 	}
 }

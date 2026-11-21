@@ -1,6 +1,8 @@
 package app
 
 import (
+	"slices"
+
 	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/layout"
@@ -49,12 +51,20 @@ var keyBindings = []keyBinding{
 	{name: key.NameTab, action: actionToggleSection},
 }
 
-var keyFilters = buildKeyFilters(keyBindings)
+// editKeys leave or commit an edited settings field; every other key, letters
+// and Left/Right/Home included, belongs to the focused editor.
+var editKeys = []key.Name{key.NameUpArrow, key.NameDownArrow, key.NameReturn, key.NameEnter, key.NameEscape, key.NameTab}
 
-func buildKeyFilters(bindings []keyBinding) []event.Filter {
-	filters := make([]event.Filter, 0, len(bindings))
-	for _, binding := range bindings {
-		filters = append(filters, key.Filter{Focus: nil, Name: binding.name, Optional: binding.optional})
+// keyFilters scopes the bindings to the focus tag, keeping only editKeys while
+// a settings field is edited. Gio delivers a key to any matching filter instead
+// of inserting its text, so the bindings must not match while an editor has
+// focus.
+func keyFilters(focus event.Tag, editing bool) []event.Filter {
+	filters := make([]event.Filter, 0, len(keyBindings))
+	for _, binding := range keyBindings {
+		if !editing || slices.Contains(editKeys, binding.name) {
+			filters = append(filters, key.Filter{Focus: focus, Name: binding.name, Optional: binding.optional})
+		}
 	}
 	return filters
 }
@@ -68,9 +78,23 @@ func actionForKey(name key.Name) inputAction {
 	return actionUnknown
 }
 
+// handleKeys reads bindings scoped to keyTag, which holds focus unless a
+// settings field is edited (syncSettingsEditor focuses the editor). Filters
+// are rebuilt per key: Gio replays the keys after a focus change under the new
+// focus.
 func (a *App) handleKeys(gtx layout.Context) {
 	for {
-		e, ok := gtx.Event(keyFilters...)
+		// Reading its FocusFilter every frame keeps keyTag focusable.
+		filters := []event.Filter{key.FocusFilter{Target: a.keyTag}}
+		if form := a.activeSettings(); form != nil && form.editing >= 0 {
+			filters = append(filters, keyFilters(&form.editor, true)...)
+		} else {
+			if !gtx.Focused(a.keyTag) {
+				gtx.Execute(key.FocusCmd{Tag: a.keyTag})
+			}
+			filters = append(filters, keyFilters(a.keyTag, false)...)
+		}
+		e, ok := gtx.Event(filters...)
 		if !ok {
 			return
 		}
@@ -119,6 +143,9 @@ func (a *App) handlePopupAction(action inputAction) {
 }
 
 func (a *App) handleBrowseAction(action inputAction) {
+	if form := a.activeSettings(); form != nil && a.settingsAction(form, action) {
+		return
+	}
 	switch action {
 	case actionUp:
 		a.navigateUp()

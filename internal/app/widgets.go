@@ -494,8 +494,15 @@ func (a *App) playButton(gtx C, id, semanticLabel, text string, action func()) D
 // A focused pill carries the D-pad focus ring and semantic selection.
 func (a *App) pill(gtx C, focused bool, bg color.NRGBA, content layout.Widget) D {
 	inset := layout.Inset{Left: dp16, Right: dp16, Top: dp8, Bottom: dp8}
+	return a.focusFrame(gtx, focused, bg, func(gtx C) D { return inset.Layout(gtx, content) })
+}
+
+// focusFrame draws content on a rounded background sized to it; bg with zero
+// alpha draws none. Focused content carries the D-pad focus ring and semantic
+// selection.
+func (a *App) focusFrame(gtx C, focused bool, bg color.NRGBA, content layout.Widget) D {
 	macro := op.Record(gtx.Ops)
-	dims := inset.Layout(gtx, content)
+	dims := content(gtx)
 	call := macro.Stop()
 
 	if focused {

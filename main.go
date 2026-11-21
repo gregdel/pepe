@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	gioapp "gioui.org/app"
@@ -38,13 +40,14 @@ func main() {
 		os.Exit(2)
 	}
 
+	source := app.ConfigSource{Path: *configPath, Overrides: configOverrides(flag.CommandLine)}
 	config, err := app.LoadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
 		fmt.Fprintf(os.Stderr, "\nRequired configuration:\n")
 		fmt.Fprintf(os.Stderr, "  %s with polochon_url and polochon_token\n", *configPath)
 		fmt.Fprintf(os.Stderr, "  or POLOCHON_URL and POLOCHON_TOKEN environment variables\n")
-		showSetup(*configPath, err)
+		showSetup(source, err)
 	}
 	if *mpvPath != "" {
 		config.MPVPath = *mpvPath
@@ -102,7 +105,11 @@ func main() {
 		if config.Fullscreen {
 			w.Option(gioapp.Decorated(false), gioapp.Fullscreen.Option())
 		}
-		if err := app.Run(w, apiClient, sseCh, config, loadErr, logs); err != nil {
+		err := app.Run(w, apiClient, sseCh, config, loadErr, logs, source)
+		if errors.Is(err, app.ErrRestart) {
+			restart(source)
+		}
+		if err != nil {
 			log.Error("error running app", "error", err)
 			fmt.Fprintf(os.Stderr, "Error running app: %v\n", err)
 			os.Exit(1)
@@ -180,8 +187,10 @@ func applyWebUIAddr(config *app.Config, flags *flag.FlagSet, addr string) error 
 }
 
 // showSetup explains a configuration problem in a window, since desktop
-// launches have no visible stderr, then exits with status 1.
-func showSetup(path string, problem error) {
+// launches have no visible stderr. It restarts pépé once the settings form
+// saved a valid config, and otherwise exits with status 1.
+func showSetup(source app.ConfigSource, problem error) {
+	path := source.Path
 	created := false
 	// Environment-only setups keep relying on the environment.
 	if os.Getenv("POLOCHON_URL") == "" && os.Getenv("POLOCHON_TOKEN") == "" {
@@ -195,7 +204,11 @@ func showSetup(path string, problem error) {
 	go func() {
 		w := new(gioapp.Window)
 		w.Option(gioapp.Title("pépé"), gioapp.Size(unit.Dp(1200), unit.Dp(700)))
-		if err := app.RunSetup(w, path, problem, created); err != nil {
+		err := app.RunSetup(w, source, problem, created)
+		if errors.Is(err, app.ErrRestart) {
+			restart(source)
+		}
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error running app: %v\n", err)
 		}
 		os.Exit(1)
@@ -219,4 +232,59 @@ func configureLogging(path string, logs *app.LogBuffer) (*os.File, error) {
 	// SetDefault also routes standard-library log calls through this handler.
 	slog.SetDefault(slog.New(logs.Handler(next)))
 	return file, nil
+}
+
+// configOverrides maps config keys to the environment variable or flag that
+// replaces their file value, for the settings form. It mirrors how main and
+// the apply functions use each flag.
+func configOverrides(flags *flag.FlagSet) map[string]string {
+	overrides := app.EnvOverrides()
+	keys := map[string][]string{
+		"mpv":         {"mpv_path"},
+		"fullscreen":  {"fullscreen", "player_fullscreen"},
+		"windowed":    {"fullscreen"},
+		"controls":    {"controls"},
+		"help-bar":    {"help_bar"},
+		"mpv-osd":     {"mpv_osd"},
+		"web-ui-addr": {"web_ui_addr"},
+	}
+	// flags.Visit is sorted, so -windowed, applied after -fullscreen, wins.
+	flags.Visit(func(setting *flag.Flag) {
+		switch setting.Name {
+		case "mpv":
+			// main only applies a non-empty path.
+			if setting.Value.String() == "" {
+				return
+			}
+		case "fullscreen", "windowed":
+			// main only applies these when true.
+			if setting.Value.String() != "true" {
+				return
+			}
+		}
+		for _, key := range keys[setting.Name] {
+			overrides[key] = "-" + setting.Name
+		}
+	})
+	return overrides
+}
+
+// restart replaces the process with a fresh pépé, keeping its arguments and
+// environment, so saved settings take effect. It runs on the window goroutine
+// while gioapp.Main holds the main thread. Desktop launches have no visible
+// stderr, so a failure is shown on the setup screen, where saving retries.
+func restart(source app.ConfigSource) {
+	exe, err := os.Executable()
+	if err == nil {
+		err = syscall.Exec(exe, os.Args, os.Environ())
+	}
+	err = fmt.Errorf("the settings were saved, but pépé could not restart: %w", err)
+	slog.Error("restart failed", "error", err)
+	fmt.Fprintln(os.Stderr, err)
+	w := new(gioapp.Window)
+	w.Option(gioapp.Title("pépé"), gioapp.Size(unit.Dp(1200), unit.Dp(700)))
+	if errors.Is(app.RunSetup(w, source, err, false), app.ErrRestart) {
+		restart(source)
+	}
+	os.Exit(1)
 }

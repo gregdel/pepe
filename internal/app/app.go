@@ -127,6 +127,7 @@ type App struct {
 	// opt-in HTTP transport; mutable app state stays on the event loop
 	webUI           *webUI
 	webCommandError string
+	webUIStartError string // the configured web remote could not start
 
 	// in-memory, redacted log; logsVisible lets other goroutines wake the UI
 	logs        *LogBuffer
@@ -157,6 +158,10 @@ type App struct {
 
 	// configuration problem screen; replaces the whole UI (nil = normal app)
 	setup *setupScreen
+
+	// settings form source; a saved form sets restartRequested and closes the window
+	configSource     ConfigSource
+	restartRequested bool
 
 	// Gio persistent list state (must survive between frames)
 	clickables   map[string]*widget.Clickable
@@ -189,13 +194,26 @@ type browseState struct {
 	nav     *NavigationState
 	focus   browseFocus
 	// Rail pages replace the catalog without changing its listing or navigation.
-	remote *webRemotePage
-	logs   *logsPage
+	remote   *webRemotePage
+	logs     *logsPage
+	settings *settingsForm
+	// settingsDraft keeps a closed Settings page with unsaved changes, so
+	// leaving it (Esc, Home, the mode rail) does not lose the edits.
+	settingsDraft *settingsForm
 }
 
-func (b *browseState) onPage() bool { return b.remote != nil || b.logs != nil }
+func (b *browseState) onPage() bool { return b.remote != nil || b.logs != nil || b.settings != nil }
 
-func (b *browseState) closePage() { b.remote, b.logs = nil, nil }
+func (b *browseState) closePage() {
+	if form := b.settings; form != nil {
+		form.commitEdit()
+		b.settingsDraft = nil
+		if form.dirty() {
+			b.settingsDraft = form
+		}
+	}
+	b.remote, b.logs, b.settings = nil, nil, nil
+}
 
 // savedSelection captures the identity of the currently selected media item so
 // navigation can be restored after a library refresh.
@@ -417,8 +435,9 @@ func (a *App) Close() {
 
 // Run drives the application in a normal Gio window and shows logs, the buffer
 // the default slog handler writes to. A non-nil loadErr means the initial
-// library fetch failed: start empty and keep retrying.
-func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Config, loadErr error, logs *LogBuffer) error {
+// library fetch failed: start empty and keep retrying. The Settings page edits
+// source; Run returns ErrRestart, after shutting down, once it was saved.
+func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Config, loadErr error, logs *LogBuffer, source ConfigSource) error {
 	wake := make(chan struct{}, 1)
 	invalidate := func() {
 		select {
@@ -435,22 +454,31 @@ func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 	}
 	a := New(client, sseCh, config, invalidate, closeWindow)
 	defer a.Close()
+	a.configSource = source
 	a.UseLogs(logs)
 	if loadErr != nil {
 		a.startWithLoadError(loadErr)
 	}
 	if config != nil {
-		if err := a.startWebUI(config.WebUIAddr); err != nil {
-			return err
-		}
+		a.startConfiguredWebUI(config.WebUIAddr)
 	}
 	defer a.pumpEvents(wake)()
-	return a.run(func() event.Event {
+	return a.runResult(a.run(func() event.Event {
 		if closing.Swap(false) {
 			w.Perform(system.ActionClose)
 		}
 		return w.Event()
-	})
+	}))
+}
+
+// runResult reports a requested restart once the window loop has ended.
+func (a *App) runResult(err error) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err == nil && a.restartRequested {
+		return ErrRestart
+	}
+	return err
 }
 
 // pumpEvents processes remote commands and async results on each wake-up,

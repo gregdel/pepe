@@ -48,8 +48,15 @@ func TestActionForKeyAliases(t *testing.T) {
 }
 
 func TestKeyFiltersCoverEveryBinding(t *testing.T) {
-	if len(keyFilters) != len(keyBindings) {
-		t.Fatalf("key filter count = %d, want %d", len(keyFilters), len(keyBindings))
+	tag := new(bool)
+	filters := keyFilters(tag, false)
+	if len(filters) != len(keyBindings) {
+		t.Fatalf("key filter count = %d, want %d", len(filters), len(keyBindings))
+	}
+	for _, filter := range filters {
+		if f := filter.(key.Filter); f.Focus != tag {
+			t.Errorf("%q filter is not scoped to the focus tag", f.Name)
+		}
 	}
 }
 

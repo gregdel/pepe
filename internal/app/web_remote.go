@@ -24,6 +24,16 @@ type webRemotePage struct {
 	message string
 }
 
+// startConfiguredWebUI starts the configured web remote. A failure (address in
+// use, privileged port) is logged and shown on the Web remote page instead of
+// stopping pépé, so the address can be fixed in Settings.
+func (a *App) startConfiguredWebUI(addr string) {
+	if err := a.startWebUI(addr); err != nil {
+		a.logger().Error("web remote disabled", "address", addr, "error", err)
+		a.webUIStartError = err.Error()
+	}
+}
+
 // openWebRemote shows the QR page without changing the catalog listing.
 func (a *App) openWebRemote() {
 	page := &webRemotePage{}
@@ -31,6 +41,9 @@ func (a *App) openWebRemote() {
 	a.browse.remote = page
 	if a.webUI == nil {
 		page.message = "Enable the web remote with web_ui_addr: \":8081\" or -web-ui-addr=:8081."
+		if a.webUIStartError != "" {
+			page.message = "The web remote could not start (" + a.webUIStartError + "). Change its address in Settings."
+		}
 		return
 	}
 	bound, ok := a.webUI.listener.Addr().(*net.TCPAddr)

@@ -82,7 +82,7 @@ func TestLoadConfigRejectsTemplatePlaceholders(t *testing.T) {
 
 func TestHeadlessSetupScreen(t *testing.T) {
 	closed := false
-	a := NewSetup("/home/user/.config/pepe/config.yaml", errors.New("polochon_url is not set (config file or POLOCHON_URL)"), true, nil, func() { closed = true })
+	a := NewSetup(ConfigSource{Path: "/home/user/.config/pepe/config.yaml"}, errors.New("polochon_url is not set (config file or POLOCHON_URL)"), true, nil, func() { closed = true })
 	d, err := driver.New(driver.Config{Width: 1024, Height: 768, PxPerDp: 1, PxPerSp: 1}, a.Layout)
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestHeadlessSetupScreen(t *testing.T) {
 	t.Cleanup(d.Close)
 	f := &headlessFixture{app: a, driver: d}
 	tree := d.Tree()
-	for _, label := range []string{"Set up pépé", "/home/user/.config/pepe/config.yaml", "polochon_url is not set (config file or POLOCHON_URL)"} {
+	for _, label := range []string{"Set up pépé", "Config file: /home/user/.config/pepe/config.yaml", "polochon_url is not set (config file or POLOCHON_URL)"} {
 		if !headlessHasLabel(tree, label) {
 			t.Fatalf("setup screen missing %q", label)
 		}

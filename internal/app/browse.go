@@ -3,11 +3,11 @@ package app
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"strings"
 
 	"gioui.org/font"
 	"gioui.org/layout"
-	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
@@ -36,6 +36,9 @@ func (a *App) layoutBrowse(gtx C) D {
 					if a.browse.logs != nil {
 						return a.layoutLogs(gtx)
 					}
+					if a.browse.settings != nil {
+						return a.layoutSettingsPage(gtx)
+					}
 					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 						layout.Flexed(navFlex, a.layoutNavPanel),
 						layout.Rigid(verticalHairline),
@@ -61,6 +64,7 @@ var (
 	dateAddedModeIcon = mustIcon(icons.ActionSchedule)
 	webRemoteIcon     = mustIcon(icons.CommunicationPhoneLinkRing)
 	logsIcon          = mustIcon(icons.ActionBugReport)
+	settingsIcon      = mustIcon(icons.ActionSettings)
 )
 
 // railEntry is a mode rail row: the catalog listings, then pages that replace
@@ -72,7 +76,8 @@ const (
 	railLastAdded  = railEntry(ListingModeDateAdded)
 	railWebRemote  = railLastAdded + 1
 	railLogs       = railWebRemote + 1
-	railEntryCount = railLogs + 1
+	railSettings   = railLogs + 1
+	railEntryCount = railSettings + 1
 )
 
 func (a *App) railOption() railEntry {
@@ -81,6 +86,8 @@ func (a *App) railOption() railEntry {
 		return railWebRemote
 	case a.browse.logs != nil:
 		return railLogs
+	case a.browse.settings != nil:
+		return railSettings
 	}
 	return railEntry(a.browse.library.mode)
 }
@@ -91,6 +98,8 @@ func (a *App) selectRailOption(entry railEntry) {
 		a.openWebRemote()
 	case railLogs:
 		a.openLogs()
+	case railSettings:
+		a.openSettings()
 	default:
 		a.applyListingMode(ListingMode(entry))
 	}
@@ -102,6 +111,8 @@ func railLabel(entry railEntry) string {
 		return "Web remote"
 	case railLogs:
 		return "Logs"
+	case railSettings:
+		return "Settings"
 	}
 	return listingModeLabel(ListingMode(entry))
 }
@@ -166,6 +177,8 @@ func (a *App) layoutModeOption(gtx C, mode railEntry) D {
 		icon = webRemoteIcon
 	case railLogs:
 		icon = logsIcon
+	case railSettings:
+		icon = settingsIcon
 	}
 
 	return a.clickableLayout(gtx, "mode:"+railLabel(mode), railLabel(mode), func(gtx C) D {
@@ -251,6 +264,9 @@ func (a *App) layoutSectionLabel(gtx C) D {
 	}
 	if a.browse.logs != nil {
 		return a.label(gtx, spMeta, a.browse.logs.summary(), colorFg, font.Medium)
+	}
+	if a.browse.settings != nil {
+		return a.label(gtx, spMeta, a.browse.settings.summary(), colorFg, font.Medium)
 	}
 	section := "Movies"
 	if a.browse.nav.isAtRoot() {
@@ -375,25 +391,28 @@ func (a *App) layoutNavList(gtx C) D {
 
 // rowShell lays out a selectable row and its optional active-mode outline.
 func (a *App) rowShell(gtx C, selected, active bool, minHeight unit.Dp, content layout.Widget) D {
+	switch {
+	case selected:
+		return a.rowFrame(gtx, minHeight, colorSelectBg, true, content)
+	case active:
+		return a.rowFrame(gtx, minHeight, colorSurface2, false, content)
+	}
+	return a.rowFrame(gtx, minHeight, color.NRGBA{}, false, content)
+}
+
+// rowFrame lays out a row of at least minHeight on an optional fill; a
+// focused row is marked selected and gets the focus ring.
+func (a *App) rowFrame(gtx C, minHeight unit.Dp, fill color.NRGBA, focused bool, content layout.Widget) D {
 	return layout.Inset{Left: dp8, Right: dp8, Top: dp2, Bottom: dp2}.Layout(gtx, func(gtx C) D {
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		if h := gtx.Dp(minHeight); gtx.Constraints.Min.Y < h {
 			gtx.Constraints.Min.Y = h
 		}
-		macro := op.Record(gtx.Ops)
-		dims := layout.Center.Layout(gtx, func(gtx C) D {
-			return layout.Inset{Left: dp12, Right: dp12, Top: dp6, Bottom: dp6}.Layout(gtx, content)
+		return a.focusFrame(gtx, focused, fill, func(gtx C) D {
+			return layout.Center.Layout(gtx, func(gtx C) D {
+				return layout.Inset{Left: dp12, Right: dp12, Top: dp6, Bottom: dp6}.Layout(gtx, content)
+			})
 		})
-		call := macro.Stop()
-		if selected {
-			defer a.markSelected(gtx, dims.Size).Pop()
-			fillRounded(gtx, dims.Size, radiusRow, colorSelectBg)
-			focusRing(gtx, dims.Size, radiusRow)
-		} else if active {
-			fillRounded(gtx, dims.Size, radiusRow, colorSurface2)
-		}
-		call.Add(gtx.Ops)
-		return dims
 	})
 }
 

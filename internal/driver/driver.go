@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"unicode/utf8"
 
 	"gioui.org/f32"
 	"gioui.org/gpu/headless"
@@ -58,6 +59,9 @@ type Driver struct {
 	// kept here until a frame is rendered.
 	hasNextFrame bool
 	nextFrame    time.Time
+	// textInput tracks the router's text input state like app.Window does:
+	// a focused editable editor opens it, and losing focus closes it.
+	textInput bool
 }
 
 func New(cfg Config, layoutFunc LayoutFunc) (*Driver, error) {
@@ -195,6 +199,7 @@ func (d *Driver) Settle() error {
 // finishFrame completes a rendered frame and records the redraw it asks for.
 func (d *Driver) finishFrame() {
 	d.router.Frame(&d.ops)
+	d.syncTextInput()
 	d.frameNumber++
 	if at, ok := d.router.WakeupTime(); ok {
 		if !d.hasNextFrame || at.Before(d.nextFrame) {
@@ -343,12 +348,29 @@ func (d *Driver) Type(text string) error {
 	if d.closed {
 		return errors.New("UI driver is closed")
 	}
-	if _, ok := d.router.TextInputHint(); !ok {
+	// Gio exposes no focus query (TextInputHint's flag reports a hint change),
+	// so require a visible editor and an open text input, which a focused
+	// editable editor requests; the router only delivers to the focused one.
+	d.syncTextInput()
+	if !d.textInput || !containsClass(d.Tree(), "editor") {
 		return errors.New("cannot type: no focused text editor")
 	}
-	state := d.router.EditorState()
-	d.router.Queue(key.EditEvent{Range: state.Selection.Range, Text: text})
+	// Like app.Window.EditorInsert, replace the selection, then move the caret
+	// past the inserted text.
+	sel := d.router.EditorState().Selection.Range
+	caret := min(sel.Start, sel.End) + utf8.RuneCountInString(text)
+	d.router.Queue(key.EditEvent{Range: sel, Text: text}, key.SelectionEvent{Start: caret, End: caret})
 	return d.Frame()
+}
+
+// syncTextInput consumes the router's text input state change, if any.
+func (d *Driver) syncTextInput() {
+	switch d.router.TextInputState() {
+	case input.TextInputOpen:
+		d.textInput = true
+	case input.TextInputClose:
+		d.textInput = false
+	}
 }
 
 func (d *Driver) Key(name string, modifiers []string) error {
@@ -365,38 +387,21 @@ func (d *Driver) Key(name string, modifiers []string) error {
 	}
 	press := key.Event{Name: keyName, Modifiers: mods, State: key.Press}
 	if keyName == key.NameTab {
+		// Like app.Window: Tab moves focus when no filter from the last frame
+		// matched it, which leaves no event pending. The frame below renders
+		// anyway, so the wakeup this query consumes is not lost.
 		d.router.Queue(input.SystemEvent{Event: press})
-		if err := d.renderWithFallbackFocus(keyName, mods); err != nil {
-			return err
+		if _, handled := d.router.WakeupTime(); !handled {
+			dir := key.FocusForward
+			if mods&key.ModShift != 0 {
+				dir = key.FocusBackward
+			}
+			d.router.MoveFocus(dir)
 		}
-		return nil
+		return d.Frame()
 	}
 	d.router.Queue(press, key.Event{Name: keyName, Modifiers: mods, State: key.Release})
 	return d.Frame()
-}
-
-func (d *Driver) renderWithFallbackFocus(name key.Name, mods key.Modifiers) error {
-	// Explicitly named SystemEvents are delivered to handlers that ask for the
-	// key. If the application did not consume Tab, mirror app.Window's focus
-	// fallback before completing the frame.
-	pending, at := d.hasNextFrame, d.nextFrame
-	d.hasNextFrame = false
-	d.ops.Reset()
-	gtx := layout.Context{Ops: &d.ops, Source: d.router.Source(), Now: time.Now(), Metric: d.metric, Constraints: layout.Exact(d.size)}
-	d.layout(gtx)
-	if _, handled := d.router.Event(key.Filter{Name: name, Optional: mods}); !handled {
-		if mods&key.ModShift != 0 {
-			d.router.MoveFocus(key.FocusBackward)
-		} else {
-			d.router.MoveFocus(key.FocusForward)
-		}
-	}
-	if err := d.window.Frame(&d.ops); err != nil {
-		d.hasNextFrame, d.nextFrame = pending, at
-		return fmt.Errorf("%w: %w", ErrRender, err)
-	}
-	d.finishFrame()
-	return nil
 }
 
 func (d *Driver) Resize(width, height int) error {
@@ -572,6 +577,8 @@ func keyModifiers(names []string) (key.Modifiers, error) {
 			modifiers |= key.ModAlt
 		case "Super":
 			modifiers |= key.ModSuper
+		case "Shortcut": // Gio's platform shortcut: Command on macOS, Ctrl elsewhere
+			modifiers |= key.ModShortcut
 		default:
 			return 0, fmt.Errorf("unknown key modifier %q", name)
 		}

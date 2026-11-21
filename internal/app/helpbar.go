@@ -67,7 +67,7 @@ var (
 
 func (a *App) contextHints() []hint {
 	if a.setup != nil {
-		return setupHints()
+		return a.setupHints()
 	}
 	if p := a.subPopup; p != nil {
 		var hints []hint
@@ -101,6 +101,9 @@ func (a *App) contextHints() []hint {
 		return append(hints, hint{key: "esc", label: "back"})
 	}
 
+	if form := a.activeSettings(); form != nil && form.editing >= 0 {
+		return settingsHints(form)
+	}
 	if a.browse.onPage() {
 		hints := []hint{{key: "←", label: "menu"}, {key: "esc", label: "back"}, {key: "home", label: "browse"}}
 		if a.browse.focus == browseFocusModeRail {
@@ -109,6 +112,8 @@ func (a *App) contextHints() []hint {
 			hints = append([]hint{{key: "↑↓", label: "address"}}, hints...)
 		} else if a.browse.logs != nil {
 			hints = append([]hint{{key: "↑↓", label: "scroll"}}, hints...)
+		} else if a.browse.settings != nil {
+			hints = append(settingsHints(a.browse.settings), hints...)
 		}
 		return append(hints, hint{key: "q", label: "quit"})
 	}

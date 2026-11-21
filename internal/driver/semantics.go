@@ -225,3 +225,12 @@ func descendantLabels(nodes []Node, labels []string) []string {
 	}
 	return labels
 }
+
+func containsClass(nodes []Node, class string) bool {
+	for _, node := range nodes {
+		if node.Class == class || containsClass(node.Children, class) {
+			return true
+		}
+	}
+	return false
+}

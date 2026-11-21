@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gioui.org/font/gofont"
+	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/io/semantic"
 	"gioui.org/layout"
@@ -363,7 +364,12 @@ func TestSemanticEditorClickFocusesEditor(t *testing.T) {
 	editor.SingleLine = true
 	theme := material.NewTheme()
 	theme.Shaper = text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
+	blur := false
 	d, err := New(Config{Width: 240, Height: 40, PxPerDp: 1, PxPerSp: 1}, func(gtx layout.Context) layout.Dimensions {
+		if blur {
+			blur = false
+			gtx.Execute(key.FocusCmd{})
+		}
 		return material.Editor(theme, &editor, "Search").Layout(gtx)
 	})
 	if err != nil {
@@ -385,18 +391,31 @@ func TestSemanticEditorClickFocusesEditor(t *testing.T) {
 	if len(ids) != 1 {
 		t.Fatalf("editor semantic IDs = %v, want one", ids)
 	}
+	if err := d.Type("lost"); err == nil {
+		t.Fatal("typed into an unfocused editor")
+	}
 	if err := d.Click(ClickTarget{ID: &ids[0]}); err != nil {
 		t.Fatal(err)
 	}
 	if !d.router.Source().Focused(&editor) {
 		t.Fatal("semantic click did not focus the editor")
 	}
-	d.router.Queue(key.EditEvent{Text: "search text"})
-	if err := d.Frame(); err != nil {
+	// Type twice: the second call must not depend on a changed input hint.
+	if err := d.Type("search "); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Type("text"); err != nil {
 		t.Fatal(err)
 	}
 	if got := editor.Text(); got != "search text" {
 		t.Fatalf("editor text = %q, want search text", got)
+	}
+	blur = true
+	if err := d.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Type("lost"); err == nil {
+		t.Fatal("typed into an editor that lost focus")
 	}
 }
 
@@ -661,5 +680,47 @@ func TestWaitIdleRendersUntilLoaded(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed < 60*time.Millisecond || elapsed > time.Second {
 		t.Fatalf("WaitIdle(60ms) took %v", elapsed)
+	}
+}
+
+func TestTabMovesFocusOnlyWhenUnhandled(t *testing.T) {
+	for _, handled := range []bool{false, true} {
+		tag := new(bool)
+		tabs, focused := 0, false
+		d, err := New(Config{Width: 100, Height: 100, PxPerDp: 1, PxPerSp: 1}, func(gtx layout.Context) layout.Dimensions {
+			defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
+			event.Op(gtx.Ops, tag)
+			filters := []event.Filter{key.FocusFilter{Target: tag}}
+			if handled {
+				filters = append(filters, key.Filter{Name: key.NameTab})
+			}
+			for {
+				e, ok := gtx.Event(filters...)
+				if !ok {
+					break
+				}
+				if _, ok := e.(key.Event); ok {
+					tabs++
+				}
+			}
+			focused = gtx.Focused(tag)
+			return layout.Dimensions{Size: gtx.Constraints.Max}
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Key("Tab", nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Frame(); err != nil { // observe a focus move made after layout
+			t.Fatal(err)
+		}
+		d.Close()
+		if handled && (tabs != 1 || focused) {
+			t.Errorf("handled Tab: tabs=%d focused=%v, want 1 and no focus move", tabs, focused)
+		}
+		if !handled && (tabs != 0 || !focused) {
+			t.Errorf("unhandled Tab: tabs=%d focused=%v, want focus moved", tabs, focused)
+		}
 	}
 }

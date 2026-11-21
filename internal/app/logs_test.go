@@ -9,8 +9,9 @@ func TestHeadlessLogsPage(t *testing.T) {
 	f := newHeadlessFixture(t)
 	headlessKey(t, f, "LeftArrow")
 	headlessKey(t, f, "UpArrow")
+	headlessKey(t, f, "UpArrow") // past Settings
 	if f.app.browse.logs == nil || !headlessHasLabel(f.driver.Tree(), "No log entries yet.") {
-		t.Fatal("Up from Smart list did not open the empty Logs page")
+		t.Fatal("Up from Settings did not open the empty Logs page")
 	}
 	nav := f.app.browse.nav
 	f.app.logs.add(slog.LevelError, "mpv", "[ytdl_hook] ERROR: Unsupported URL")
