@@ -94,7 +94,7 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen, alpha float32) D {
 	id := d.movieID
 
 	playText := "Play"
-	if pos := a.resumePos[movieMediaKey(movieID)]; pos > minimumResumePosition {
+	if pos := a.progress.position(movieMediaKey(movieID)); pos > 0 {
 		playText = "Resume " + formatResumePos(pos)
 	}
 
@@ -107,6 +107,13 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen, alpha float32) D {
 		sections = append(sections, spacerFn(dp8))
 		sections = append(sections, func(gtx C) D {
 			return a.body(gtx, spMeta, metaLine, colorSubtle, 2)
+		})
+	}
+
+	if a.progress.watched(movieMediaKey(movieID)) {
+		sections = append(sections, spacerFn(dp8))
+		sections = append(sections, func(gtx C) D {
+			return a.watchedMark(gtx, spMeta, "Watched", colorSubtle)
 		})
 	}
 

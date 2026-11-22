@@ -149,6 +149,14 @@ func (a *App) showEpisodeList(gtx C, s *showPage) D {
 							return a.label(gtx, sp, title, titleCol, weight)
 						}),
 						layout.Rigid(func(gtx C) D {
+							if node.Episode == nil || !a.progress.watched(episodeMediaKey(node.ShowID, node.Episode.Season, node.Episode.Episode)) {
+								return D{}
+							}
+							return layout.Inset{Left: dp12}.Layout(gtx, func(gtx C) D {
+								return a.watchedMark(gtx, spTiny, "", subCol)
+							})
+						}),
+						layout.Rigid(func(gtx C) D {
 							if node.Episode == nil || node.Episode.Runtime <= 0 {
 								return D{}
 							}
@@ -190,9 +198,17 @@ func (a *App) showEpisodeInfo(gtx C, s *showPage) D {
 		)
 	})
 
+	key := episodeMediaKey(node.ShowID, ep.Season, ep.Episode)
+	if a.progress.watched(key) {
+		sections = append(sections, spacerFn(dp12))
+		sections = append(sections, func(gtx C) D {
+			return a.watchedMark(gtx, spMeta, "Watched", colorSubtle)
+		})
+	}
+
 	// The resume position replaces the Play button's label: Enter resumes,
 	// so it gets its own line rather than being clamped off the meta line.
-	if pos := a.resumePos[episodeMediaKey(node.ShowID, ep.Season, ep.Episode)]; pos > minimumResumePosition {
+	if pos := a.progress.position(key); pos > 0 {
 		resume := "Resume from " + formatResumePos(pos)
 		sections = append(sections, spacerFn(dp12))
 		sections = append(sections, func(gtx C) D {

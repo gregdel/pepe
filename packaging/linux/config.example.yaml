@@ -9,6 +9,9 @@ controls: keyboard
 help_bar: true
 # pepe shares the pause panel across desktop/appliance; native opts out.
 mpv_osd: pepe
+# Keep resume positions and watched marks in $XDG_STATE_HOME/pepe/progress.json.
+# Written once after playback or a few seconds after marking; false keeps them in memory.
+save_progress: true
 mpv_managed_launcher: false
 mpv_startup_timeout: 3s
 mpv_stop_timeout: 2s

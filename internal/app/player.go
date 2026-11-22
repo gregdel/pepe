@@ -240,7 +240,7 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 		}
 		token = a.client.getToken()
 		subtitleURLs = a.externalSubtitleURLs(source.subtitles)
-		startPos = a.resumePos[source.mediaKey]
+		startPos = a.progress.position(source.mediaKey)
 	}
 
 	runtimeDir, configPath, sockPath, err := createPlayerRuntime(token)
@@ -418,16 +418,7 @@ func (a *App) applyPlaybackSnapshot(tracker *playbackTracker) {
 		return
 	}
 	mediaKey, pos, eof := tracker.snapshot()
-	if mediaKey == "" {
-		return
-	}
-	if eof {
-		delete(a.resumePos, mediaKey)
-		return
-	}
-	if pos > minimumResumePosition {
-		a.resumePos[mediaKey] = pos
-	}
+	a.progress.recordPlayback(mediaKey, pos, tracker.durationSeconds(), eof)
 }
 
 // macOSMPVFallbacks are tried when the default "mpv" is not on PATH, as for apps
@@ -568,6 +559,7 @@ type playbackTracker struct {
 	mu       sync.RWMutex
 	mediaKey string
 	pos      float64
+	duration float64
 	eof      bool
 	title    string
 	onTitle  func()
@@ -600,6 +592,19 @@ func (t *playbackTracker) updatePos(pos float64) {
 	t.mu.Lock()
 	t.pos = pos
 	t.mu.Unlock()
+}
+
+func (t *playbackTracker) updateDuration(duration float64) {
+	t.mu.Lock()
+	t.duration = duration
+	t.mu.Unlock()
+}
+
+// durationSeconds is the length mpv reported, or 0 when unknown.
+func (t *playbackTracker) durationSeconds() float64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.duration
 }
 
 func (t *playbackTracker) updateTitle(title string) {
@@ -716,6 +721,7 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 	// older ones (and user configs) set force-media-title, which wins.
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 3, \"force-media-title\"]}\n")
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 4, \"metadata/by-key/title\"]}\n")
+	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 5, \"duration\"]}\n")
 	titles := map[string]string{}
 
 	scanner := bufio.NewScanner(conn)
@@ -749,6 +755,10 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 		case "time-pos":
 			if pos, ok := ev.Data.(float64); ok && pos > minimumResumePosition {
 				tracker.updatePos(pos)
+			}
+		case "duration":
+			if duration, ok := ev.Data.(float64); ok && duration > 0 {
+				tracker.updateDuration(duration)
 			}
 		case "eof-reached":
 			if reached, ok := ev.Data.(bool); ok && reached {

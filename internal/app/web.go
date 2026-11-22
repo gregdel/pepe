@@ -253,7 +253,8 @@ func (web *webUI) handler() http.Handler {
 var webActions = map[string]inputAction{
 	"up": actionUp, "down": actionDown, "left": actionLeft, "right": actionRight,
 	"ok": actionActivate, "back": actionBack, "home": actionHome,
-	"section": actionToggleSection, "refresh": actionRefresh, "subtitles": actionSubtitles, "quit": actionQuit,
+	"section": actionToggleSection, "refresh": actionRefresh, "subtitles": actionSubtitles,
+	"watched": actionToggleWatched, "quit": actionQuit,
 }
 
 func decodeWebJSON(w http.ResponseWriter, r *http.Request, destination any) bool {

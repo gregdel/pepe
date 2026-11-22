@@ -268,7 +268,8 @@ The playback overrides below are only enabled by this control profile.
 | Arrows | Navigate; **Right** opens a title's detail | Default mpv seek controls |
 | OK | Activate (does not open browse terminals) | Toggle pause |
 | Back/Exit | Close subtitles, leave details, or go back | Quit to pépé |
-| Root/contents menu, red | Home (close subtitles first) | Quit to pépé |
+| Root/contents menu | Home (close subtitles first) | Quit to pépé |
+| Red | Mark the movie or episode watched/unwatched | Ignored |
 | Blue | Subtitle search | Cycle subtitles |
 | Green | Refresh library in browse | Toggle help |
 | Yellow | Movies/shows in browse | Select subtitle track |
@@ -280,9 +281,9 @@ The playback overrides below are only enabled by this control profile.
 
 `cec.toml` maps CEC Select/Exit to Enter/Escape; the kernel defaults
 KEY_OK/KEY_EXIT are not understood by Gio's pinned XKB backend. Colour buttons
-share keyboard shortcuts: Blue sends S, Green sends R, Red sends Home, and
+share keyboard shortcuts: Blue sends S, Green sends R, Red sends W, and
 Yellow sends Tab. Letter keys follow the seat's active keyboard layout; the
-layout must translate KEY_S/KEY_R to s/r (including lock/modifier state). Unlike
+layout must translate KEY_S/KEY_R/KEY_W to s/r/w (including lock/modifier state). Unlike
 the old F-key mapping, these shortcuts are not layout-independent. Transport
 buttons retain dedicated F5–F12 mappings because Play/Pause/Stop have distinct
 semantics and no pépé browse shortcuts. Programme +/− send F3/F4, which are
@@ -295,7 +296,8 @@ all loaded subtitle tracks. Up/Down and OK choose a track; Back dismisses the
 list without quitting or changing pause state. Blue remains a quick cycle.
 Green shows help without pausing. Keyboard-mode mpv retains its own shortcuts.
 
-**Migration:** reload `cec.toml` after upgrading. Old colour assignments were
+**Migration:** reload `cec.toml` after upgrading. Red sent Home before it marked
+titles watched. Older colour assignments were
 Red=refresh, Green=movies/shows, Yellow=Home, and Blue/Red/Green emitted F1–F3.
 Do not mix an old installed keymap with the new help/bindings.
 

@@ -97,6 +97,8 @@ var settingRows = []settingRow{
 		field: func(c *Config) any { return &c.HelpBar }},
 	{key: "mpv_osd", label: "Playback overlay", kind: settingChoice, choices: [2]string{"pepe", "native"},
 		field: func(c *Config) any { return &c.MPVOSD }},
+	{key: "save_progress", label: "Remember progress", kind: settingToggle,
+		field: func(c *Config) any { return &c.SaveProgress }},
 	{key: "web_ui_addr", label: "Web remote address", hint: "Disabled (for example :8081)",
 		field: func(c *Config) any { return &c.WebUIAddr }},
 }

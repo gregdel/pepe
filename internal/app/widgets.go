@@ -500,6 +500,24 @@ func (a *App) playButton(gtx C, id, semanticLabel, text string, action func()) D
 	}, action)
 }
 
+// watchedMark draws a check followed by "Watched", or only the check when
+// text is empty, one text line high.
+func (a *App) watchedMark(gtx C, size unit.Sp, text string, col color.NRGBA) D {
+	gtx.Constraints.Min = image.Point{}
+	measure := op.Record(gtx.Ops)
+	line := a.label(gtx, size, "M", col, font.Normal)
+	measure.Stop()
+	icon := layout.Rigid(inlineIcon(watchedIcon, line.Size.Y, line.Size.Y, col))
+	if text == "" {
+		return layout.Flex{Alignment: layout.Middle}.Layout(gtx, icon)
+	}
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+		icon,
+		layout.Rigid(layout.Spacer{Width: dp6}.Layout),
+		layout.Rigid(func(gtx C) D { return a.label(gtx, size, text, col, font.Normal) }),
+	)
+}
+
 // pill draws content on a rounded background; bg with zero alpha draws none.
 // A focused pill carries the D-pad focus ring and semantic selection.
 func (a *App) pill(gtx C, focused bool, bg color.NRGBA, content layout.Widget) D {
@@ -546,6 +564,7 @@ var (
 		'→': mustIcon(icons.NavigationArrowForward),
 	}
 	playIcon              = mustIcon(icons.AVPlayArrow)
+	watchedIcon           = mustIcon(icons.ActionDone)
 	posterPlaceholderIcon = mustIcon(icons.AVMovie)
 )
 

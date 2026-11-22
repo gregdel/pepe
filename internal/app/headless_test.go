@@ -475,7 +475,7 @@ func TestHeadlessMovieDetailShortContentScroll(t *testing.T) {
 
 func TestHeadlessShowSeasonAndEpisodeNavigation(t *testing.T) {
 	f := newHeadlessFixture(t)
-	f.app.resumePos[episodeMediaKey("show-one", 1, 1)] = 300
+	f.app.progress.entries[episodeMediaKey("show-one", 1, 1)] = progressEntry{Pos: 300}
 
 	headlessKey(t, f, "LeftArrow")
 	headlessKey(t, f, "DownArrow")

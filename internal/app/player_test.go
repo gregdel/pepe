@@ -70,7 +70,7 @@ func TestCatalogPlaybackURLFailures(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				a.resumePos[source.mediaKey] = 47
+				a.progress.entries[source.mediaKey] = progressEntry{Pos: 47}
 				command, err := a.buildPlayerCommand(source)
 				if err != nil {
 					t.Fatalf("subtitle URL failure prevented playback command: %v", err)
@@ -134,7 +134,7 @@ func TestPlayerRuntimeKeepsTokenOutOfArgumentsAndCleansUp(t *testing.T) {
 	}
 
 	invalidated := make(chan struct{}, 2)
-	a := &App{playerStatus: PlayerStatusIdle, resumePos: make(map[string]float64), images: newAsyncCache[paint.ImageOp](1, 0), backdrops: newAsyncCache[backdrop](1, 0), invalidate: func() { invalidated <- struct{}{} }}
+	a := &App{playerStatus: PlayerStatusIdle, progress: newProgressStore(), images: newAsyncCache[paint.ImageOp](1, 0), backdrops: newAsyncCache[backdrop](1, 0), invalidate: func() { invalidated <- struct{}{} }}
 	if !a.startPlayer(playerCommand{mediaKey: "movie:tt123", sockPath: sockPath, runtimeDir: runtimeDir, args: args, mode: PlayerModeGUI}) {
 		t.Fatalf("startPlayer failed: %s", a.playerError)
 	}
@@ -363,7 +363,7 @@ func TestPlayerNotFoundOnPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &App{resumePos: make(map[string]float64), images: newAsyncCache[paint.ImageOp](1, 0), backdrops: newAsyncCache[backdrop](1, 0)}
+	a := &App{progress: newProgressStore(), images: newAsyncCache[paint.ImageOp](1, 0), backdrops: newAsyncCache[backdrop](1, 0)}
 	if a.startPlayer(playerCommand{runtimeDir: runtimeDir, args: []string{"mpv"}}) {
 		t.Fatal("startPlayer succeeded without mpv on PATH")
 	}
@@ -377,7 +377,7 @@ func TestPlayerLaunchFailureAndNonzeroExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &App{resumePos: make(map[string]float64), images: newAsyncCache[paint.ImageOp](1, 0), backdrops: newAsyncCache[backdrop](1, 0)}
+	a := &App{progress: newProgressStore(), images: newAsyncCache[paint.ImageOp](1, 0), backdrops: newAsyncCache[backdrop](1, 0)}
 	if a.startPlayer(playerCommand{runtimeDir: runtimeDir, args: []string{filepath.Join(t.TempDir(), "missing-mpv")}}) {
 		t.Fatal("startPlayer succeeded for missing executable")
 	}
@@ -489,10 +489,10 @@ func TestApplyPlaybackSnapshotStoresResumePosition(t *testing.T) {
 	tracker.updatePos(91.5)
 	close(tracker.done)
 
-	a := &App{resumePos: make(map[string]float64)}
+	a := &App{progress: newProgressStore()}
 	a.applyPlaybackSnapshot(tracker)
 
-	if got := a.resumePos["movie:tt123"]; got != 91.5 {
+	if got := a.progress.entries["movie:tt123"].Pos; got != 91.5 {
 		t.Fatalf("resume position = %v", got)
 	}
 }
@@ -507,12 +507,12 @@ func TestPlayerCompletionAppliesItsLaunchResumeTracker(t *testing.T) {
 	a := &App{
 		playerStatus: PlayerStatusRunning,
 		playerDone:   done,
-		resumePos:    make(map[string]float64),
+		progress:     newProgressStore(),
 		images:       newAsyncCache[paint.ImageOp](1, 0),
 		backdrops:    newAsyncCache[backdrop](1, 0),
 	}
 	a.drainChannels()
-	if got := a.resumePos[key]; got != 180 {
+	if got := a.progress.entries[key].Pos; got != 180 {
 		t.Fatalf("completed launch resume position = %v, want 180", got)
 	}
 	if a.playerStatus != PlayerStatusIdle || a.playerDone != nil {
@@ -526,9 +526,9 @@ func TestApplyPlaybackSnapshotStoresEpisodeResumePosition(t *testing.T) {
 	tracker.updatePos(180)
 	close(tracker.done)
 
-	a := &App{resumePos: make(map[string]float64)}
+	a := &App{progress: newProgressStore()}
 	a.applyPlaybackSnapshot(tracker)
-	if got := a.resumePos[key]; got != 180 {
+	if got := a.progress.entries[key].Pos; got != 180 {
 		t.Fatalf("episode resume position = %v, want 180", got)
 	}
 }
@@ -539,11 +539,12 @@ func TestApplyPlaybackSnapshotClearsResumeOnEOF(t *testing.T) {
 	tracker.markEOF()
 	close(tracker.done)
 
-	a := &App{resumePos: map[string]float64{"movie:tt123": 42}}
+	a := &App{progress: newProgressStore()}
+	a.progress.entries["movie:tt123"] = progressEntry{Pos: 42}
 	a.applyPlaybackSnapshot(tracker)
 
-	if _, ok := a.resumePos["movie:tt123"]; ok {
-		t.Fatal("resume position was not cleared")
+	if entry := a.progress.entries["movie:tt123"]; entry.Pos != 0 || !entry.Watched {
+		t.Fatalf("finished movie = %+v, want watched without resume position", entry)
 	}
 }
 

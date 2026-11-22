@@ -125,9 +125,9 @@ type App struct {
 	mpvPath          string
 	playerFullscreen bool
 	playerPolicy     playerPolicy
-	playerCleanupDir string             // retained until launcher teardown is confirmed
-	playerDone       chan playerResult  // goroutine → event loop
-	resumePos        map[string]float64 // mediaKey -> last position (seconds)
+	playerCleanupDir string            // retained until launcher teardown is confirmed
+	playerDone       chan playerResult // goroutine → event loop
+	progress         *progressStore    // resume positions and watched marks
 
 	// opt-in HTTP transport; mutable app state stays on the event loop
 	webUI           *webUI
@@ -349,7 +349,7 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		mpvPath:          mpvPath,
 		playerFullscreen: playerFullscreen,
 		playerPolicy:     playerPolicyFromConfig(config),
-		resumePos:        make(map[string]float64),
+		progress:         newProgressStore(),
 		keyTag:           keyTag,
 		invalidate:       invalidate,
 		closeWindow:      closeWindow,
@@ -429,6 +429,9 @@ func (a *App) UseLogs(logs *LogBuffer) {
 // headless users should call it when their driver/app lifetime ends.
 func (a *App) Close() {
 	a.stopLoadRetry()
+	// mpv may outlive pépé; keep the last position it reported.
+	a.applyPlaybackSnapshot(a.playerTracker)
+	a.progress.close()
 	a.logs.setNotify(nil)
 	if a.webUI != nil {
 		a.webUI.close()
@@ -475,6 +478,7 @@ func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 	}
 	if config != nil {
 		a.startConfiguredWebUI(config.WebUIAddr)
+		a.openProgress(config)
 	}
 	defer a.pumpEvents(wake)()
 	return a.runResult(a.run(func() event.Event {

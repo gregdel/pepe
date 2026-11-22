@@ -44,7 +44,7 @@ func TestWebPlaybackCommandHasNoCatalogCredentialsOrResume(t *testing.T) {
 			}
 			a := New(client, nil, &Config{MPVPath: "/opt/mpv", PlayerFullscreen: true, MPVManagedLauncher: managed}, nil, nil)
 			defer a.Close()
-			a.resumePos[""] = 123
+			a.progress.entries[""] = progressEntry{Pos: 123}
 			videoURL := "https://media.example/video?signature=a%2Fb+z&x=1"
 			command, err := a.buildPlayerCommand(playbackSource{title: "Web UI video", url: videoURL})
 			if err != nil {

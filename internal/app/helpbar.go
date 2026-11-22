@@ -19,22 +19,22 @@ func (a *App) currentHints() []hint {
 	if a.controls != ControlsHDMICEC {
 		return hints
 	}
-	remote := make([]hint, 0, len(hints)+1)
+	remote := make([]hint, 0, len(hints))
 	colours := make([]hint, 0, 4)
-	hasHome := false
 	for _, h := range hints {
 		switch h.key {
 		case "q":
 			continue // No remote Quit binding; TV power is not app power.
+		case "home":
+			continue // Red marks watched; only the TV's menu buttons send Home.
 		case "s":
 			h.key, h.color = "Blue", colorRemoteBlue
 		case "r":
 			h.key, h.color = "Green", colorRemoteGreen
 		case "tab":
 			h.key, h.color = "Yellow", colorRemoteYellow
-		case "home":
+		case "w":
 			h.key, h.color = "Red", colorRemoteRed
-			hasHome = true
 		default:
 			h.key = strings.NewReplacer("enter", "OK", "esc", "Back").Replace(h.key)
 		}
@@ -43,9 +43,6 @@ func (a *App) currentHints() []hint {
 		} else {
 			remote = append(remote, h)
 		}
-	}
-	if !hasHome && a.subPopup == nil && (a.detail != nil || a.browse.focus == browseFocusModeRail || !a.browse.nav.isAtRoot()) {
-		colours = append(colours, hint{key: "Red", label: "home", color: colorRemoteRed})
 	}
 	// Match the physical remote's colour row, after the navigation hints.
 	for _, key := range []string{"Red", "Green", "Yellow", "Blue"} {
@@ -97,6 +94,7 @@ func (a *App) contextHints() []hint {
 		if a.currentVideo() != nil {
 			hints = append(hints, hint{key: "s", label: "subtitles"})
 		}
+		hints = append(hints, a.watchedHint()...)
 		// Back always leaves details, unlike Left on later season tabs.
 		return append(hints, hint{key: "esc", label: "back"})
 	}
@@ -152,6 +150,7 @@ func (a *App) contextHints() []hint {
 	if a.currentVideo() != nil {
 		hints = append(hints, hint{key: "s", label: "subtitles"})
 	}
+	hints = append(hints, a.watchedHint()...)
 	return append(hints, hint{key: "r", label: "refresh"}, hint{key: "q", label: "quit"})
 }
 

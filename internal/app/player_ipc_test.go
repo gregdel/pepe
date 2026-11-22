@@ -77,16 +77,17 @@ func TestPlayerIPCEndFileResume(t *testing.T) {
 					t.Fatalf("snapshot = %v, %v", pos, eof)
 				}
 				a := New(nil, nil, nil, nil, nil)
-				a.resumePos[key] = 42
-				a.resumePos["movie:unrelated"] = 99
+				a.progress.entries[key] = progressEntry{Pos: 42}
+				a.progress.entries["movie:unrelated"] = progressEntry{Pos: 99}
 				a.playerDone = make(chan playerResult, 1)
 				a.playerStatus = PlayerStatusRunning
 				a.playerDone <- playerResult{tracker: tracker}
 				a.drainChannels()
-				resume, exists := a.resumePos[key]
+				entry, exists := a.progress.entries[key]
+				resume := entry.Pos
 				if reason == "eof" {
-					if exists {
-						t.Fatal("finished media retained its resume position")
+					if !entry.Watched || resume != 0 {
+						t.Fatalf("finished media = %+v, want watched without resume position", entry)
 					}
 				} else if !exists || resume != 180 {
 					t.Fatalf("interrupted resume = %v, exists = %v", resume, exists)
@@ -95,7 +96,7 @@ func TestPlayerIPCEndFileResume(t *testing.T) {
 				if got := strings.Contains(strings.Join(args, " "), "--start=180"); got != (reason != "eof") {
 					t.Fatalf("replay arguments = %v", args)
 				}
-				if a.resumePos["movie:unrelated"] != 99 || a.playerStatus != PlayerStatusIdle || a.playerDone != nil {
+				if a.progress.entries["movie:unrelated"].Pos != 99 || a.playerStatus != PlayerStatusIdle || a.playerDone != nil {
 					t.Fatal("completion changed unrelated resume or left stale player state")
 				}
 			})

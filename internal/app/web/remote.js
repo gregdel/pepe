@@ -10,6 +10,7 @@ const playLabel = document.getElementById("play-label");
 const siteChips = document.querySelectorAll("[data-site]");
 const commandButtons = document.querySelectorAll("[data-command]");
 const sectionButton = document.querySelector('[data-action="section"]');
+const watchedButton = document.querySelector('[data-action="watched"]');
 const logsLink = document.getElementById("logs-link");
 let requests = Promise.resolve();
 let pending = 0;
@@ -128,6 +129,7 @@ function render(state, title, status, badge, controls) {
   setText(source, badge);
   commandButtons.forEach(button => { button.disabled = !controls(button.dataset.command); });
   sectionButton.disabled = state === "running";
+  watchedButton.disabled = state === "running";
   logsLink.hidden = state !== "error";
 }
 

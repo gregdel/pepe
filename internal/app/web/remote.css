@@ -153,7 +153,7 @@ input:focus { border-color: var(--accent-light); }
 }
 .dpad .ok:not(:disabled):active { background: var(--accent-hover); }
 @media (hover: hover) { .dpad .ok:not(:disabled):hover { background: var(--accent-hover); } }
-.keys { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; }
+.keys { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .5rem; }
 .keys button {
   flex-direction: column; gap: .35rem; min-height: 4.5rem; padding: .6rem .25rem;
   font-size: .8rem; line-height: 1.2; text-align: center;
@@ -205,7 +205,7 @@ main.logs-page { display: block; max-width: 56rem; padding-top: 0; }
   main { gap: .75rem; padding-left: .75rem; padding-right: .75rem; }
   section { padding: 1rem; }
   .playback-bar { gap: .4rem; }
-  .keys { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .keys { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

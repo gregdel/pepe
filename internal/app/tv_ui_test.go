@@ -279,7 +279,7 @@ func TestTVDetailsAndOverlays(t *testing.T) {
 				for _, key := range []string{"fanart:movie-new", "thumb:movie-new", "fanart:show-one", "poster:show-one"} {
 					storeArtwork(f.app, key, art)
 				}
-				f.app.resumePos[movieMediaKey("movie-new")] = 300
+				f.app.progress.entries[movieMediaKey("movie-new")] = progressEntry{Pos: 300}
 				f.app.pushMovieDetail(&MediaItem{ID: "movie-new", Title: "A longer movie title that must remain readable from the sofa", Type: mediaKindMovie})
 				if err := f.driver.Resize(size.X, size.Y); err != nil {
 					t.Fatal(err)

@@ -96,7 +96,7 @@ func TestContextHintsMatchActions(t *testing.T) {
 		t.Fatal("popup keyboard names leaked")
 	}
 	a.subPopup = nil
-	if !has("Blue", "subtitles") || !has("Red", "home") {
+	if !has("Blue", "subtitles") || !has("Red", "watched") {
 		t.Fatal("detail remote colours missing")
 	}
 	a.popDetail()
@@ -297,7 +297,7 @@ func TestCECKeymapSharesKeyboardBindings(t *testing.T) {
 	}
 	for _, entry := range []string{
 		`0x30 = "KEY_F3"`, `0x31 = "KEY_F4"`,
-		`0x71 = "KEY_S"`, `0x72 = "KEY_HOME"`, `0x73 = "KEY_R"`, `0x74 = "KEY_TAB"`,
+		`0x71 = "KEY_S"`, `0x72 = "KEY_W"`, `0x73 = "KEY_R"`, `0x74 = "KEY_TAB"`,
 	} {
 		if !strings.Contains(string(data), entry) {
 			t.Fatalf("missing CEC mapping %s", entry)

@@ -47,6 +47,12 @@ type Config struct {
 	Controls           ControlProfile `yaml:"controls"`
 	HelpBar            *bool          `yaml:"help_bar"` // nil means visible, including minimal programmatic configs
 	MPVOSD             string         `yaml:"mpv_osd"`
+	SaveProgress       *bool          `yaml:"save_progress"` // nil means on
+}
+
+// saveProgress reports whether watch progress is kept on disk.
+func (c *Config) saveProgress() bool {
+	return c.SaveProgress == nil || *c.SaveProgress
 }
 
 // DefaultConfig returns a fresh configuration with playback defaults.
@@ -449,7 +455,7 @@ func writeFileAtomic(path string, data []byte) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".config-*.yaml")
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+"-*")
 	if err != nil {
 		return err
 	}
@@ -458,5 +464,13 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := errors.Join(writeErr, tmp.Chmod(mode), tmp.Sync(), tmp.Close()); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	// Persist the rename itself; not every platform can sync a directory.
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }

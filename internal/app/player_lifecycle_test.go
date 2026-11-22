@@ -42,7 +42,7 @@ func TestPlayerManagedArgumentsAreOptIn(t *testing.T) {
 				t.Fatal(err)
 			}
 			a := New(client, nil, &Config{MPVPath: "launcher", MPVManagedLauncher: managed, PlayerFullscreen: true}, nil, nil)
-			a.resumePos["movie:first"] = 91
+			a.progress.entries["movie:first"] = progressEntry{Pos: 91}
 			source := playbackSource{mediaKey: "movie:first", title: "A 'quoted' $ title", video: testMovie("first", "First", 2020)}
 			command, err := a.buildPlayerCommand(source)
 			if err != nil {

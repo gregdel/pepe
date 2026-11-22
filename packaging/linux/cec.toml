@@ -32,6 +32,6 @@ protocol = "cec"
 0x64 = "KEY_F8" # Stop function
 # Colours share pépé's keyboard shortcuts. Letter keys follow the seat's XKB layout.
 0x71 = "KEY_S" # Blue: subtitle search / cycle
-0x72 = "KEY_HOME" # Red: home / return
+0x72 = "KEY_W" # Red: mark watched / unwatched (ignored during playback)
 0x73 = "KEY_R" # Green: refresh / playback help
 0x74 = "KEY_TAB" # Yellow: movies/shows / subtitle tracks

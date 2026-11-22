@@ -22,6 +22,7 @@ const (
 	actionToggleSection
 	actionRefresh
 	actionSubtitles
+	actionToggleWatched
 	actionQuit
 )
 
@@ -40,7 +41,7 @@ var keyBindings = []keyBinding{
 	{name: key.NameEnter, action: actionActivate},
 	{name: key.NameEscape, action: actionBack},
 	{name: key.NameHome, action: actionHome},
-	// CEC colours use the same S/R/Tab/Home bindings as the keyboard.
+	// CEC colours use the same S/R/Tab/W bindings as the keyboard.
 	{name: "H", action: actionLeft, optional: key.ModShift},
 	{name: "J", action: actionDown, optional: key.ModShift},
 	{name: "K", action: actionUp, optional: key.ModShift},
@@ -48,6 +49,7 @@ var keyBindings = []keyBinding{
 	{name: "Q", action: actionQuit, optional: key.ModShift},
 	{name: "R", action: actionRefresh, optional: key.ModShift},
 	{name: "S", action: actionSubtitles, optional: key.ModShift},
+	{name: "W", action: actionToggleWatched, optional: key.ModShift},
 	{name: key.NameTab, action: actionToggleSection},
 }
 
@@ -165,6 +167,8 @@ func (a *App) handleBrowseAction(action inputAction) {
 		a.startRefresh()
 	case actionSubtitles:
 		a.openSubtitlePopup()
+	case actionToggleWatched:
+		a.toggleWatched()
 	case actionQuit:
 		if a.closeWindow != nil {
 			a.closeWindow()
@@ -192,6 +196,8 @@ func (a *App) handleDetailAction(action inputAction) {
 		a.scrollDetail(1)
 	case actionSubtitles:
 		a.openSubtitlePopup()
+	case actionToggleWatched:
+		a.toggleWatched()
 	case actionQuit:
 		if a.closeWindow != nil {
 			a.closeWindow()
@@ -233,6 +239,8 @@ func (a *App) handleShowAction(action inputAction, show *showPage) {
 		}
 	case actionSubtitles:
 		a.openSubtitlePopup()
+	case actionToggleWatched:
+		a.toggleWatched()
 	case actionQuit:
 		if a.closeWindow != nil {
 			a.closeWindow()

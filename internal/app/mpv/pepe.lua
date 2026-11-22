@@ -292,7 +292,7 @@ if opts.controls == "hdmi-cec" then
     -- Only this profile overrides native mpv shortcuts. Console/selector
     -- bindings activated later take priority until their menu is closed.
     local bindings = {
-        {"s", "cycle sub"}, {"HOME", "quit"},
+        {"s", "cycle sub"}, {"w", "ignore"}, {"HOME", "quit"},
         {"ENTER", "cycle pause"}, {"ESC", "quit"},
         -- Programme keys are inert unless this player explicitly opts in.
         {"F3", opts.volume_keys and "osd-msg-bar add volume 5" or "ignore", {repeatable = opts.volume_keys}},

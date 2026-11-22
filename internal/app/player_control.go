@@ -219,7 +219,7 @@ func (a *App) handleRemoteAction(action inputAction) bool {
 	if a.playerStatus != PlayerStatusRunning {
 		return false
 	}
-	if action == actionToggleSection {
+	if action == actionToggleSection || action == actionToggleWatched {
 		a.webCommandError = "Not available during playback."
 		return true
 	}
