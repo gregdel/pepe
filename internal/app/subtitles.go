@@ -238,12 +238,8 @@ func (a *App) layoutSubtitlePopupBody(gtx C, p *SubtitlePopup) D {
 		if len(p.entries) == 0 {
 			return a.label(gtx, sp, "No subtitles found", colorFg, 0)
 		}
-		keepSelectedVisible(&p.list, p.cursor, gtx.Constraints.Max, &p.listSize)
-		return p.list.Layout(gtx, len(p.entries), func(gtx C, i int) D {
-			entry := p.entries[i]
-			selected := i == p.cursor
-			return a.drawSubtitleEntry(gtx, entry, selected)
-		})
+		return a.focusList(gtx, &p.list, &p.motion, p, len(p.entries), p.cursor, true, rowFocus,
+			func(gtx C, i int) D { return a.drawSubtitleEntry(gtx, p.entries[i], i == p.cursor) })
 	}
 	return D{}
 }
@@ -253,7 +249,7 @@ func (a *App) layoutSubtitlePopupBody(gtx C, p *SubtitlePopup) D {
 func (a *App) drawSubtitleEntry(gtx C, entry *polochon.SubtitleEntry, selected bool) D {
 	const sourceColDp = unit.Dp(180)
 
-	return a.rowShell(gtx, selected, false, browseRowHeight, func(gtx C) D {
+	return a.focusRowShell(gtx, selected, false, browseRowHeight, func(gtx C) D {
 		fg := colorFg
 		fgSecondary := colorSubtle
 		if selected {

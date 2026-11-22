@@ -29,23 +29,6 @@ type (
 	D = layout.Dimensions
 )
 
-// keepSelectedVisible adjusts a list before layout, including partially clipped
-// first and last rows. The caller supplies the constraints at its layout point.
-func keepSelectedVisible(list *layout.List, cursor int, size image.Point, previousSize *image.Point) {
-	pos := list.Position
-	last := pos.First + pos.Count - 1
-	if *previousSize != size || pos.Count == 0 || cursor < pos.First || (cursor == pos.First && pos.Offset > 0) {
-		list.ScrollTo(cursor)
-	} else if cursor > last || (cursor == last && pos.OffsetLast < 0) {
-		first := cursor - pos.Count + 1
-		if pos.OffsetLast < 0 {
-			first++
-		}
-		list.ScrollTo(first)
-	}
-	*previousSize = size
-}
-
 // clickableLayout adds a semantic button and routes pointer activation into
 // the same application actions used by keyboard navigation. The action is
 // queued and runs before the next frame's layout, like key actions, so a frame
@@ -519,16 +502,16 @@ func (a *App) watchedMark(gtx C, size unit.Sp, text string, col color.NRGBA) D {
 }
 
 // pill draws content on a rounded background; bg with zero alpha draws none.
-// A focused pill carries the D-pad focus ring and semantic selection.
+// A focused pill carries the semantic selection; its bg is the focus fill.
 func (a *App) pill(gtx C, focused bool, bg color.NRGBA, content layout.Widget) D {
 	inset := layout.Inset{Left: dp16, Right: dp16, Top: dp8, Bottom: dp8}
-	return a.focusFrame(gtx, focused, bg, func(gtx C) D { return inset.Layout(gtx, content) })
+	return a.focusFrame(gtx, focused, false, bg, func(gtx C) D { return inset.Layout(gtx, content) })
 }
 
 // focusFrame draws content on a rounded background sized to it; bg with zero
-// alpha draws none. Focused content carries the D-pad focus ring and semantic
-// selection.
-func (a *App) focusFrame(gtx C, focused bool, bg color.NRGBA, content layout.Widget) D {
+// alpha draws none. Focused content carries the semantic selection, and ring
+// adds the editing outline (DESIGN.md, Focus).
+func (a *App) focusFrame(gtx C, focused, ring bool, bg color.NRGBA, content layout.Widget) D {
 	macro := op.Record(gtx.Ops)
 	dims := content(gtx)
 	call := macro.Stop()
@@ -539,11 +522,102 @@ func (a *App) focusFrame(gtx C, focused bool, bg color.NRGBA, content layout.Wid
 	if bg.A != 0 {
 		fillRounded(gtx, dims.Size, radiusRow, bg)
 	}
-	if focused {
+	if ring {
 		focusRing(gtx, dims.Size, radiusRow)
 	}
 	call.Add(gtx.Ops)
 	return dims
+}
+
+// ── Focus lists ───────────────────────────────────────────────────────────────
+
+// focusStyle is how a focus list draws and moves its focus.
+type focusStyle struct {
+	// paint draws the focus fill behind row i of size; nil draws none.
+	paint func(gtx C, i int, size image.Point)
+	// centre keeps the cursor centred; otherwise the list scrolls only to
+	// keep it visible.
+	centre bool
+	// still keeps the fill from lifting with its row, for fills that scaling
+	// would spoil. The row's content stays inside it: the lift is smaller
+	// than a row's padding.
+	still bool
+}
+
+// rowFocus is the focus of rows laid out by rowFrame.
+var rowFocus = focusStyle{paint: func(gtx C, _ int, size image.Point) { paintFocusRow(gtx, size) }}
+
+// focusList lays out a keyboard-driven list with the shared focus model
+// (DESIGN.md, Focus and Motion): the list, not the row, paints the focus fill
+// so it can glide, and the focused row lifts. cursor is the list's logical
+// cursor and focused whether the list has the D-pad focus.
+func (a *App) focusList(gtx C, list *layout.List, m *listMotion, key any, n, cursor int, focused bool,
+	style focusStyle, row func(gtx C, i int) D,
+) D {
+	target := m.visibleTarget(list, cursor)
+	if style.centre {
+		target = m.centreTarget(list, cursor)
+	}
+	// A resize makes the resting view stale: the list snaps (the size is part
+	// of its key) and brings the cursor to the top, not knowing what fits.
+	if gtx.Constraints.Max != m.size {
+		m.size = gtx.Constraints.Max
+		if !style.centre {
+			target, m.reveal = cursor, true
+		}
+	}
+	key = sizedListKey{key, m.size}
+	focus := -1
+	if focused {
+		focus = cursor
+	}
+	viewport := gtx.Constraints.Max.Y
+	if list.Axis == layout.Horizontal {
+		viewport = gtx.Constraints.Max.X
+	}
+	if m.begin(gtx, list, key, focus, target, n, viewport) {
+		a.animating(gtx)
+	}
+	dims := list.Layout(gtx, n, func(gtx C, i int) D {
+		return focusListRow(gtx, list.Axis, m, i, focus, style, row)
+	})
+	m.end(list)
+	return dims
+}
+
+// sizedListKey is a focus list's key with its size.
+type sizedListKey struct {
+	key  any
+	size image.Point
+}
+
+// focusListRow lays out row i of a list animated by m: it records the row's
+// size, paints the focus fill where the highlight is, and lifts the row. Like
+// a focused Android TV card or tvOS item, the row lifts from its centre
+// together with its fill, so its content never leaves the fill.
+func focusListRow(gtx C, axis layout.Axis, m *listMotion, i, focus int, style focusStyle, row func(gtx C, i int) D) D {
+	macro := op.Record(gtx.Ops)
+	dims := row(gtx, i)
+	call := macro.Stop()
+	m.record(i, axis.Convert(dims.Size).X)
+	if i == focus && style.paint != nil && style.still {
+		paintFocusAt(gtx, axis, m, i, dims.Size, style)
+	}
+	if s := liftScale(gtx, dims.Size.X, m.lifted(i)); s != 1 {
+		pivot := f32.Pt(float32(dims.Size.X)/2, float32(dims.Size.Y)/2)
+		defer op.Affine(f32.AffineId().Scale(pivot, f32.Pt(s, s))).Push(gtx.Ops).Pop()
+	}
+	if i == focus && style.paint != nil && !style.still {
+		paintFocusAt(gtx, axis, m, i, dims.Size, style)
+	}
+	call.Add(gtx.Ops)
+	return dims
+}
+
+// paintFocusAt paints row i's focus fill where the highlight is.
+func paintFocusAt(gtx C, axis layout.Axis, m *listMotion, i int, size image.Point, style focusStyle) {
+	defer op.Offset(axis.Convert(image.Pt(m.highlightOffset(), 0))).Push(gtx.Ops).Pop()
+	style.paint(gtx, i, size)
 }
 
 // ── Keycap hints ──────────────────────────────────────────────────────────────

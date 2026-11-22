@@ -238,7 +238,7 @@ func TestHeadlessSetupScreenSavesSettings(t *testing.T) {
 	_, problem := LoadConfig(path)
 	closed := false
 	a := NewSetup(ConfigSource{Path: path}, problem, true, nil, func() { closed = true })
-	d, err := driver.New(driver.Config{Width: 1024, Height: 768, PxPerDp: 1, PxPerSp: 1}, a.Layout)
+	d, err := driver.New(driver.Config{Width: 1024, Height: 768, PxPerDp: 1, PxPerSp: 1}, settledLayout(a))
 	if err != nil {
 		t.Fatal(err)
 	}

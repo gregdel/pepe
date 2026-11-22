@@ -226,8 +226,9 @@ func TestDetailArtworkEntranceFade(t *testing.T) {
 				if high-low < sample.minEnd {
 					t.Fatalf("%s did not become visible: start=%v end=%v", sample.name, startPixel, endPixel)
 				}
-				if progress := (mid - low) / (high - low); progress < 0.4 || progress > 0.6 {
-					t.Errorf("%s midpoint progress = %.3f, want approximately 0.5 (pixels %v, %v, %v)", sample.name, progress, startPixel, middlePixel, endPixel)
+				want := float64(easeStandard(0.5))
+				if progress := (mid - low) / (high - low); progress < want-0.1 || progress > want+0.1 {
+					t.Errorf("%s midpoint progress = %.3f, want approximately %.3f (pixels %v, %v, %v)", sample.name, progress, want, startPixel, middlePixel, endPixel)
 				}
 			}
 
@@ -237,7 +238,7 @@ func TestDetailArtworkEntranceFade(t *testing.T) {
 
 			// Reference composition keeps the scrim at full opacity while only
 			// its white fanart layer fades. The protected sample has no controls.
-			for i, alpha := range []float32{0, 0.5, 1} {
+			for i, alpha := range []float32{0, easeStandard(0.5), 1} {
 				reference := renderDetailFadeFrame(t, window, &router, entered, func(gtx C) D {
 					paint.Fill(gtx.Ops, colorBg)
 					gtx = scaleContext(gtx)
@@ -251,7 +252,7 @@ func TestDetailArtworkEntranceFade(t *testing.T) {
 				actual := []detailFadeFrame{start, middle, end}[i].pixels.RGBAAt(protected.X, protected.Y)
 				want := reference.pixels.RGBAAt(protected.X, protected.Y)
 				if !detailFadePixelNear(actual, want, 2) {
-					t.Errorf("scrim at alpha %.1f = %v, want opaque-scrim composition %v", alpha, actual, want)
+					t.Errorf("scrim at alpha %.2f = %v, want opaque-scrim composition %v", alpha, actual, want)
 				}
 			}
 			bg := end.pixels.RGBAAt(protected.X, protected.Y)

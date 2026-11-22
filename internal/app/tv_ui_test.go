@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"gioui.org/layout"
 	"github.com/gregdel/pepe/internal/driver"
@@ -288,7 +287,7 @@ func TestTVDetailsAndOverlays(t *testing.T) {
 				if err := f.driver.Refresh(); err != nil {
 					t.Fatal(err)
 				}
-				if time.Since(f.app.detail.enteredAt) < detailFadeDuration {
+				if f.app.inMotion {
 					t.Fatal("driver left detail transition unfinished")
 				}
 				tvAssertSafeButton(t, f, "Play movie")

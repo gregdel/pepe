@@ -34,6 +34,18 @@
 - Constrain/clamp descriptions to roughly 55–70 characters/line with ~1.35–1.5 line spacing. On shows, prioritize the selected episode synopsis over repeated show copy. Order episode content: title, resume position (own line, since Enter resumes), air date/runtime, synopsis, then one subdued technical line (size, quality, codecs, container, release group); do not restore bright file badges.
 - For detail-page changes, inspect headless screenshots at 1080p and a smaller viewport with bright and dark fanart. References: [Android TV typography](https://developer.android.com/design/ui/tv/guides/styles/typography), [Android TV scrims](https://developer.android.com/design/ui/tv/guides/components/featured-carousel), [Android TV color and gradient banding](https://developer.android.com/design/ui/tv/guides/foundations/color-on-tv), [Fire TV UX](https://developer.amazon.com/docs/fire-tv/design-and-user-experience-guidelines.html), [WCAG contrast](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum), [WCAG G18: text contrast over images](https://www.w3.org/WAI/WCAG22/Techniques/general/G18).
 
+## Design and motion (when changing how the UI looks or moves)
+
+- `DESIGN.md` is the design reference: colour roles, type and spacing scales, the focus model and motion. Follow it for any visual change. If a change needs a new rule, update `DESIGN.md` in the same change rather than diverging.
+- **Focusable lists:** every focusable list goes through `focusList` (or `focusListRow` for a non-scrolling `Flex`, like the rail), with `focusRowShell` rows. Never paint a focus fill or ring inside a row. Give each list its own `listMotion` and a key that changes with its contents, so new contents snap.
+- **Motion mechanics:**
+  - Compute motion from `frameTime(gtx)`, and request frames only through `a.animating`, which feeds `Loading`. Driver screenshots therefore wait for motion; `--no-wait` captures mid-motion.
+  - Never let motion delay or queue input.
+  - A new opacity layer must not be followed by a full-screen opaque fill (see the Gio renderer note under Detail UI).
+- **Tests:**
+  - Headless fixtures lay out through `settledLayout`, whose clock moves a second per frame, and `headlessKey` settles after each key. Assertions therefore see settled positions.
+  - Motion itself is tested frame by frame with explicit `gtx.Now` (`motion_test.go`, `detail_fade_test.go`).
+
 ## Known platform limitations
 
 - Steam Deck Gaming Mode sleep inhibition is not solved by the generic `packaging/linux/mpv-inhibit.sh` wrapper. On SteamOS 3.8.28 stable, a confirmed idle/block lock did not prevent suspend; a sleep/block lock kept SSH usable but left the display black, unrecoverable by pointer activity. See [tested behavior and upstream issues](packaging/linux/README.md#automatic-sleep-during-playback). Do not recommend a stronger lock as a verified fix or add synthetic input/global power-setting changes unless explicitly requested. Preserve manual suspend requirements and verify behavior on the target SteamOS/client versions.
