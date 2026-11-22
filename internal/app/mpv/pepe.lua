@@ -7,7 +7,9 @@ local overlay = mp.create_osd_overlay("ass-events")
 local loaded, started_at = false, nil
 local generation = 0
 local timer, render
-local help_requested, selecting, startup_until = false, false, 0
+-- menu_open tracks mpv's console (pepe's selector, select.lua menus, the
+-- console itself); own_menu only marks pepe's pending selector request.
+local help_requested, menu_open, own_menu, startup_until = false, false, false, 0
 
 local function finite(value)
     return type(value) == "number" and value == value
@@ -55,14 +57,16 @@ local function clear()
     end
 end
 
+-- Arrows seek 5s, the web remote 10s; both seek 1 min with Up/Down.
+local seek_hint = "Left/Right Seek  ·  Up/Down Seek 1 min"
+
 local function hints(events, left, center, right, top)
     if opts.controls == "hdmi-cec" then
         text(events, center, top, 8, 22, "FFFFFF", "OK Pause/resume  ·  Back Return")
         -- One row in the same order as the remote, with bars above the labels
-        -- so all four actions also fit in narrow windows.
+        -- so all actions also fit in narrow windows. Red (w) is inert here.
         local buttons = {
-            {"808AFF", "Return"}, {"9BD781", "Help"},
-            {"6BD8FF", "Subtitle tracks"}, {"FFB468", "Cycle subtitles"},
+            {"9BD781", "Help"}, {"6BD8FF", "Subtitle tracks"}, {"FFB468", "Cycle subtitles"},
         }
         local column = (right - left) / #buttons
         for i, button in ipairs(buttons) do
@@ -79,7 +83,7 @@ end
 render = function()
     local paused = mp.get_property_bool("pause", false)
     local transient = opts.help and mp.get_time() < startup_until
-    if not loaded or (not opts.panel and not help_requested) or selecting
+    if not loaded or (not opts.panel and not help_requested) or menu_open
         or not (paused or help_requested or transient) then
         clear()
         return
@@ -118,7 +122,7 @@ render = function()
     if not paused or not opts.panel then
         rectangle(events, left - 28, top, right + 28, top + 160, "181410", "00")
         hints(events, left, center, right, top + 20)
-        text(events, center, top + 100, 8, 22, "BDB7B1", "Left/Right Seek 5s  ·  Up/Down Seek 1 min")
+        text(events, center, top + 100, 8, 22, "BDB7B1", seek_hint)
         local data = table.concat(events, "\n")
         if data ~= overlay.data or width ~= overlay.res_x or height ~= overlay.res_y then
             overlay.res_x, overlay.res_y, overlay.data = width, height, data
@@ -131,7 +135,7 @@ render = function()
         rectangle(events, left - 28, hint_top, right + 28, top - 8, "181410", "00")
         hints(events, left, center, right, hint_top + 12)
         if help_requested then
-            text(events, center, top - 52, 8, 22, "BDB7B1", "Left/Right Seek 5s  ·  Up/Down Seek 1 min")
+            text(events, center, top - 52, 8, 22, "BDB7B1", seek_hint)
         end
     end
     rectangle(events, left - 28, top, right + 28, bottom, "181410", "00")
@@ -191,8 +195,8 @@ local function reset()
     generation = generation + 1
     loaded, started_at = false, nil
     help_requested, startup_until = false, 0
-    if selecting then input.terminate() end
-    selecting = false
+    if own_menu then input.terminate() end
+    own_menu = false
     clear()
 end
 
@@ -214,17 +218,23 @@ for _, property in ipairs({"time-pos", "duration", "speed", "media-title", "forc
     mp.observe_property(property,
         (property == "media-title" or property == "force-media-title") and "string" or "number", render)
 end
+-- Unset without the console script, so a missing console never hides the
+-- panel or swallows remote keys.
+mp.observe_property("user-data/mpv/console/open", "bool", function(_, open)
+    menu_open = open == true
+    render()
+end)
 mp.register_event("shutdown", reset)
 
 local function toggle_help()
-    if not loaded or selecting then return end
+    if not loaded or menu_open then return end
     help_requested = not help_requested
     startup_until = 0
     render()
 end
 
 local function select_subtitles()
-    if not loaded or selecting then return end
+    if not loaded or menu_open then return end
     local ids, items = {"no"}, {"Off"}
     local current = mp.get_property_native("sid")
     local default_item = 1
@@ -244,10 +254,9 @@ local function select_subtitles()
         end
     end
     local selected_generation = generation
-    selecting = true
-    clear()
-    -- Reuse mpv's native selector renderer/input routing, with callbacks so
-    -- pause/help panels cannot obscure it. No separate menu or key dispatcher.
+    own_menu = true
+    -- Reuse mpv's native selector renderer/input routing; the console-open
+    -- observer hides pause/help panels. No separate menu or key dispatcher.
     input.select({
         prompt = #items == 1 and "Subtitles (no tracks available):"
             or "Subtitles — Up/Down Choose · OK Select · Back Close:",
@@ -258,10 +267,7 @@ local function select_subtitles()
             end
         end,
         closed = function()
-            if generation == selected_generation then
-                selecting = false
-                render()
-            end
+            if generation == selected_generation then own_menu = false end
         end,
     })
 end
@@ -269,11 +275,12 @@ end
 mp.add_key_binding(nil, "toggle-help", toggle_help)
 mp.add_key_binding(opts.controls == "keyboard" and "TAB" or nil, "subtitles", select_subtitles)
 
--- pépé forwards web remote actions here while playing. Open menus get the
--- keys; otherwise OK/Back act like a TV remote and Up/Down keep mpv's bindings.
+-- pépé forwards web remote actions here while playing. Any open console menu
+-- gets the keys; otherwise OK/Back act like a TV remote and Up/Down keep
+-- mpv's bindings.
 local remote_keys = {up = "UP", down = "DOWN", left = "LEFT", right = "RIGHT", ok = "ENTER", back = "ESC"}
 mp.register_script_message("remote", function(action)
-    if selecting or action == "up" or action == "down" then
+    if menu_open or action == "up" or action == "down" then
         if remote_keys[action] then mp.commandv("keypress", remote_keys[action]) end
     elseif action == "left" then mp.command("seek -10")
     elseif action == "right" then mp.command("seek 10")

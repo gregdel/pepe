@@ -10,7 +10,8 @@ local props = {
 local observers, events, updates, removes = {}, {}, 0, 0
 local escaped = {}
 local options = {help = false}
-local bindings, forced, commands, repeatable = {}, {}, {}, {}
+local bindings, forced, commands, repeatable, messages = {}, {}, {}, {}, {}
+local console_open = "user-data/mpv/console/open"
 local selection
 package.loaded["mp.options"] = {read_options = function(opts)
     for k, v in pairs(options) do opts[k] = v end
@@ -44,6 +45,8 @@ package.loaded.mp = {
         repeatable[key] = flags and flags.repeatable or false
     end,
     command = function(command) commands[#commands + 1] = command end,
+    commandv = function(...) commands[#commands + 1] = table.concat({...}, " ") end,
+    register_script_message = function(name, fn) messages[name] = fn end,
     osd_message = function(message) commands[#commands + 1] = message end,
     observe_property = function(name, kind, fn)
         assert(not observers[name])
@@ -78,7 +81,7 @@ end
 local function remote_bars()
     local count = 0
     local previous_x
-    local colours = {"808AFF", "9BD781", "6BD8FF", "FFB468"}
+    local colours = {"9BD781", "6BD8FF", "FFB468"}
     for line in overlay.data:gmatch("[^\n]+") do
         if line:find("\\p1}", 1, true) then
             local x1, y1, x2, y2 = line:match("m (%-?%d+) (%-?%d+) l (%-?%d+) %d+ %d+ (%-?%d+)")
@@ -91,9 +94,11 @@ local function remote_bars()
             end
         end
     end
-    assert(count == 4, "missing grouped remote bars")
+    -- Red (w) is inert during playback, so it gets no bar.
+    assert(count == 3, "missing grouped remote bars")
     for _, name in ipairs({"Red", "Green", "Yellow", "Blue"}) do absent(name) end
-    for _, label in ipairs({"Return", "Help", "Subtitle tracks", "Cycle subtitles"}) do contains(label) end
+    for _, label in ipairs({"Help", "Subtitle tracks", "Cycle subtitles"}) do contains(label) end
+    contains("Back Return")
 end
 local function at(x, y, alignment, value)
     local anchor = string.format("\\an%d\\pos(%d,%d)", alignment, x, y)
@@ -292,6 +297,11 @@ assert(next(forced) == nil)
 assert(bindings["toggle-help"].key == nil and bindings.subtitles.key == "TAB")
 
 -- Native selector data and close lifecycle, including explicit Off and sparse IDs.
+-- The console reports itself open/closed; that alone hides/restores the panel.
+local function close_selection()
+    set(console_open, false)
+    selection.closed()
+end
 events["file-loaded"]()
 props["track-list"] = {
     {id = 9, type = "audio"}, {id = 3, type = "sub", lang = "en", title = "English"},
@@ -299,32 +309,77 @@ props["track-list"] = {
 }
 props.sid = 7
 bindings.subtitles.fn()
+set(console_open, true)
 assert(selection and selection.default_item == 3 and #selection.items == 3)
 assert(selection.items[1] == "Off" and selection.items[3]:find("[selected]", 1, true))
 assert(overlay.data == "" and not timer.enabled)
 selection.submit(2)
 assert(props.sid == 3)
-selection.closed()
+close_selection()
 assert(overlay.data ~= "")
 bindings.subtitles.fn()
+set(console_open, true)
 selection.submit(1)
 assert(props.sid == "no")
-selection.closed()
+close_selection()
 props["track-list"] = {}
 bindings.subtitles.fn()
+set(console_open, true)
 assert(#selection.items == 1 and selection.prompt:find("no tracks", 1, true))
 local stale_selection = selection
 events["end-file"]()
+assert(selection == nil, "end-file did not close pepe's selector")
+set(console_open, false)
 assert(overlay.data == "" and not timer.enabled)
 events["file-loaded"]()
 props.sid = 7
 stale_selection.submit(1)
 assert(props.sid == 7, "old menu changed a new file's subtitle track")
+
+-- Web remote: without a menu, OK/Back/Left/Right drive playback and Up/Down
+-- keep mpv's bindings.
+local remote = messages.remote
+set("pause", true)
+local panel = overlay.data
+assert(panel ~= "")
+for _, case in ipairs({
+    {"ok", "cycle pause"}, {"back", "quit"}, {"left", "seek -10"}, {"right", "seek 10"},
+    {"up", "keypress UP"}, {"down", "keypress DOWN"},
+}) do
+    remote(case[1])
+    assert(commands[#commands] == case[2], "remote " .. case[1] .. " sent " .. commands[#commands])
+end
+remote("subtitles")
+assert(selection, "remote subtitles did not open the selector")
+close_selection()
+-- Any console menu, including mpv's own (g-s, console), gets every key and
+-- hides the panel; the selector cannot be stacked on top of it.
+selection = nil
+set(console_open, true)
+assert(overlay.data == "" and not timer.enabled)
+for action, key in pairs({up = "UP", down = "DOWN", left = "LEFT", right = "RIGHT", ok = "ENTER", back = "ESC"}) do
+    remote(action)
+    assert(commands[#commands] == "keypress " .. key, "menu did not receive remote " .. action)
+end
+local sent = #commands
+remote("subtitles")
+bindings.subtitles.fn()
+assert(selection == nil and #commands == sent)
+set(console_open, false)
+assert(overlay.data == panel and timer.enabled)
+-- Without the console script the property never turns true: the panel stays
+-- and the remote still pauses and quits.
+remote("subtitles")
+assert(selection and overlay.data == panel)
+remote("ok")
+assert(commands[#commands] == "cycle pause")
+remote("back")
+assert(commands[#commands] == "quit")
 events["end-file"]()
 
 -- Reload with CEC controls, hidden automatic hints, and safe web-title handling.
 options = {controls = "hdmi-cec", help = false, web = true}
-observers, events, bindings, forced = {}, {}, {}, {}
+observers, events, bindings, forced, messages = {}, {}, {}, {}, {}
 props.pause = false
 props["media-title"] = "https://private.example/video?secret=token"
 props["force-media-title"] = ""
@@ -362,7 +417,7 @@ forced.r()
 absent("Cycle subtitles")
 set("pause", false)
 forced.r()
-contains("Left/Right Seek 5s")
+contains("Left/Right Seek  ·  Up/Down Seek 1 min")
 forced.r()
 assert(overlay.data == "")
 
@@ -414,7 +469,7 @@ assert(overlay.data == "" and not timer.enabled)
 
 -- Automatic startup guidance expires and does no periodic work afterwards.
 options = {controls = "hdmi-cec", help = true}
-observers, events, bindings, forced = {}, {}, {}, {}
+observers, events, bindings, forced, messages = {}, {}, {}, {}, {}
 props.pause = false
 dofile(script)
 events["file-loaded"]()
@@ -427,7 +482,7 @@ events.shutdown()
 
 -- Opting out of the pause panel leaves CEC controls available independently.
 options = {controls = "hdmi-cec", help = true, panel = false}
-observers, events, bindings, forced = {}, {}, {}, {}
+observers, events, bindings, forced, messages = {}, {}, {}, {}, {}
 dofile(script)
 events["file-loaded"]()
 set("pause", true)
@@ -440,12 +495,14 @@ assert(overlay.data == "" and not timer.enabled)
 forced.r()
 remote_bars()
 forced.TAB()
+set(console_open, true)
 assert(selection and overlay.data == "")
+set(console_open, false)
 events.shutdown()
 
 -- Programme volume is opt-in, repeatable, capped, and independent of the panel.
 options = {controls = "hdmi-cec", volume_keys = true, help = false, panel = false}
-observers, events, bindings, forced = {}, {}, {}, {}
+observers, events, bindings, forced, messages = {}, {}, {}, {}, {}
 props["volume-max"], props.volume = 130, 120
 dofile(script)
 assert(props["volume-max"] == 100 and props.volume == 100)
@@ -461,7 +518,7 @@ events.shutdown()
 
 -- Even an explicit volume opt-in must not override keyboard-mode shortcuts.
 options = {controls = "keyboard", volume_keys = true}
-observers, events, bindings, forced = {}, {}, {}, {}
+observers, events, bindings, forced, messages = {}, {}, {}, {}, {}
 props["volume-max"], props.volume = 130, 120
 dofile(script)
 assert(next(forced) == nil and props["volume-max"] == 130 and props.volume == 120)

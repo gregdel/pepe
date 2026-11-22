@@ -326,8 +326,11 @@ func TestMPVInterfaceIntegration(t *testing.T) {
 				request("keypress", "g")
 				request("keypress", "s")
 				wait("user-data/mpv/console/open", "true")
-				request("keypress", "ESC")
+				waitKeyOwner("ENTER", "console")
+				// Web remote Back closes mpv's own menu too, not the player.
+				request("script-message-to", "pepe", "remote", "back")
 				wait("user-data/mpv/console/open", "false")
+				wait("pause", "true")
 				return
 			}
 			waitKeyOwner("ENTER", "pepe")
