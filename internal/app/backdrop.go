@@ -202,9 +202,14 @@ func ambientImages(img image.Image) (ambient *image.NRGBA, veils [2]*image.NRGBA
 // in linear light, where a dark layer only reads as darker late in its ramp;
 // the exponent makes the perceived fade follow the smoothstep.
 func veilAlpha(u, edge float32) uint8 {
-	start := edge + 1.5/ambientWidth
+	start := veilFadeStart(edge)
 	s := 1 - smoothstep(start, start+veilFadeWidth, u)
 	return uint8((1-math.Pow(float64(1-s), 2.2))*255 + 0.5)
+}
+
+// veilFadeStart is where the veil that is opaque up to edge starts to fade.
+func veilFadeStart(edge float32) float32 {
+	return edge + 1.5/ambientWidth
 }
 
 func smoothstep(edge0, edge1, x float32) float32 {

@@ -66,6 +66,17 @@ func (a *App) layoutCatalog(gtx C) D {
 	a.layoutPreview(pgtx)
 	preview := macro.Stop()
 
+	// Only a terminal preview shows the sharp fanart and the veil's fade,
+	// which the selection fades out with; otherwise the preview's text starts
+	// right of the list.
+	a.browse.selectionReach = 0
+	if a.browse.previewTextTop >= 0 {
+		insetLeft := gtx.Dp(a.viewportInsets.Left)
+		window := float32(size.X + insetLeft + gtx.Dp(a.viewportInsets.Right))
+		veilClear := (veilFadeStart(catalogListEdge(a.browse.focus == browseFocusModeRail))+veilFadeWidth)*window - float32(insetLeft)
+		a.browse.selectionReach = max(int(veilClear)-left, 0)
+	}
+
 	if top := a.browse.previewTextTop; top >= 0 {
 		insets := a.viewportInsets
 		area := image.Rect(-gtx.Dp(insets.Left), -gtx.Dp(insets.Top), size.X+gtx.Dp(insets.Right), size.Y)
@@ -374,6 +385,29 @@ func (a *App) layoutNavList(gtx C) D {
 		}
 	}
 
+	// The list is widened by selectionReach so the selection can fade out
+	// with the backdrop veil; rows keep the list's width.
+	width, reach := gtx.Constraints.Max.X, a.browse.selectionReach
+	gtx.Constraints.Max.X += reach
+	gtx.Constraints.Min.X = min(gtx.Constraints.Min.X+reach, gtx.Constraints.Max.X)
+	layoutRows := func(n int, row func(gtx C, i int) D) D {
+		dims := a.leftList.Layout(gtx, n, func(gtx C, i int) D {
+			gtx.Constraints.Max.X = width
+			gtx.Constraints.Min.X = min(gtx.Constraints.Min.X, width)
+			if a.browse.focus != browseFocusContent || i != a.browse.nav.cursor {
+				return row(gtx, i)
+			}
+			macro := op.Record(gtx.Ops)
+			dims := row(gtx, i)
+			call := macro.Stop()
+			paintCatalogSelection(gtx, dims.Size, reach)
+			call.Add(gtx.Ops)
+			return dims
+		})
+		dims.Size.X = min(dims.Size.X, width)
+		return dims
+	}
+
 	if a.browse.nav.isAtRoot() {
 		items := []struct {
 			name  string
@@ -382,7 +416,7 @@ func (a *App) layoutNavList(gtx C) D {
 			{"Movies", a.browse.library.movieCount},
 			{"Shows", a.browse.library.showCount},
 		}
-		return a.leftList.Layout(gtx, len(items), func(gtx C, i int) D {
+		return layoutRows(len(items), func(gtx C, i int) D {
 			selected := a.browse.focus == browseFocusContent && i == a.browse.nav.cursor
 			item := items[i]
 			return a.clickableLayout(gtx, "section:"+item.name, item.name, func(gtx C) D {
@@ -405,7 +439,7 @@ func (a *App) layoutNavList(gtx C) D {
 	}
 	currentPath := a.browse.nav.getCurrentPath()
 	children := current.Children
-	return a.leftList.Layout(gtx, len(children), func(gtx C, i int) D {
+	return layoutRows(len(children), func(gtx C, i int) D {
 		node := children[i]
 		selected := a.browse.focus == browseFocusContent && i == a.browse.nav.cursor
 		label := node.Label
@@ -452,9 +486,9 @@ func (a *App) rowFrame(gtx C, minHeight unit.Dp, fill color.NRGBA, focused bool,
 	})
 }
 
-// catalogRowShell is rowShell for catalog list rows: the selection, without a
-// focus ring, fades out to the right into the backdrop instead of ending on a
-// hard edge.
+// catalogRowShell is rowShell for catalog list rows. The selected row has no
+// focus ring or fill: layoutNavList paints its fade (paintCatalogSelection),
+// which reaches past the row's clips into the backdrop veil's fade.
 func (a *App) catalogRowShell(gtx C, selected bool, minHeight unit.Dp, content layout.Widget) D {
 	if !selected {
 		return a.rowShell(gtx, false, false, minHeight, content)
@@ -471,30 +505,40 @@ func (a *App) catalogRowShell(gtx C, selected bool, minHeight unit.Dp, content l
 		call := macro.Stop()
 
 		defer a.markSelected(gtx, dims.Size).Pop()
-		size := dims.Size
-		r := gtx.Dp(radiusRow)
-		rr := clip.RRect{Rect: image.Rectangle{Max: size}, NE: r, NW: r, SE: r, SW: r}
-		fill := rr.Push(gtx.Ops)
-		paintSelectionFade(gtx, size, colorSelectBg)
-		fill.Pop()
 		call.Add(gtx.Ops)
 		return dims
 	})
 }
 
 const (
-	// The selection is solid up to selectionFadeStart of its width, then
-	// fades out by its right edge.
+	// The selection is solid up to selectionFadeStart of the row's width,
+	// then fades out where the backdrop veil clears (selectionReach).
 	selectionFadeStart    = 0.45
 	selectionFadeSegments = 8
 )
 
-// paintSelectionFade fills size with col fading out horizontally. Gio blends
-// in linear light, where a fading colour over a dark background lingers and
-// then drops; squaring the ramp's complement (gamma 2.2) makes the perceived
-// fade even.
-func paintSelectionFade(gtx C, size image.Point, col color.NRGBA) {
-	x0 := int(selectionFadeStart * float32(size.X))
+// paintCatalogSelection paints the selection of a catalog row of size, inset
+// like catalogRowShell's, fading out by the row's right edge, or reach past
+// the list's.
+func paintCatalogSelection(gtx C, size image.Point, reach int) {
+	inset, insetY := gtx.Dp(dp8), gtx.Dp(dp2)
+	r := gtx.Dp(radiusRow)
+	right := size.X - inset
+	if reach > 0 {
+		right = size.X + reach
+	}
+	area := image.Rect(inset, insetY, right, size.Y-insetY)
+	defer clip.RRect{Rect: area, NW: r, SW: r}.Push(gtx.Ops).Pop()
+	defer op.Offset(area.Min).Push(gtx.Ops).Pop()
+	x0 := int(selectionFadeStart * float32(size.X-2*inset))
+	paintSelectionFade(gtx, area.Size(), x0, colorSelectBg)
+}
+
+// paintSelectionFade fills size with col, fading out horizontally from x0 to
+// its right edge. Gio blends in linear light, where a fading colour over a
+// dark background lingers and then drops; squaring the ramp's complement
+// (gamma 2.2) makes the perceived fade even.
+func paintSelectionFade(gtx C, size image.Point, x0 int, col color.NRGBA) {
 	paint.FillShape(gtx.Ops, col, clip.Rect(image.Rect(0, 0, x0, size.Y)).Op())
 	tint := func(i int) color.NRGBA {
 		t := float64(i) / selectionFadeSegments

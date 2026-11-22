@@ -204,6 +204,9 @@ type browseState struct {
 	// previewTextTop is where the terminal preview's text starts, set while
 	// laying it out; -1 without one.
 	previewTextTop int
+	// selectionReach is how far past the nav list's right edge the backdrop
+	// veil clears, set by layoutCatalog: the selection fades out there too.
+	selectionReach int
 	// Rail pages replace the catalog without changing its listing or navigation.
 	remote   *webRemotePage
 	logs     *logsPage
