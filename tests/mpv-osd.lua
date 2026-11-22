@@ -119,10 +119,10 @@ local function bar(fill_end, cursor)
             x1, y1, x2, y2 = tonumber(x1), tonumber(y1), tonumber(x2), tonumber(y2)
             if y1 == 472 and y2 == 482 then
                 assert(x1 == 108 and x2 <= 1172 and x2 > x1)
-                if line:find("6B6259", 1, true) then
+                if line:find("6A6060", 1, true) then
                     assert(x2 == 1172); track = true
                 else
-                    assert(line:find("D8C568", 1, true) and x2 == fill_end)
+                    assert(line:find("FF7F9C", 1, true) and x2 == fill_end)
                     fill = true
                 end
             elseif y1 == 467 and y2 == 487 then

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -151,16 +152,21 @@ func (web *webUI) enqueue(command webCommand) bool {
 	}
 }
 
+// themedHTML fills a page's theme-color with colorBg.
+func themedHTML(page []byte) []byte {
+	return bytes.ReplaceAll(page, []byte("@COLOR_BG@"), []byte(cssColor(colorBg)))
+}
+
 func (web *webUI) handler() http.Handler {
 	mux := http.NewServeMux()
 	for path, asset := range map[string]struct {
 		contentType string
 		data        []byte
 	}{
-		"/{$}":        {"text/html; charset=utf-8", webHTML},
-		"/remote.css": {"text/css; charset=utf-8", webCSS},
+		"/{$}":        {"text/html; charset=utf-8", themedHTML(webHTML)},
+		"/remote.css": {"text/css; charset=utf-8", append([]byte(themeCSS()), webCSS...)},
 		"/remote.js":  {"text/javascript; charset=utf-8", webJS},
-		"/logs":       {"text/html; charset=utf-8", webLogsHTML},
+		"/logs":       {"text/html; charset=utf-8", themedHTML(webLogsHTML)},
 		"/logs.js":    {"text/javascript; charset=utf-8", webLogsJS},
 		"/roboto.ttf": {"font/ttf", embeddedRoboto},
 	} {

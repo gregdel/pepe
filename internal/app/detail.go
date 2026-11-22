@@ -8,7 +8,6 @@ import (
 
 	"gioui.org/font"
 	"gioui.org/layout"
-	"gioui.org/op"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget/material"
@@ -17,7 +16,7 @@ import (
 // ── Detail screen dispatch ────────────────────────────────────────────────────
 
 const (
-	detailFadeDuration = 140 * time.Millisecond
+	detailFadeDuration = 250 * time.Millisecond // Material 3 medium1
 	moviePosterWidth   = unit.Dp(280)
 	showPosterWidth    = unit.Dp(240)
 	movieDetailWidth   = proseWidth // narrow panel, wider fanart feather
@@ -34,14 +33,9 @@ func (a *App) layoutDetail(gtx C) D {
 
 	alpha := float32(1)
 	if a.playerStatus != PlayerStatusRunning {
-		now := gtx.Now
-		if now.IsZero() {
-			now = time.Now()
-		}
-		since := now.Sub(d.enteredAt)
-		if since < detailFadeDuration {
-			alpha = max(0, float32(since)/float32(detailFadeDuration))
-			gtx.Execute(op.InvalidateCmd{})
+		alpha = easedProgress(frameTime(gtx), d.enteredAt, detailFadeDuration, easeStandard)
+		if alpha < 1 {
+			a.animating(gtx)
 		}
 	}
 	if d.kind == detailShow {
@@ -240,7 +234,7 @@ func (a *App) renderPlayerStatus(gtx C) D {
 	}
 	if status == PlayerStatusError && a.playerError != "" {
 		lines = append(lines, labelLine{text: "Error:", color: colorFg, size: sp})
-		lines = append(lines, labelLine{text: a.playerError, color: colorTerminal, size: sp})
+		lines = append(lines, labelLine{text: a.playerError, color: colorError, size: sp})
 	}
 	return a.renderLines(gtx, lines)
 }

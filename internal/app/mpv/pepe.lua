@@ -1,7 +1,14 @@
 -- pépé-owned playback UI. Keyboard mode yields to user input.conf bindings.
 local mp = require "mp"
 local input = require "mp.input"
-local opts = {controls = "keyboard", help = true, panel = true, web = false, volume_keys = false}
+-- Colours are ASS BGR hex. pépé passes its theme (theme.go); these defaults
+-- mirror it only so the script stands alone.
+local opts = {
+    controls = "keyboard", help = true, panel = true, web = false, volume_keys = false,
+    color_fg = "ECE8E8", color_subtle = "ABA0A0", color_accent = "FF7F9C",
+    color_panel = "141010", color_track = "6A6060",
+    color_green = "9BD781", color_yellow = "6BD8FF", color_blue = "FFB468",
+}
 require("mp.options").read_options(opts, "pepe")
 local overlay = mp.create_osd_overlay("ass-events")
 local loaded, started_at = false, nil
@@ -62,21 +69,22 @@ local seek_hint = "Left/Right Seek  ·  Up/Down Seek 1 min"
 
 local function hints(events, left, center, right, top)
     if opts.controls == "hdmi-cec" then
-        text(events, center, top, 8, 22, "FFFFFF", "OK Pause/resume  ·  Back Return")
+        text(events, center, top, 8, 22, opts.color_fg, "OK Pause/resume  ·  Back Return")
         -- One row in the same order as the remote, with bars above the labels
         -- so all actions also fit in narrow windows. Red (w) is inert here.
         local buttons = {
-            {"9BD781", "Help"}, {"6BD8FF", "Subtitle tracks"}, {"FFB468", "Cycle subtitles"},
+            {opts.color_green, "Help"}, {opts.color_yellow, "Subtitle tracks"},
+            {opts.color_blue, "Cycle subtitles"},
         }
         local column = (right - left) / #buttons
         for i, button in ipairs(buttons) do
             local x = math.floor(left + (i - 0.5) * column)
             rectangle(events, x - 20, top + 32, x + 20, top + 40, button[1])
-            text(events, x, top + 46, 8, 20, "FFFFFF", button[2])
+            text(events, x, top + 46, 8, 20, opts.color_fg, button[2])
         end
     else
-        text(events, center, top, 8, 22, "FFFFFF", "Space Pause/resume  ·  q Return")
-        text(events, center, top + 32, 8, 22, "BDB7B1", "j Cycle subtitles  ·  Tab Subtitle tracks")
+        text(events, center, top, 8, 22, opts.color_fg, "Space Pause/resume  ·  q Return")
+        text(events, center, top + 32, 8, 22, opts.color_subtle, "j Cycle subtitles  ·  Tab Subtitle tracks")
     end
 end
 
@@ -117,12 +125,13 @@ render = function()
     -- must neither hide pause metadata nor intercept OSC clicks and dragging.
     local bottom = height - 120
     local top = bottom - 282
-    local white, muted, accent = "FFFFFF", "BDB7B1", "D8C568"
+    local fg, muted, accent = opts.color_fg, opts.color_subtle, opts.color_accent
+    local panel = opts.color_panel
     local events = {}
     if not paused or not opts.panel then
-        rectangle(events, left - 28, top, right + 28, top + 160, "181410", "00")
+        rectangle(events, left - 28, top, right + 28, top + 160, panel, "00")
         hints(events, left, center, right, top + 20)
-        text(events, center, top + 100, 8, 22, "BDB7B1", seek_hint)
+        text(events, center, top + 100, 8, 22, muted, seek_hint)
         local data = table.concat(events, "\n")
         if data ~= overlay.data or width ~= overlay.res_x or height ~= overlay.res_y then
             overlay.res_x, overlay.res_y, overlay.data = width, height, data
@@ -132,15 +141,15 @@ render = function()
     end
     if opts.help or help_requested then
         local hint_top = help_requested and top - 134 or top - 90
-        rectangle(events, left - 28, hint_top, right + 28, top - 8, "181410", "00")
+        rectangle(events, left - 28, hint_top, right + 28, top - 8, panel, "00")
         hints(events, left, center, right, hint_top + 12)
         if help_requested then
-            text(events, center, top - 52, 8, 22, "BDB7B1", seek_hint)
+            text(events, center, top - 52, 8, 22, muted, seek_hint)
         end
     end
-    rectangle(events, left - 28, top, right + 28, bottom, "181410", "00")
+    rectangle(events, left - 28, top, right + 28, bottom, panel, "00")
     -- A long title is single-line and clipped before the pause badge.
-    text(events, left, top + 22, 7, 30, white, escape(title),
+    text(events, left, top + 22, 7, 30, fg, escape(title),
         string.format("\\b1\\clip(%d,%d,%d,%d)", left, top, right - 160, top + 64))
     rectangle(events, right - 128, top + 29, right - 123, top + 49, accent)
     rectangle(events, right - 118, top + 29, right - 113, top + 49, accent)
@@ -153,18 +162,18 @@ render = function()
     end
     text(events, center, top + 78, 8, 16, muted, remaining_label)
     text(events, right, top + 78, 9, 16, muted, "TOTAL")
-    text(events, left, top + 100, 7, 28, white, timestamp(position))
+    text(events, left, top + 100, 7, 28, fg, timestamp(position))
     text(events, center, top + 100, 8, 28, accent,
         remaining and string.format("%d min left", math.ceil(remaining / 60)) or "Unknown")
-    text(events, right, top + 100, 9, 28, white, timestamp(duration))
+    text(events, right, top + 100, 9, 28, fg, timestamp(duration))
 
     local bar_y = top + 154
-    rectangle(events, left, bar_y, right, bar_y + 10, "6B6259")
+    rectangle(events, left, bar_y, right, bar_y + 10, opts.color_track)
     if finite(position) and position >= 0 and finite(duration) and duration > 0 then
         local progress = math.min(1, position / duration)
         local cursor = left + math.floor((right - left) * progress + 0.5)
         rectangle(events, left, bar_y, cursor, bar_y + 10, accent)
-        rectangle(events, cursor - 2, bar_y - 5, cursor + 2, bar_y + 15, white)
+        rectangle(events, cursor - 2, bar_y - 5, cursor + 2, bar_y + 15, fg)
     else
         text(events, center, bar_y + 16, 8, 14, muted, "PROGRESS UNKNOWN")
     end
@@ -176,8 +185,8 @@ render = function()
         text(events, x, top + 212, alignment, epoch and 28 or 22, color, value)
         if date then text(events, x, top + 246, alignment, 16, muted, date) end
     end
-    clock_cell(left, 7, "STARTED", started_at, "Not started yet", white)
-    clock_cell(center, 8, "NOW", now, nil, white)
+    clock_cell(left, 7, "STARTED", started_at, "Not started yet", fg)
+    clock_cell(center, 8, "NOW", now, nil, fg)
     clock_cell(right, 9, "FINISH", remaining and now + math.ceil(remaining), "Unknown", accent)
     text(events, right, top + 266, 9, 14, muted, "if resumed now")
 

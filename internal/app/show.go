@@ -79,33 +79,41 @@ func showCounts(show *papi.Show) (seasons, episodes int) {
 
 // showTabs renders the horizontal season selector.
 func (a *App) showTabs(gtx C, s *showPage) D {
-	keepSelectedVisible(&s.tabsList, s.seasonCursor, gtx.Constraints.Max, &s.tabsSize)
-
 	return layout.Inset{Top: dp4, Bottom: dp4}.Layout(gtx, func(gtx C) D {
-		return s.tabsList.Layout(gtx, len(s.seasons), func(gtx C, i int) D {
-			season := s.seasons[i]
-			current := i == s.seasonCursor
-			focused := current && s.focus == focusTabs
-
-			return layout.Inset{Right: dp8}.Layout(gtx, func(gtx C) D {
-				return a.clickableLayout(gtx, fmt.Sprintf("season:%s:%d", s.showID, i), season.Label, func(gtx C) D {
-					col, weight, bg := colorSubtle, font.Medium, color.NRGBA{}
-					switch {
-					case focused:
-						col, weight, bg = colorSelectFg, font.Bold, colorSelectBg
-					case current:
-						col, bg = colorFg, colorSurface2
-					}
-					return a.pill(gtx, focused, bg, func(gtx C) D {
-						return a.label(gtx, sp, season.Label, col, weight)
+		return a.focusList(gtx, &s.tabsList, &s.tabsMotion, s.showID, len(s.seasons), s.seasonCursor, s.focus == focusTabs,
+			focusStyle{paint: func(gtx C, _ int, size image.Point) {
+				// The tab's pill, without the gap after it.
+				fillRounded(gtx, image.Pt(size.X-gtx.Dp(dp8), size.Y), radiusRow, colorSelectBg)
+			}},
+			func(gtx C, i int) D {
+				season := s.seasons[i]
+				current := i == s.seasonCursor
+				focused := current && s.focus == focusTabs
+				return layout.Inset{Right: dp8}.Layout(gtx, func(gtx C) D {
+					return a.clickableLayout(gtx, fmt.Sprintf("season:%s:%d", s.showID, i), season.Label, func(gtx C) D {
+						col, weight, bg := colorSubtle, font.Medium, color.NRGBA{}
+						switch {
+						case focused:
+							col, weight = colorSelectFg, font.Bold
+						case current:
+							col, bg = colorPrimary, colorSurface2
+						}
+						return a.pill(gtx, focused, bg, func(gtx C) D {
+							return a.label(gtx, sp, season.Label, col, weight)
+						})
+					}, func() {
+						s.focus = focusTabs
+						s.switchSeason(i - s.seasonCursor)
 					})
-				}, func() {
-					s.focus = focusTabs
-					s.switchSeason(i - s.seasonCursor)
 				})
 			})
-		})
 	})
+}
+
+// episodeMotionKey identifies an episode list: switching seasons snaps.
+type episodeMotionKey struct {
+	showID string
+	season int
 }
 
 // showEpisodeList shares the page's reading surface with the episode synopsis.
@@ -118,60 +126,60 @@ func (a *App) showEpisodeList(gtx C, s *showPage) D {
 			})
 		}
 
-		keepSelectedVisible(&s.epList, s.epCursor, gtx.Constraints.Max, &s.epListSize)
-
 		episodes := season.Children
-		return s.epList.Layout(gtx, len(episodes), func(gtx C, i int) D {
-			node := episodes[i]
-			selected := i == s.epCursor && s.focus == focusEpisodes
+		key := episodeMotionKey{showID: s.showID, season: s.seasonCursor}
+		return a.focusList(gtx, &s.epList, &s.epMotion, key, len(episodes), s.epCursor, s.focus == focusEpisodes, rowFocus,
+			func(gtx C, i int) D {
+				node := episodes[i]
+				selected := i == s.epCursor && s.focus == focusEpisodes
 
-			code, title := episodeDisplayParts(node)
-			return a.clickableLayout(gtx, fmt.Sprintf("episode:%s:%d:%d", s.showID, s.seasonCursor, i), strings.TrimSpace("Play "+code+" "+title), func(gtx C) D {
-				return a.rowShell(gtx, selected, false, browseRowHeight, func(gtx C) D {
-					titleCol := colorFg
-					subCol := colorSubtle
-					if selected {
-						titleCol = colorSelectFg
-						subCol = colorSelectFg
-					}
-					weight := font.Normal
-					if selected {
-						weight = font.Bold
-					}
+				code, title := episodeDisplayParts(node)
+				return a.clickableLayout(gtx, fmt.Sprintf("episode:%s:%d:%d", s.showID, s.seasonCursor, i), strings.TrimSpace("Play "+code+" "+title), func(gtx C) D {
+					return a.focusRowShell(gtx, selected, false, browseRowHeight, func(gtx C) D {
+						titleCol := colorFg
+						subCol := colorSubtle
+						if selected {
+							titleCol = colorSelectFg
+							subCol = colorSelectFg
+						}
+						weight := font.Normal
+						if selected {
+							weight = font.Bold
+						}
 
-					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-						layout.Rigid(func(gtx C) D {
-							return layout.Inset{Right: dp16}.Layout(gtx, func(gtx C) D {
-								return a.label(gtx, sp, code, titleCol, font.Medium)
-							})
-						}),
-						layout.Flexed(1, func(gtx C) D {
-							return a.label(gtx, sp, title, titleCol, weight)
-						}),
-						layout.Rigid(func(gtx C) D {
-							if node.Episode == nil || !a.progress.watched(episodeMediaKey(node.ShowID, node.Episode.Season, node.Episode.Episode)) {
-								return D{}
-							}
-							return layout.Inset{Left: dp12}.Layout(gtx, func(gtx C) D {
-								return a.watchedMark(gtx, spTiny, "", subCol)
-							})
-						}),
-						layout.Rigid(func(gtx C) D {
-							if node.Episode == nil || node.Episode.Runtime <= 0 {
-								return D{}
-							}
-							return layout.Inset{Left: dp12}.Layout(gtx, func(gtx C) D {
-								return a.label(gtx, spTiny, fmt.Sprintf("%d min", node.Episode.Runtime), subCol, 0)
-							})
-						}),
-					)
+						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+							layout.Rigid(func(gtx C) D {
+								return layout.Inset{Right: dp16}.Layout(gtx, func(gtx C) D {
+									return a.label(gtx, sp, code, titleCol, font.Medium)
+								})
+							}),
+							layout.Flexed(1, func(gtx C) D {
+								return a.label(gtx, sp, title, titleCol, weight)
+							}),
+							layout.Rigid(func(gtx C) D {
+								if node.Episode == nil || !a.progress.watched(episodeMediaKey(node.ShowID, node.Episode.Season, node.Episode.Episode)) {
+									return D{}
+								}
+								return layout.Inset{Left: dp12}.Layout(gtx, func(gtx C) D {
+									return a.watchedMark(gtx, spTiny, "", subCol)
+								})
+							}),
+							layout.Rigid(func(gtx C) D {
+								if node.Episode == nil || node.Episode.Runtime <= 0 {
+									return D{}
+								}
+								return layout.Inset{Left: dp12}.Layout(gtx, func(gtx C) D {
+									return a.label(gtx, spTiny, fmt.Sprintf("%d min", node.Episode.Runtime), subCol, 0)
+								})
+							}),
+						)
+					})
+				}, func() {
+					s.focus = focusEpisodes
+					s.epCursor = i
+					a.launchEpisode(node)
 				})
-			}, func() {
-				s.focus = focusEpisodes
-				s.epCursor = i
-				a.launchEpisode(node)
 			})
-		})
 	})
 }
 

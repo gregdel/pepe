@@ -209,11 +209,25 @@ func (a *App) layoutModeRail(gtx C) D {
 	if a.browse.focus == browseFocusModeRail {
 		inset.Right = dp8
 	}
+	// The rail never scrolls; it shares the lists' focus motion through a
+	// scratch list whose position nothing reads.
+	focus := -1
+	if a.browse.focus == browseFocusModeRail {
+		focus = int(a.railOption())
+	}
+	m := &a.browse.railMotion
+	var still layout.List
+	if m.begin(gtx, &still, railMotionKey{}, focus, 0, int(railEntryCount), math.MaxInt32) {
+		a.animating(gtx)
+	}
 	return inset.Layout(gtx, func(gtx C) D {
 		return layout.Center.Layout(gtx, func(gtx C) D {
 			var entries [railEntryCount]layout.FlexChild
 			for entry := range railEntryCount {
-				entries[entry] = layout.Rigid(func(gtx C) D { return a.layoutModeOption(gtx, entry) })
+				entries[entry] = layout.Rigid(func(gtx C) D {
+					return focusListRow(gtx, layout.Vertical, m, int(entry), focus, rowFocus,
+						func(gtx C, _ int) D { return a.layoutModeOption(gtx, entry) })
+				})
 			}
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, entries[:]...)
 		})
@@ -242,7 +256,7 @@ func (a *App) layoutModeOption(gtx C, mode railEntry) D {
 	}
 
 	return a.clickableLayout(gtx, "mode:"+railLabel(mode), railLabel(mode), func(gtx C) D {
-		return a.rowShell(gtx, focused, active, unit.Dp(64), func(gtx C) D {
+		return a.focusRowShell(gtx, focused, active, browseRowHeight, func(gtx C) D {
 			iconColor := colorSubtle
 			if active {
 				iconColor = colorPrimary
@@ -354,7 +368,7 @@ func (a *App) layoutHeaderStatus(gtx C) D {
 			status = "Server unreachable · retrying"
 		}
 		parts = append(parts, layout.Rigid(func(gtx C) D {
-			return a.label(gtx, spTiny, status, colorTerminal, font.Medium)
+			return a.label(gtx, spTiny, status, colorError, font.Medium)
 		}))
 		parts = append(parts, layout.Rigid(layout.Spacer{Width: dp16}.Layout))
 	}
@@ -376,14 +390,26 @@ func listingModeLabel(mode ListingMode) string {
 
 // ── Nav panel ─────────────────────────────────────────────────────────────────
 
+// railMotionKey identifies the mode rail's focus motion; its entries never
+// change.
+type railMotionKey struct{}
+
+// navMotionKey identifies the nav list's rows and width; the list snaps
+// instead of gliding when they change (drill-in, back, refresh).
+type navMotionKey struct {
+	node *RadixNode // nil at home
+	mode ListingMode
+}
+
 func (a *App) layoutNavList(gtx C) D {
-	// Keep cursor centered in the visible area (like scrolloff=999).
-	if pos := a.leftList.Position; pos.Count > 0 {
-		target := max(0, a.browse.nav.cursor-pos.Count/2)
-		if pos.First != target {
-			a.leftList.ScrollTo(target)
+	var current *RadixNode
+	if !a.browse.nav.isAtRoot() {
+		if current = a.browse.nav.getCurrentNode(); current == nil {
+			return D{}
 		}
 	}
+	key := navMotionKey{node: current, mode: a.browse.library.mode}
+	focused := a.browse.focus == browseFocusContent
 
 	// The list is widened by selectionReach so the selection can fade out
 	// with the backdrop veil; rows keep the list's width.
@@ -391,19 +417,18 @@ func (a *App) layoutNavList(gtx C) D {
 	gtx.Constraints.Max.X += reach
 	gtx.Constraints.Min.X = min(gtx.Constraints.Min.X+reach, gtx.Constraints.Max.X)
 	layoutRows := func(n int, row func(gtx C, i int) D) D {
-		dims := a.leftList.Layout(gtx, n, func(gtx C, i int) D {
-			gtx.Constraints.Max.X = width
-			gtx.Constraints.Min.X = min(gtx.Constraints.Min.X, width)
-			if a.browse.focus != browseFocusContent || i != a.browse.nav.cursor {
+		// The cursor stays centred (like scrolloff=999).
+		dims := a.focusList(gtx, &a.leftList, &a.browse.navMotion, key, n, a.browse.nav.cursor, focused,
+			focusStyle{
+				paint:  func(gtx C, _ int, size image.Point) { paintCatalogSelection(gtx, size, reach) },
+				centre: true,
+				still:  true, // the fade's segments would show seams when scaled
+			},
+			func(gtx C, i int) D {
+				gtx.Constraints.Max.X = width
+				gtx.Constraints.Min.X = min(gtx.Constraints.Min.X, width)
 				return row(gtx, i)
-			}
-			macro := op.Record(gtx.Ops)
-			dims := row(gtx, i)
-			call := macro.Stop()
-			paintCatalogSelection(gtx, dims.Size, reach)
-			call.Add(gtx.Ops)
-			return dims
-		})
+			})
 		dims.Size.X = min(dims.Size.X, width)
 		return dims
 	}
@@ -433,10 +458,6 @@ func (a *App) layoutNavList(gtx C) D {
 		})
 	}
 
-	current := a.browse.nav.getCurrentNode()
-	if current == nil {
-		return D{}
-	}
 	currentPath := a.browse.nav.getCurrentPath()
 	children := current.Children
 	return layoutRows(len(children), func(gtx C, i int) D {
@@ -459,26 +480,28 @@ func (a *App) layoutNavList(gtx C) D {
 	})
 }
 
-// rowShell lays out a selectable row and its optional active-mode outline.
-func (a *App) rowShell(gtx C, selected, active bool, minHeight unit.Dp, content layout.Widget) D {
-	switch {
-	case selected:
-		return a.rowFrame(gtx, minHeight, colorSelectBg, true, content)
-	case active:
-		return a.rowFrame(gtx, minHeight, colorSurface2, false, content)
+// focusRowShell lays out a focusable list row (DESIGN.md, Focus). A selected
+// row draws no fill of its own: its list paints the focus fill (focusList),
+// so the fill can glide between rows. A current row, focused elsewhere, gets
+// the quiet surface.
+func (a *App) focusRowShell(gtx C, selected, current bool, minHeight unit.Dp, content layout.Widget) D {
+	fill := color.NRGBA{}
+	if current && !selected {
+		fill = colorSurface2
 	}
-	return a.rowFrame(gtx, minHeight, color.NRGBA{}, false, content)
+	return a.rowFrame(gtx, minHeight, fill, selected, false, content)
 }
 
-// rowFrame lays out a row of at least minHeight on an optional fill; a
-// focused row is marked selected and gets the focus ring.
-func (a *App) rowFrame(gtx C, minHeight unit.Dp, fill color.NRGBA, focused bool, content layout.Widget) D {
+// rowFrame lays out a row of at least minHeight on an optional fill, inset
+// like the focus fill (paintFocusRow). A focused row is marked selected; ring
+// outlines it, which only a field being edited uses.
+func (a *App) rowFrame(gtx C, minHeight unit.Dp, fill color.NRGBA, focused, ring bool, content layout.Widget) D {
 	return layout.Inset{Left: dp8, Right: dp8, Top: dp2, Bottom: dp2}.Layout(gtx, func(gtx C) D {
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		if h := gtx.Dp(minHeight); gtx.Constraints.Min.Y < h {
 			gtx.Constraints.Min.Y = h
 		}
-		return a.focusFrame(gtx, focused, fill, func(gtx C) D {
+		return a.focusFrame(gtx, focused, ring, fill, func(gtx C) D {
 			return layout.Center.Layout(gtx, func(gtx C) D {
 				return layout.Inset{Left: dp12, Right: dp12, Top: dp6, Bottom: dp6}.Layout(gtx, content)
 			})
@@ -486,28 +509,12 @@ func (a *App) rowFrame(gtx C, minHeight unit.Dp, fill color.NRGBA, focused bool,
 	})
 }
 
-// catalogRowShell is rowShell for catalog list rows. The selected row has no
-// focus ring or fill: layoutNavList paints its fade (paintCatalogSelection),
-// which reaches past the row's clips into the backdrop veil's fade.
-func (a *App) catalogRowShell(gtx C, selected bool, minHeight unit.Dp, content layout.Widget) D {
-	if !selected {
-		return a.rowShell(gtx, false, false, minHeight, content)
-	}
-	return layout.Inset{Left: dp8, Right: dp8, Top: dp2, Bottom: dp2}.Layout(gtx, func(gtx C) D {
-		gtx.Constraints.Min.X = gtx.Constraints.Max.X
-		if h := gtx.Dp(minHeight); gtx.Constraints.Min.Y < h {
-			gtx.Constraints.Min.Y = h
-		}
-		macro := op.Record(gtx.Ops)
-		dims := layout.Center.Layout(gtx, func(gtx C) D {
-			return layout.Inset{Left: dp12, Right: dp12, Top: dp6, Bottom: dp6}.Layout(gtx, content)
-		})
-		call := macro.Stop()
-
-		defer a.markSelected(gtx, dims.Size).Pop()
-		call.Add(gtx.Ops)
-		return dims
-	})
+// paintFocusRow paints the focus fill behind a row of size laid out by
+// rowFrame.
+func paintFocusRow(gtx C, size image.Point) {
+	inset, insetY := gtx.Dp(dp8), gtx.Dp(dp2)
+	defer op.Offset(image.Pt(inset, insetY)).Push(gtx.Ops).Pop()
+	fillRounded(gtx, image.Pt(size.X-2*inset, size.Y-2*insetY), radiusRow, colorSelectBg)
 }
 
 const (
@@ -518,7 +525,7 @@ const (
 )
 
 // paintCatalogSelection paints the selection of a catalog row of size, inset
-// like catalogRowShell's, fading out by the row's right edge, or reach past
+// like rowFrame, fading out by the row's right edge, or reach past
 // the list's.
 func paintCatalogSelection(gtx C, size image.Point, reach int) {
 	inset, insetY := gtx.Dp(dp8), gtx.Dp(dp2)
@@ -559,7 +566,7 @@ func paintSelectionFade(gtx C, size image.Point, x0 int, col color.NRGBA) {
 
 // groupRow renders a radix prefix group: two-tone label + count pill.
 func (a *App) groupRow(gtx C, prefix, label string, count int, selected bool) D {
-	return a.catalogRowShell(gtx, selected, browseRowHeight, func(gtx C) D {
+	return a.focusRowShell(gtx, selected, false, browseRowHeight, func(gtx C) D {
 		fg := colorFg
 		prefixCol := colorPrimary
 		if selected {
@@ -593,7 +600,7 @@ func (a *App) terminalRow(gtx C, node *RadixNode, currentPath string, selected b
 	const thumbW = unit.Dp(44)
 	fullString := node.FullString
 
-	return a.catalogRowShell(gtx, selected, thumbW*3/2, func(gtx C) D {
+	return a.focusRowShell(gtx, selected, false, thumbW*3/2, func(gtx C) D {
 		titleCol := colorFg
 		if selected {
 			titleCol = colorSelectFg

@@ -64,7 +64,7 @@ func (a *App) layoutLogEntry(gtx C, entry logEntry) D {
 	levelColor := colorSubtle
 	switch entry.Level {
 	case "ERROR":
-		levelColor = colorTerminal
+		levelColor = colorError
 	case "WARN":
 		levelColor = colorWarn
 	}

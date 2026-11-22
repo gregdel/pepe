@@ -51,7 +51,9 @@ const (
 	ambientKnee         = 0.15
 	ambientEdgeDarken   = 0.7
 
-	backdropFade = 240 * time.Millisecond
+	// backdropFade is Material 3's medium2 duration with standard easing:
+	// a cross-fade in place, not an entrance, so it must not pop.
+	backdropFade = 300 * time.Millisecond
 )
 
 // backdrop holds one title's fanart, its opaque ambient copy and the veils
@@ -350,10 +352,7 @@ func (a *App) layoutBackdrop(gtx C) D {
 	} else {
 		view, art = backdropView{}, backdrop{}
 	}
-	now := gtx.Now
-	if now.IsZero() {
-		now = time.Now()
-	}
+	now := frameTime(gtx)
 	if view != st.cur || art != st.curArt {
 		instant := st.cur.sharp && !view.sharp
 		st.prev, st.prevArt = st.cur, st.curArt
@@ -364,10 +363,9 @@ func (a *App) layoutBackdrop(gtx C) D {
 		}
 	}
 
-	t := float32(1)
-	if since := now.Sub(st.since); since < backdropFade {
-		t = float32(since) / float32(backdropFade)
-		gtx.Execute(op.InvalidateCmd{})
+	t := easedProgress(now, st.since, backdropFade, easeStandard)
+	if t < 1 {
+		a.animating(gtx)
 	}
 	if t >= 1 {
 		a.drawBackdrop(gtx, st.cur, st.curArt, size, 1)

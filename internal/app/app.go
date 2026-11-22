@@ -68,7 +68,7 @@ type SubtitlePopup struct {
 	errMsg       string
 	doneAt       time.Time
 	list         layout.List
-	listSize     image.Point
+	motion       listMotion
 	resultCh     chan subPopupListResult
 	downloadDone chan subPopupDownloadResult
 }
@@ -179,6 +179,8 @@ type App struct {
 	// metric is the scaled metric of the last frame, for input handled
 	// outside layout.
 	metric unit.Metric
+	// inMotion is set while the last frame drew a running transition.
+	inMotion bool
 
 	// key input tag — a stable pointer used as event.Tag
 	keyTag *bool
@@ -207,6 +209,8 @@ type browseState struct {
 	// selectionReach is how far past the nav list's right edge the backdrop
 	// veil clears, set by layoutCatalog: the selection fades out there too.
 	selectionReach int
+	navMotion      listMotion
+	railMotion     listMotion
 	// Rail pages replace the catalog without changing its listing or navigation.
 	remote   *webRemotePage
 	logs     *logsPage
@@ -631,11 +635,12 @@ func (a *App) scrollDetail(dir int) {
 
 // Layout renders one frame and processes input routed by the supplied
 // layout context. It is intentionally independent of gioapp.Window.
-// Loading reports whether the library or artwork is still being fetched, so
-// the headless driver can wait for it before a screenshot. Call it from the
+// Loading reports whether the library or artwork is still being fetched, or
+// a transition is still moving, so the headless driver can wait for it
+// before a screenshot. Call it from the
 // goroutine that runs Layout.
 func (a *App) Loading() bool {
-	return a.refreshing || a.images.busy() || a.backdrops.busy()
+	return a.refreshing || a.inMotion || a.images.busy() || a.backdrops.busy()
 }
 
 func (a *App) Layout(gtx C) D {
@@ -643,6 +648,7 @@ func (a *App) Layout(gtx C) D {
 	a.logsVisible.Store(false) // layoutLogs sets it while the page is drawn
 	gtx = scaleContext(gtx)
 	a.metric = gtx.Metric
+	a.inMotion = false
 	// Run the last frame's click first: its closure captured that frame's
 	// state, which refresh results or web commands may replace below.
 	if click := a.pendingClick; click != nil {

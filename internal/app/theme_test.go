@@ -100,7 +100,7 @@ func renderDetailScrim(t *testing.T, size image.Point, scrim func(C)) image.Imag
 func assertDetailContrast(t *testing.T, img image.Image, p image.Point) {
 	t.Helper()
 	bg := color.NRGBAModel.Convert(img.At(p.X, p.Y)).(color.NRGBA)
-	for _, fg := range []color.NRGBA{colorFg, colorSubtle, colorPrimary, colorTerminal} {
+	for _, fg := range []color.NRGBA{colorFg, colorSubtle, colorPrimary, colorError} {
 		if got := contrastRatio(fg, bg); got < 4.5 {
 			t.Fatalf("pixel %v: %v on %v = %.2f:1, want 4.5:1", p, fg, bg, got)
 		}
@@ -160,6 +160,16 @@ func TestDetailPanelIsMinimal(t *testing.T) {
 	lighter.A--
 	if got := contrastRatio(colorPrimary, composite(lighter, white)); got >= 4.5 {
 		t.Fatalf("a lighter panel still reaches %.2f:1; colorDetailPanel is darker than needed", got)
+	}
+}
+
+// The unplayed part of the OSD progress bar is non-text content (WCAG 1.4.11).
+func TestTrackContrast(t *testing.T) {
+	if got := contrastRatio(colorTrack, colorSurface); got < 3 {
+		t.Fatalf("track on panel = %.2f:1, want 3:1", got)
+	}
+	if got := contrastRatio(colorPrimary, colorTrack); got < 1.5 {
+		t.Fatalf("progress fill on track = %.2f:1, want them distinct", got)
 	}
 }
 
@@ -244,5 +254,19 @@ func TestPreviewScrimRenderedContrast(t *testing.T) {
 				previous = current
 			}
 		})
+	}
+}
+
+func TestThemeColorFormats(t *testing.T) {
+	c := color.NRGBA{R: 0x01, G: 0x02, B: 0xab, A: 0xff}
+	if got := assColor(c); got != "AB0201" {
+		t.Errorf("assColor = %s, want BGR AB0201", got)
+	}
+	if got := cssColor(c); got != "#0102ab" {
+		t.Errorf("cssColor = %s", got)
+	}
+	c.A = 0x80
+	if got := cssColor(c); got != "#0102ab80" {
+		t.Errorf("translucent cssColor = %s", got)
 	}
 }

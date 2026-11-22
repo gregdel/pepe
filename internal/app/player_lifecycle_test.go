@@ -52,13 +52,20 @@ func TestPlayerManagedArgumentsAreOptIn(t *testing.T) {
 			want := buildMPVArgs("launcher", source.title, command.args[len(command.args)-1], nil,
 				command.mode, 91, command.sockPath, true, filepath.Join(command.runtimeDir, "auth.conf"))
 			last := len(want) - 1
+			media := want[last]
+			var colors []string
+			for _, c := range osdColors {
+				colors = append(colors, "--script-opts-append=pepe-color_"+c.name+"="+assColor(c.color))
+			}
 			want = append(want[:last:last],
 				"--script="+filepath.Join(command.runtimeDir, "pepe.lua"),
 				"--script-opts-append=pepe-controls=keyboard",
 				"--script-opts-append=pepe-help=yes", "--script-opts-append=pepe-panel=yes",
-				"--script-opts-append=pepe-web=no",
+				"--script-opts-append=pepe-web=no")
+			want = append(want, colors...)
+			want = append(want,
 				"--osd-fonts-dir="+filepath.Join(command.runtimeDir, "fonts"),
-				"--osd-font=Roboto", "--script-opts-append=console-background_alpha=0", want[last])
+				"--osd-font=Roboto", "--script-opts-append=console-background_alpha=0", media)
 			if managed {
 				want = append([]string{want[0], "--managed-runtime=" + command.runtimeDir}, want[1:]...)
 			}

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"image"
 	"time"
 
 	"gioui.org/layout"
@@ -55,8 +54,8 @@ type showPage struct {
 	tabsList   layout.List
 	epList     layout.List
 	infoList   layout.List
-	tabsSize   image.Point
-	epListSize image.Point
+	tabsMotion listMotion
+	epMotion   listMotion
 }
 
 // currentSeason returns the selected season node, or nil when empty.

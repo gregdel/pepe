@@ -37,6 +37,9 @@ func (a *App) playerInterfaceArgs(runtimeDir string, fromWeb bool) ([]string, er
 		"--script-opts-append=pepe-panel=" + yesNo(!a.nativeOSD),
 		"--script-opts-append=pepe-web=" + yesNo(fromWeb),
 	}
+	for _, c := range osdColors {
+		args = append(args, "--script-opts-append=pepe-color_"+c.name+"="+assColor(c.color))
+	}
 	if !a.nativeOSD {
 		fontDir := filepath.Join(runtimeDir, "fonts")
 		if err := os.Mkdir(fontDir, 0o700); err != nil {

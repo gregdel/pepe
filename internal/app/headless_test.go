@@ -70,7 +70,7 @@ func newHeadlessFixture(t *testing.T) *headlessFixture {
 	a := New(client, nil, &Config{MPVPath: "mpv"}, nil, nil)
 	d, err := driver.New(driver.Config{
 		Width: 1024, Height: 768, PxPerDp: 1, PxPerSp: 1,
-	}, a.Layout)
+	}, settledLayout(a))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +104,10 @@ func headlessEpisode(season, episode int, title string) *papi.Episode {
 func headlessKey(t *testing.T, f *headlessFixture, name string) {
 	t.Helper()
 	if err := f.driver.Key(name, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Render the frames the key's motion asks for (see settledLayout).
+	if err := f.driver.Settle(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -724,4 +728,17 @@ func headlessContains(node driver.Node, id uint64) bool {
 		}
 	}
 	return false
+}
+
+// settledLayout lays a out with a clock that moves a second each frame, so
+// motion has settled whenever a test looks at the UI after an input (the
+// driver renders the frames motion asks for). Motion itself is tested frame
+// by frame with explicit times (motion_test.go, detail_fade_test.go).
+func settledLayout(a *App) driver.LayoutFunc {
+	clock := time.Now()
+	return func(gtx C) D {
+		clock = clock.Add(time.Second)
+		gtx.Now = clock
+		return a.Layout(gtx)
+	}
 }

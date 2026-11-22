@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -108,6 +109,30 @@ func TestWebHTTPValidationAndAssets(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusUnsupportedMediaType {
 		t.Fatal("simple form-compatible content type accepted")
+	}
+}
+
+// The web remote's colours come from theme.go, not from its own files.
+func TestWebUsesTheme(t *testing.T) {
+	handler := (&webUI{commands: make(chan webCommand, webQueueSize)}).handler()
+	css := webRequest(handler, "GET", "/remote.css", "").Body.String()
+	for _, want := range []string{"--bg: " + cssColor(colorBg) + ";", "--select-bg: " + cssColor(colorSelectBg) + ";", "--radius-row: 10px;"} {
+		if !strings.Contains(css, want) {
+			t.Errorf("remote.css lacks %q", want)
+		}
+	}
+	if !strings.HasPrefix(css, ":root {") || !strings.Contains(css, ".primary {") {
+		t.Error("theme tokens are not served ahead of remote.css")
+	}
+	// Literal colours other than shadow black would bypass the theme.
+	if hex := regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b`).FindAllString(string(webCSS), -1); len(hex) != 1 || hex[0] != "#0009" {
+		t.Errorf("remote.css has literal colours %v", hex)
+	}
+	for _, path := range []string{"/", "/logs"} {
+		page := webRequest(handler, "GET", path, "").Body.String()
+		if strings.Contains(page, "@COLOR_BG@") || !strings.Contains(page, `content="`+cssColor(colorBg)+`"`) {
+			t.Errorf("%s theme-color is not colorBg", path)
+		}
 	}
 }
 

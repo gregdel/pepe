@@ -35,6 +35,9 @@ func TestHeadlessShowListVisibility(t *testing.T) {
 		if err := f.driver.Frame(); err != nil {
 			t.Fatal(err)
 		}
+		if err := f.driver.Settle(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	visible := func(t *testing.T, name string, list *layout.List, cursor int) {
 		t.Helper()

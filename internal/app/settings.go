@@ -124,8 +124,8 @@ type settingsForm struct {
 	message string
 	failed  bool // message reports an error
 
-	list     layout.List
-	listSize image.Point
+	list   layout.List
+	motion listMotion
 }
 
 func newSettingsForm(source ConfigSource) *settingsForm {
@@ -387,13 +387,20 @@ func (a *App) layoutSettingsForm(gtx C, form *settingsForm, focused bool) D {
 	a.syncSettingsEditor(gtx, form)
 	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(settingsMaxWidth))
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
-	keepSelectedVisible(&form.list, form.cursor, gtx.Constraints.Max, &form.listSize)
-	return form.list.Layout(gtx, settingsSaveRow+1, func(gtx C, i int) D {
-		if i == settingsSaveRow {
-			return a.layoutSettingsSave(gtx, form, focused && form.cursor == i)
-		}
-		return a.layoutSettingRow(gtx, form, i, focused && form.cursor == i)
-	})
+	return a.focusList(gtx, &form.list, &form.motion, form, settingsSaveRow+1, form.cursor, focused,
+		focusStyle{paint: func(gtx C, i int, size image.Point) {
+			// The Save button is its own pill, and a field being edited keeps
+			// its neutral surface for the caret.
+			if i != settingsSaveRow && form.editing != i {
+				paintFocusRow(gtx, size)
+			}
+		}},
+		func(gtx C, i int) D {
+			if i == settingsSaveRow {
+				return a.layoutSettingsSave(gtx, form, focused && form.cursor == i)
+			}
+			return a.layoutSettingRow(gtx, form, i, focused && form.cursor == i)
+		})
 }
 
 // syncSettingsEditor applies pending focus changes and commits an edit whose
@@ -457,9 +464,9 @@ func (a *App) layoutSettingRow(gtx C, form *settingsForm, i int, selected bool) 
 	return a.clickableLayout(gtx, "setting:"+row.key, row.label, func(gtx C) D {
 		if editing {
 			// A neutral surface keeps the caret and selection visible.
-			return a.rowFrame(gtx, settingsRowHeight, colorSurface2, true, content)
+			return a.rowFrame(gtx, settingsRowHeight, colorSurface2, true, true, content)
 		}
-		return a.rowShell(gtx, selected, false, settingsRowHeight, content)
+		return a.focusRowShell(gtx, selected, false, settingsRowHeight, content)
 	}, func() { a.clickSetting(form, i) })
 }
 
@@ -477,7 +484,7 @@ func settingDisplay(row settingRow, value string) (string, color.NRGBA) {
 func (a *App) layoutSettingsSave(gtx C, form *settingsForm, selected bool) D {
 	status, statusCol := form.message, colorSubtle
 	if form.failed {
-		statusCol = colorTerminal
+		statusCol = colorError
 	} else if status == "" && form.dirty() {
 		status = "Unsaved changes"
 	}
@@ -486,7 +493,8 @@ func (a *App) layoutSettingsSave(gtx C, form *settingsForm, selected bool) D {
 			layout.Rigid(func(gtx C) D {
 				gtx.Constraints.Min.X = 0
 				return a.clickableLayout(gtx, "setting:save", "Save & restart", func(gtx C) D {
-					bg, fg := colorSurface2, colorFg
+					// At rest a button has no fill, like a row (DESIGN.md, Focus).
+					bg, fg := color.NRGBA{}, colorFg
 					if selected {
 						bg, fg = colorSelectBg, colorSelectFg
 					}

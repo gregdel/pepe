@@ -2,7 +2,6 @@ package app
 
 import (
 	"image"
-	"image/color"
 	"strings"
 
 	"gioui.org/op"
@@ -54,13 +53,6 @@ func (a *App) currentHints() []hint {
 	}
 	return remote
 }
-
-var (
-	colorRemoteBlue   = color.NRGBA{R: 0x68, G: 0xb4, B: 0xff, A: 0xff}
-	colorRemoteRed    = color.NRGBA{R: 0xff, G: 0x8a, B: 0x80, A: 0xff}
-	colorRemoteGreen  = color.NRGBA{R: 0x81, G: 0xd7, B: 0x9b, A: 0xff}
-	colorRemoteYellow = color.NRGBA{R: 0xff, G: 0xd8, B: 0x6b, A: 0xff}
-)
 
 func (a *App) contextHints() []hint {
 	if a.setup != nil {

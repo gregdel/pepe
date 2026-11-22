@@ -91,7 +91,7 @@ func TestAmbientLuminanceAndVeil(t *testing.T) {
 func TestBrowseTextOverAmbient(t *testing.T) {
 	v := uint8(linearToSRGB(ambientMaxLuminance)*255 + 1) // round up: worst case
 	bg := color.NRGBA{R: v, G: v, B: v, A: 0xff}
-	for _, fg := range []color.NRGBA{colorFg, colorSubtle, colorPrimary, colorTerminal} {
+	for _, fg := range []color.NRGBA{colorFg, colorSubtle, colorPrimary, colorError} {
 		if got := contrastRatio(fg, bg); got < 4.5 {
 			t.Fatalf("%v on brightest ambient %v = %.2f:1, want 4.5:1", fg, bg, got)
 		}
