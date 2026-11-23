@@ -234,7 +234,7 @@ func TestTVDelayedArtworkAndMissingSynopsis(t *testing.T) {
 	f.app.backdrops.reset()
 	f.app.backdrops.fetch("fanart:movie-new", func() (backdrop, error) {
 		<-release
-		return newBackdrop(art), nil
+		return newBackdrop(art, image.Point{}), nil
 	})
 	f.app.pushMovieDetail(&MediaItem{ID: "movie-new", Title: "New Movie", Type: mediaKindMovie})
 	if err := f.driver.Resize(1280, 720); err != nil {

@@ -305,6 +305,17 @@ func resizeArtwork(img image.Image, maxWidth, maxHeight int) image.Image {
 	if width == bounds.Dx() && height == bounds.Dy() {
 		return img
 	}
+	// A decoded JPEG is first box-averaged by a whole factor, leaving less
+	// than 2× to scale.
+	if src, ok := img.(*image.YCbCr); ok {
+		if k := min(bounds.Dx()/width, bounds.Dy()/height); k >= 2 {
+			img = boxShrinkYCbCr(src, bounds, k)
+			bounds = img.Bounds()
+			if bounds.Dx() == width && bounds.Dy() == height {
+				return img
+			}
+		}
+	}
 	resized := image.NewRGBA(image.Rect(0, 0, width, height))
 	// ApproxBiLinear samples only 4 source pixels and aliases beyond about
 	// 2×; the kernel scaler widens its support when shrinking but costs
@@ -317,10 +328,63 @@ func resizeArtwork(img image.Image, maxWidth, maxHeight int) image.Image {
 	return resized
 }
 
+// boxShrinkYCbCr averages each k×k block of r in src into one RGBA pixel.
+// The YCbCr to RGB conversion is affine up to clamping, so averaging before
+// converting gives nearly the same colour as converting first, for a
+// fraction of the work.
+// Original posters are about 20× larger than a row poster; the kernel scaler
+// spends tens of milliseconds and megabytes of scratch on them.
+func boxShrinkYCbCr(src *image.YCbCr, r image.Rectangle, k int) *image.RGBA {
+	// Chroma planes are subsampled by powers of two.
+	var hs, vs int
+	switch src.SubsampleRatio {
+	case image.YCbCrSubsampleRatio422:
+		hs = 1
+	case image.YCbCrSubsampleRatio420:
+		hs, vs = 1, 1
+	case image.YCbCrSubsampleRatio440:
+		vs = 1
+	case image.YCbCrSubsampleRatio411:
+		hs = 2
+	case image.YCbCrSubsampleRatio410:
+		hs, vs = 2, 1
+	}
+	w, h := r.Dx()/k, r.Dy()/k
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	sums := make([]uint32, 3*w)
+	n := uint32(k * k)
+	minX, minY := src.Rect.Min.X, src.Rect.Min.Y
+	for y := range h {
+		clear(sums)
+		for sy := r.Min.Y + y*k; sy < r.Min.Y+(y+1)*k; sy++ {
+			yRow := (sy-minY)*src.YStride - minX
+			cRow := ((sy>>vs)-(minY>>vs))*src.CStride - minX>>hs
+			for x := range w {
+				var sY, sCb, sCr uint32
+				for sx := r.Min.X + x*k; sx < r.Min.X+(x+1)*k; sx++ {
+					ci := cRow + sx>>hs
+					sY += uint32(src.Y[yRow+sx])
+					sCb += uint32(src.Cb[ci])
+					sCr += uint32(src.Cr[ci])
+				}
+				sums[3*x] += sY
+				sums[3*x+1] += sCb
+				sums[3*x+2] += sCr
+			}
+		}
+		row := dst.Pix[y*dst.Stride:]
+		for x := range w {
+			cr, cg, cb := color.YCbCrToRGB(uint8((sums[3*x]+n/2)/n), uint8((sums[3*x+1]+n/2)/n), uint8((sums[3*x+2]+n/2)/n))
+			row[4*x], row[4*x+1], row[4*x+2], row[4*x+3] = cr, cg, cb, 0xff
+		}
+	}
+	return dst
+}
+
 // fetchArtwork keeps failures visible in the log even though the cache resolves
 // them to empty images. Do not log request URLs, which may contain credentials.
-func (a *App) fetchArtwork(cacheKey string, fetchFn func() (image.Image, error), maxWidth, maxHeight int) {
-	a.images.fetch(cacheKey, func() (paint.ImageOp, error) {
+func (a *App) fetchArtwork(cache *asyncCache[paint.ImageOp], cacheKey string, fetchFn func() (image.Image, error), maxWidth, maxHeight int) {
+	cache.fetch(cacheKey, func() (paint.ImageOp, error) {
 		img, err := fetchImageOp(fetchFn, maxWidth, maxHeight)
 		if err != nil {
 			a.logArtworkError(cacheKey, err)
@@ -337,8 +401,8 @@ func (a *App) logArtworkError(cacheKey string, err error) {
 
 // scheduleArtworkRetry redraws when a visible transient failure may be
 // retried; nothing else would wake an idle TV UI to fetch it again.
-func (a *App) scheduleArtworkRetry(gtx C, cacheKey string) {
-	if at, ok := a.images.retryAt(cacheKey); ok {
+func (a *App) scheduleArtworkRetry(gtx C, cache *asyncCache[paint.ImageOp], cacheKey string) {
+	if at, ok := cache.retryAt(cacheKey); ok {
 		gtx.Execute(op.InvalidateCmd{At: at})
 	}
 }
@@ -346,18 +410,18 @@ func (a *App) scheduleArtworkRetry(gtx C, cacheKey string) {
 // posterImage renders a 2:3 poster at the given width, asynchronously fetching
 // it on first use. A placeholder surface is drawn while loading or on failure.
 // maxSize bounds the cached texture; keys must differ between sizes.
-func (a *App) posterImage(gtx C, cacheKey string, fetchFn func() (image.Image, error), width, radius unit.Dp, maxSize image.Point) D {
+func (a *App) posterImage(gtx C, cache *asyncCache[paint.ImageOp], cacheKey string, fetchFn func() (image.Image, error), width, radius unit.Dp, maxSize image.Point) D {
 	w := gtx.Dp(width)
 	size := image.Pt(w, w*3/2)
 
 	gtx2 := gtx
 	gtx2.Constraints = layout.Exact(size)
 
-	img, ok := a.images.get(cacheKey)
+	img, ok := cache.get(cacheKey)
 	if !ok {
-		a.fetchArtwork(cacheKey, fetchFn, maxSize.X, maxSize.Y)
+		a.fetchArtwork(cache, cacheKey, fetchFn, maxSize.X, maxSize.Y)
 	}
-	a.scheduleArtworkRetry(gtx, cacheKey)
+	a.scheduleArtworkRetry(gtx, cache, cacheKey)
 	defer clip.RRect{
 		Rect: image.Rectangle{Max: size},
 		NE:   gtx.Dp(radius), NW: gtx.Dp(radius), SE: gtx.Dp(radius), SW: gtx.Dp(radius),
@@ -410,11 +474,11 @@ func (a *App) fanart(gtx C, cacheKey string, fetchFn func() (image.Image, error)
 // Preview and detail share full-size poster cache keys; nav rows use small
 // "row" keys for the same files (see rowPosterMaxSize).
 func (a *App) movieThumb(gtx C, id string, width, radius unit.Dp) D {
-	return a.posterImage(gtx, "thumb:"+id, a.movieThumbFile(id), width, radius, posterMaxSize)
+	return a.posterImage(gtx, a.images, "thumb:"+id, a.movieThumbFile(id), width, radius, posterMaxSize)
 }
 
 func (a *App) showPoster(gtx C, id string, width, radius unit.Dp) D {
-	return a.posterImage(gtx, "poster:"+id, a.showPosterFile(id), width, radius, posterMaxSize)
+	return a.posterImage(gtx, a.images, "poster:"+id, a.showPosterFile(id), width, radius, posterMaxSize)
 }
 
 func (a *App) movieThumbFile(id string) func() (image.Image, error) {

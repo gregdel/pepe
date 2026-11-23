@@ -125,7 +125,7 @@ func TestArtworkClientAndRendering(t *testing.T) {
 					client.movies["tt001"] = movie
 					client.shows["tt001"], client.shows["tt002"] = show, show2
 				}
-				a := &App{client: client, images: newAsyncCache[paint.ImageOp](1, 0), backdrops: newAsyncCache[backdrop](1, 0)}
+				a := &App{client: client, images: newAsyncCache[paint.ImageOp](1, 0), thumbs: newAsyncCache[paint.ImageOp](1, 0), backdrops: newAsyncCache[backdrop](1, 0)}
 				completed := make(chan struct{}, 1)
 				a.images.onDone = func() { completed <- struct{}{} }
 				a.backdrops.onDone = a.images.onDone
@@ -182,10 +182,11 @@ func TestArtworkUnknownErrorsNeverLogTheirText(t *testing.T) {
 		a := &App{
 			client: NewEmptyAPIClient(slog.New(slog.NewTextHandler(&output, nil))),
 			images: newAsyncCache[paint.ImageOp](1, 0),
+			thumbs: newAsyncCache[paint.ImageOp](1, 0),
 		}
 		completed := make(chan struct{}, 1)
 		a.images.onDone = func() { completed <- struct{}{} }
-		a.fetchArtwork("thumb:tt001", func() (image.Image, error) { return nil, err }, posterMaxSize.X, posterMaxSize.Y)
+		a.fetchArtwork(a.images, "thumb:tt001", func() (image.Image, error) { return nil, err }, posterMaxSize.X, posterMaxSize.Y)
 		waitForArtwork(t, a, completed)
 		if got := output.String(); !strings.Contains(got, `error="artwork load failed"`) || strings.Contains(got, "https://") || strings.Contains(got, "private-token") || strings.Contains(got, "password") {
 			t.Fatalf("unsafe or missing fallback diagnostic: %s", got)

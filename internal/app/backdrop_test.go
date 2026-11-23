@@ -15,7 +15,7 @@ import (
 // posters into the image cache.
 func storeArtwork(a *App, key string, img image.Image) {
 	if strings.HasPrefix(key, "fanart:") {
-		a.backdrops.store(key, newBackdrop(img))
+		a.backdrops.store(key, newBackdrop(img, image.Point{}))
 		return
 	}
 	a.images.store(key, paint.NewImageOp(img))
@@ -273,7 +273,7 @@ func TestBackdropSurvivesRefresh(t *testing.T) {
 		return linearLuminance(color.NRGBAModel.Convert(img.At(size.X-2, 2)).(color.NRGBA))
 	}
 	a.backdrops.reset()
-	grey := newBackdrop(uniformImage(64, 36, color.NRGBA{R: 0x80, G: 0x80, B: 0x80, A: 0xff}))
+	grey := newBackdrop(uniformImage(64, 36, color.NRGBA{R: 0x80, G: 0x80, B: 0x80, A: 0xff}), image.Point{})
 	release := blockBackdrop(t, a, "fanart:tt001", grey)
 	if l := art(renderBackdrop(t, a, size)); l < 0.9 {
 		t.Fatalf("refresh blanked the backdrop: luminance %.2f", l)
@@ -292,5 +292,54 @@ func TestBackdropSurvivesRefresh(t *testing.T) {
 	a.browse.backdrop.since = time.Time{}
 	if l := art(renderBackdrop(t, a, size)); l < 0.15 || l > 0.3 {
 		t.Fatalf("refetched artwork not shown: luminance %.2f", l)
+	}
+}
+
+func TestFanartSizeCoversWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		src, window, want image.Point
+	}{
+		{"unknown window", image.Pt(3840, 2160), image.Point{}, image.Pt(fanartMaxWidth, fanartMaxHeight)},
+		{"4K art, 1080p", image.Pt(3840, 2160), image.Pt(1920, 1080), image.Pt(1920, 1080)},
+		{"4K art, Deck", image.Pt(3840, 2160), image.Pt(1280, 800), image.Pt(1423, 800)},
+		{"4K art, 4K window", image.Pt(3840, 2160), image.Pt(3840, 2160), image.Pt(fanartMaxWidth, fanartMaxHeight)},
+		{"1080p art, 1080p", image.Pt(1920, 1080), image.Pt(1920, 1080), image.Pt(fanartMaxWidth, fanartMaxHeight)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := fanartSize(tc.src, tc.window); got != tc.want {
+				t.Fatalf("fanartSize(%v, %v) = %v, want %v", tc.src, tc.window, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFanartRefetchedWhenWindowGrows(t *testing.T) {
+	a := &App{backdrops: newWeightedAsyncCache[backdrop](2, 4, backdropCacheBudget, backdropWeight)}
+	art := uniformImage(64, 36, color.NRGBA{R: 0x80, G: 0x80, B: 0x80, A: 0xff})
+	cached := func() bool { _, ok := a.backdrops.cache["fanart:tt001"]; return ok }
+
+	a.trackFanartWindow(image.Pt(1280, 800)) // first known size: the baseline
+	storeArtwork(a, "fanart:tt001", art)
+	for _, tc := range []struct {
+		name   string
+		window image.Point
+		kept   bool
+		base   image.Point
+	}{
+		{"small growth", image.Pt(1300, 810), true, image.Pt(1280, 800)},
+		{"docked to a TV", image.Pt(1920, 1080), false, image.Pt(1920, 1080)},
+		{"shrink", image.Pt(1280, 800), true, image.Pt(1920, 1080)},
+		{"back to the baseline", image.Pt(1920, 1080), true, image.Pt(1920, 1080)},
+		{"4K window", image.Pt(3840, 2160), false, image.Pt(3840, 2160)},
+		{"beyond the cap", image.Pt(7680, 4320), true, image.Pt(3840, 2160)},
+	} {
+		if !cached() {
+			storeArtwork(a, "fanart:tt001", art)
+		}
+		a.trackFanartWindow(tc.window)
+		if cached() != tc.kept || a.fanartWindow != tc.base {
+			t.Fatalf("%s: kept=%v base=%v, want kept=%v base=%v", tc.name, cached(), a.fanartWindow, tc.kept, tc.base)
+		}
 	}
 }

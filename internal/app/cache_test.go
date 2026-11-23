@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"image"
+	"image/color"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -76,6 +77,43 @@ func TestAsyncCacheLimitsActiveFetchesAndStartsQueuedWork(t *testing.T) {
 	close(queuedRelease)
 	waitForCache(t, func() bool { return len(c.done) == 2 })
 	c.drain()
+}
+
+func TestAsyncCacheSweepDropsQueuedRequestsNoLongerShown(t *testing.T) {
+	c := newAsyncCache[int](1, 4)
+	release := make(chan struct{})
+	var starts atomic.Int32
+	fetch := func() (int, error) {
+		starts.Add(1)
+		<-release
+		return 1, nil
+	}
+	for _, key := range []string{"running", "shown", "gone"} {
+		c.fetch(key, fetch)
+	}
+	waitForCache(t, func() bool { return starts.Load() == 1 })
+	c.sweep() // the frame that asked for all three
+
+	// The next frame shows only "shown": "gone" is dropped from the queue,
+	// while "running" keeps its slot and its result.
+	c.get("shown")
+	c.sweep()
+	if len(c.pending) != 1 || c.pending[0].key != "shown" {
+		t.Fatalf("pending = %v, want only shown", c.pending)
+	}
+	if _, ok := c.loading["gone"]; ok {
+		t.Fatal("dropped request still marked loading, so it could never be fetched again")
+	}
+	close(release)
+	waitForCache(t, func() bool { c.drain(); return !c.busy() })
+	if starts.Load() != 2 {
+		t.Fatalf("started %d fetches, want running and shown only", starts.Load())
+	}
+	for _, key := range []string{"running", "shown"} {
+		if _, ok := c.get(key); !ok {
+			t.Fatalf("%s was not cached", key)
+		}
+	}
 }
 
 func TestAsyncCacheDropsOldestPendingRequest(t *testing.T) {
@@ -330,6 +368,62 @@ func TestArtworkLargeReductionDoesNotAlias(t *testing.T) {
 	}
 }
 
+func TestArtworkBoxShrinkKeepsJPEGColour(t *testing.T) {
+	for _, ratio := range []image.YCbCrSubsampleRatio{
+		image.YCbCrSubsampleRatio444, image.YCbCrSubsampleRatio422, image.YCbCrSubsampleRatio420,
+		image.YCbCrSubsampleRatio440, image.YCbCrSubsampleRatio411, image.YCbCrSubsampleRatio410,
+	} {
+		src := image.NewYCbCr(image.Rect(0, 0, 61, 47), ratio)
+		const y, cb, cr = 140, 90, 170
+		for i := range src.Y {
+			src.Y[i] = y
+		}
+		for i := range src.Cb {
+			src.Cb[i], src.Cr[i] = cb, cr
+		}
+		// An odd crop origin crosses chroma sample boundaries.
+		got := boxShrinkYCbCr(src, image.Rect(3, 5, 61, 47), 4)
+		r, g, b := color.YCbCrToRGB(y, cb, cr)
+		if got.Bounds().Size() != image.Pt(14, 10) {
+			t.Fatalf("%v: size %v, want 14×10", ratio, got.Bounds().Size())
+		}
+		for i := 0; i < len(got.Pix); i += 4 {
+			if got.Pix[i] != r || got.Pix[i+1] != g || got.Pix[i+2] != b || got.Pix[i+3] != 0xff {
+				t.Fatalf("%v: pixel %d = %v, want %v", ratio, i/4, got.Pix[i:i+4], []uint8{r, g, b, 0xff})
+			}
+		}
+	}
+}
+
+func TestArtworkLargeJPEGReductionDoesNotAlias(t *testing.T) {
+	src := image.NewYCbCr(image.Rect(0, 0, 960, 1440), image.YCbCrSubsampleRatio420)
+	for i := range src.Cb {
+		src.Cb[i], src.Cr[i] = 128, 128
+	}
+	for y := range 1440 {
+		for x := 0; x < 960; x += 3 {
+			src.Y[y*src.YStride+x] = 0xff
+		}
+	}
+	got, ok := resizeArtwork(src, rowPosterMaxSize.X, rowPosterMaxSize.Y).(*image.RGBA)
+	if !ok || got.Bounds().Size() != rowPosterMaxSize {
+		t.Fatalf("resized = %T %v, want RGBA %v", got, got.Bounds(), rowPosterMaxSize)
+	}
+	// Each pixel averages its block: a third of it white, give or take one
+	// stripe in ten, where point sampling would give 0 or 255.
+	sum := 0
+	for i := 0; i < len(got.Pix); i += 4 {
+		v := int(got.Pix[i])
+		if v < 85-26 || v > 85+26 {
+			t.Fatalf("pixel %d = %d, want about 85", i/4, v)
+		}
+		sum += v
+	}
+	if mean := sum / (len(got.Pix) / 4); mean < 85-3 || mean > 85+3 {
+		t.Fatalf("mean = %d, want 85", mean)
+	}
+}
+
 func TestWeightedCacheResetIgnoresStaleInFlightResult(t *testing.T) {
 	c := newWeightedAsyncCache[int](1, 1, 10, func(value int) int64 { return int64(value) })
 	started := make(chan struct{})
@@ -488,6 +582,7 @@ func TestAsyncCacheRetryBackoffIsCapped(t *testing.T) {
 func TestArtworkSchedulesRedrawForTransientRetry(t *testing.T) {
 	a := &App{
 		images:    newWeightedAsyncCache[paint.ImageOp](2, 0, imageCacheBudget, imageOpWeight),
+		thumbs:    newWeightedAsyncCache[paint.ImageOp](2, 0, thumbCacheBudget, imageOpWeight),
 		backdrops: newWeightedAsyncCache[backdrop](2, 0, backdropCacheBudget, backdropWeight),
 	}
 	a.images.retryable = isTransientArtworkError
@@ -511,11 +606,11 @@ func TestArtworkSchedulesRedrawForTransientRetry(t *testing.T) {
 	}
 
 	frame(func(gtx C) { a.fanart(gtx, "fanart:x", failure) })
-	frame(func(gtx C) { a.posterImage(gtx, "thumb:x", failure, 10, 0, posterMaxSize) })
+	frame(func(gtx C) { a.posterImage(gtx, a.images, "thumb:x", failure, 10, 0, posterMaxSize) })
 	resolve()
 	for _, draw := range []func(C){
 		func(gtx C) { a.fanart(gtx, "fanart:x", failure) },
-		func(gtx C) { a.posterImage(gtx, "thumb:x", failure, 10, 0, posterMaxSize) },
+		func(gtx C) { a.posterImage(gtx, a.images, "thumb:x", failure, 10, 0, posterMaxSize) },
 	} {
 		if at, ok := frame(draw); !ok || at.IsZero() {
 			t.Fatalf("transient artwork failure scheduled no redraw (%v, %v)", at, ok)

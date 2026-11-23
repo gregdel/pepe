@@ -43,9 +43,15 @@ type cacheWeightEntry struct {
 // A zero-value T stored in the cache is a failure sentinel. It is permanent
 // unless retryable reports the error as transient: then get treats the key as
 // unresolved again once its backoff has elapsed, so the caller fetches it anew.
+//
+// Only what is on screen waits for a fetch slot: sweep, called once per
+// frame, drops queued requests for keys the previous frame did not ask for
+// (get or fetch). Fetches already running finish, since on a high-latency
+// link cancelling them wastes the round trip already paid.
 type asyncCache[T any] struct {
 	cache       map[string]T
 	loading     map[string]uint64
+	wanted      map[string]bool // keys asked for since the last sweep
 	pending     []cacheRequest[T]
 	active      int
 	maxActive   int
@@ -74,6 +80,7 @@ func newWeightedAsyncCache[T any](maxActive, maxPending int, maxWeight int64, we
 	return &asyncCache[T]{
 		cache:      make(map[string]T),
 		loading:    make(map[string]uint64),
+		wanted:     make(map[string]bool),
 		maxActive:  maxActive,
 		maxPending: maxPending,
 		done:       make(chan cacheResult[T], maxActive),
@@ -108,6 +115,7 @@ func (c *asyncCache[T]) busy() bool {
 // val may be zero/nil if the fetch failed. A transient failure whose backoff
 // has elapsed is dropped and reported as unresolved, so the caller refetches.
 func (c *asyncCache[T]) get(key string) (T, bool) {
+	c.wanted[key] = true
 	val, ok := c.cache[key]
 	if retry, failed := c.retries[key]; ok && failed && !c.now().Before(retry.at) {
 		delete(c.cache, key)
@@ -133,6 +141,7 @@ func (c *asyncCache[T]) retryAt(key string) (time.Time, bool) {
 // Fetches run in goroutines and are limited by maxActive. Recent requests are
 // preferred when the pending queue is full.
 func (c *asyncCache[T]) fetch(key string, fetchFn func() (T, error)) {
+	c.wanted[key] = true
 	if _, ok := c.cache[key]; ok {
 		return // already resolved (success or permanent failure)
 	}
@@ -244,6 +253,22 @@ func (c *asyncCache[T]) drain() {
 			return
 		}
 	}
+}
+
+// sweep drops queued requests for keys not asked for since the last sweep,
+// then starts tracking the next frame.
+func (c *asyncCache[T]) sweep() {
+	kept := c.pending[:0]
+	for _, request := range c.pending {
+		if c.wanted[request.key] {
+			kept = append(kept, request)
+		} else if c.loading[request.key] == request.generation {
+			delete(c.loading, request.key)
+		}
+	}
+	clear(c.pending[len(kept):])
+	c.pending = kept
+	clear(c.wanted)
 }
 
 // recordRetry schedules the next attempt after a transient failure, doubling

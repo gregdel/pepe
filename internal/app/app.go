@@ -79,6 +79,7 @@ type SubtitlePopup struct {
 // fanart does not evict the posters on screen.
 const (
 	imageCacheBudget    int64 = 48 << 20
+	thumbCacheBudget    int64 = 8 << 20
 	backdropCacheBudget int64 = 80 << 20
 )
 
@@ -155,8 +156,11 @@ type App struct {
 	sseCancel        context.CancelFunc
 	sseDone          <-chan struct{}
 
-	// image cache (thumbs, fanarts, posters — all media types)
+	// posters for the preview and detail pages
 	images *asyncCache[paint.ImageOp]
+	// small posters for catalog rows, cached apart so the large posters do
+	// not evict the rows on screen
+	thumbs *asyncCache[paint.ImageOp]
 	// fanart for the catalog backdrop and detail pages
 	backdrops *asyncCache[backdrop]
 
@@ -179,6 +183,11 @@ type App struct {
 	// metric is the scaled metric of the last frame, for input handled
 	// outside layout.
 	metric unit.Metric
+	// windowSize is the window in pixels, sizing fanart textures
+	windowSize image.Point
+	// fanartWindow is the window size the cached fanart was sized for
+	// (see trackFanartWindow).
+	fanartWindow image.Point
 	// inMotion is set while the last frame drew a running transition.
 	inMotion bool
 
@@ -364,7 +373,8 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		th:               th,
 		leftList:         layout.List{Axis: layout.Vertical},
 		detailList:       layout.List{Axis: layout.Vertical},
-		images:           newWeightedAsyncCache[paint.ImageOp](3, 24, imageCacheBudget, imageOpWeight),
+		images:           newWeightedAsyncCache[paint.ImageOp](2, 4, imageCacheBudget, imageOpWeight),
+		thumbs:           newWeightedAsyncCache[paint.ImageOp](3, 24, thumbCacheBudget, imageOpWeight),
 		backdrops:        newWeightedAsyncCache[backdrop](2, 4, backdropCacheBudget, backdropWeight),
 		sseCh:            sseCh,
 		logs:             NewLogBuffer(),
@@ -383,9 +393,11 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		go app.forwardSSE(ctx, done)
 	}
 	app.images.retryable = isTransientArtworkError
+	app.thumbs.retryable = isTransientArtworkError
 	app.backdrops.retryable = isTransientArtworkError
 	if invalidate != nil {
 		app.images.onDone = invalidate
+		app.thumbs.onDone = invalidate
 		app.backdrops.onDone = invalidate
 	}
 	return app
@@ -617,6 +629,7 @@ func (a *App) drainChannels() {
 
 	// Drain all pending image fetch results.
 	a.images.drain()
+	a.thumbs.drain()
 	a.backdrops.drain()
 }
 
@@ -640,7 +653,7 @@ func (a *App) scrollDetail(dir int) {
 // before a screenshot. Call it from the
 // goroutine that runs Layout.
 func (a *App) Loading() bool {
-	return a.refreshing || a.inMotion || a.images.busy() || a.backdrops.busy()
+	return a.refreshing || a.inMotion || a.images.busy() || a.thumbs.busy() || a.backdrops.busy()
 }
 
 func (a *App) Layout(gtx C) D {
@@ -648,6 +661,8 @@ func (a *App) Layout(gtx C) D {
 	a.logsVisible.Store(false) // layoutLogs sets it while the page is drawn
 	gtx = scaleContext(gtx)
 	a.metric = gtx.Metric
+	a.windowSize = gtx.Constraints.Max
+	a.trackFanartWindow(a.windowSize)
 	a.inMotion = false
 	// Run the last frame's click first: its closure captured that frame's
 	// state, which refresh results or web commands may replace below.
@@ -655,6 +670,11 @@ func (a *App) Layout(gtx C) D {
 		a.pendingClick = nil
 		click()
 	}
+	// Fetch only the artwork the last frame drew. Sweep before draining:
+	// a finished fetch frees a slot, and only wanted requests may take it.
+	a.images.sweep()
+	a.thumbs.sweep()
+	a.backdrops.sweep()
 	a.drainChannels()
 	a.drainWebCommands()
 	paint.Fill(gtx.Ops, colorBg)

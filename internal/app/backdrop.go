@@ -96,11 +96,13 @@ type backdropState struct {
 	since           time.Time
 }
 
-// newBackdrop builds the display textures for one fanart image.
-func newBackdrop(img image.Image) backdrop {
+// newBackdrop builds the display textures for one fanart image shown in a
+// window of the given size (zero when unknown).
+func newBackdrop(img image.Image, window image.Point) backdrop {
 	ambient, veils := ambientImages(img)
+	size := fanartSize(img.Bounds().Size(), window)
 	return backdrop{
-		sharp:   paint.NewImageOp(resizeArtwork(img, fanartMaxWidth, fanartMaxHeight)),
+		sharp:   paint.NewImageOp(resizeArtwork(img, size.X, size.Y)),
 		ambient: paint.NewImageOp(ambient),
 		veils:   [2]paint.ImageOp{paint.NewImageOp(veils[0]), paint.NewImageOp(veils[1])},
 	}
@@ -128,6 +130,12 @@ func ambientImages(img image.Image) (ambient *image.NRGBA, veils [2]*image.NRGBA
 		ch := src.Dx() * h / boxW
 		crop.Min.Y += (src.Dy() - ch) / 2
 		crop.Max.Y = crop.Min.Y + ch
+	}
+	if src, ok := img.(*image.YCbCr); ok {
+		if k := min(crop.Dx()/boxW, crop.Dy()/h); k >= 2 {
+			img = boxShrinkYCbCr(src, crop, k)
+			crop = img.Bounds()
+		}
 	}
 	small := image.NewRGBA(image.Rect(0, 0, boxW, h))
 	draw.BiLinear.Scale(small, small.Bounds(), img, crop, draw.Src, nil)
@@ -259,6 +267,7 @@ func linearToSRGB8(v float32) uint8 {
 
 // fetchBackdrop loads fanart for both the catalog backdrop and detail pages.
 func (a *App) fetchBackdrop(key string, fetchFn func() (image.Image, error)) {
+	window := a.windowSize
 	a.backdrops.fetch(key, func() (backdrop, error) {
 		img, err := fetchFn()
 		if err != nil {
@@ -268,8 +277,47 @@ func (a *App) fetchBackdrop(key string, fetchFn func() (image.Image, error)) {
 		if img == nil {
 			return backdrop{}, nil
 		}
-		return newBackdrop(img), nil
+		return newBackdrop(img, window), nil
 	})
+}
+
+// fanartSize is the largest the sharp fanart is drawn: covering the window
+// (detail pages), capped at fanartMaxWidth×fanartMaxHeight. A texture
+// larger than the window only costs upload time and memory each time it is
+// shown. When the window grows, trackFanartWindow resets the cache so the
+// artwork is rebuilt for the new size.
+func fanartSize(src, window image.Point) image.Point {
+	limit := image.Pt(fanartMaxWidth, fanartMaxHeight)
+	if window.X <= 0 || window.Y <= 0 || src.X <= 0 || src.Y <= 0 {
+		return limit
+	}
+	scale := max(float64(window.X)/float64(src.X), float64(window.Y)/float64(src.Y))
+	if scale >= 1 {
+		return limit
+	}
+	cover := image.Pt(int(math.Ceil(float64(src.X)*scale)), int(math.Ceil(float64(src.Y)*scale)))
+	return image.Pt(min(cover.X, limit.X), min(cover.Y, limit.Y))
+}
+
+// trackFanartWindow drops the cached fanart once the window has grown well
+// past the size it was built for (a Steam Deck docked to a TV, a maximised
+// window), so it is refetched sharp. The catalog backdrop keeps showing the
+// old artwork until then (backdropState). The 1.25× step bounds the resets
+// during a drag-resize; growth beyond the fanart cap gains nothing.
+func (a *App) trackFanartWindow(window image.Point) {
+	if window.X <= 0 || window.Y <= 0 {
+		return
+	}
+	base := a.fanartWindow
+	if base.X <= 0 || base.Y <= 0 {
+		a.fanartWindow = window
+		return
+	}
+	grown := func(n, b, limit int) bool { return min(n, limit) > b*5/4 }
+	if grown(window.X, base.X, fanartMaxWidth) || grown(window.Y, base.Y, fanartMaxHeight) {
+		a.backdrops.reset()
+		a.fanartWindow = window
+	}
 }
 
 // fanartSource returns the cache key and loader of a title's fanart.

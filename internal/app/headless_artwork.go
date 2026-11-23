@@ -64,9 +64,12 @@ func renderMockArtwork(art *mockArtwork) []byte {
 type mockArtworkTransport struct {
 	arts    map[string]*mockArtwork
 	encoded map[string]func() []byte // renders each file once, on first success
+	link    *mockLink                // nil serves bodies at once
 
 	mu       sync.Mutex
 	attempts map[string]int
+	sent     map[string]int64 // body bytes read, by file
+	complete map[string]int   // bodies read to the end, by file
 }
 
 func newMockArtworkTransport(arts map[string]*mockArtwork) *mockArtworkTransport {
@@ -104,8 +107,87 @@ func (t *mockArtworkTransport) RoundTrip(req *http.Request) (*http.Response, err
 		return mockResponse(req, http.StatusServiceUnavailable, nil), nil
 	}
 
-	return mockResponse(req, http.StatusOK, t.encoded[name]()), nil
+	resp := mockResponse(req, http.StatusOK, t.encoded[name]())
+	if t.link != nil {
+		if err := t.link.wait(req, t.link.latency); err != nil {
+			return nil, err
+		}
+	}
+	resp.Body = &mockLinkBody{t: t, name: name, req: req, r: resp.Body}
+	return resp, nil
 }
+
+// mockLink models the network between pépé and Polochon: a round-trip
+// latency before each response, and one bandwidth shared by every body in
+// flight, as on a home uplink or Wi-Fi.
+type mockLink struct {
+	latency     time.Duration
+	bytesPerSec float64
+
+	mu   sync.Mutex
+	free time.Time // when the link has sent everything queued so far
+}
+
+// mockLinkChunk is how much a body sends per turn, so concurrent bodies
+// interleave on the link.
+const mockLinkChunk = 16 << 10
+
+// reserve queues n bytes on the link and returns when they have arrived.
+func (l *mockLink) reserve(n int) time.Time {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	start := l.free
+	if start.Before(now) {
+		start = now
+	}
+	l.free = start.Add(time.Duration(float64(n) / l.bytesPerSec * float64(time.Second)))
+	return l.free
+}
+
+func (l *mockLink) wait(req *http.Request, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-req.Context().Done():
+		return req.Context().Err()
+	}
+}
+
+// mockLinkBody sends a response body over the transport's link, if any, and
+// counts what was read.
+type mockLinkBody struct {
+	t    *mockArtworkTransport
+	name string
+	req  *http.Request
+	r    io.ReadCloser
+}
+
+func (b *mockLinkBody) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p[:min(len(p), mockLinkChunk)])
+	if link := b.t.link; n > 0 && link != nil {
+		if werr := link.wait(b.req, time.Until(link.reserve(n))); werr != nil {
+			return 0, werr
+		}
+	}
+	b.t.mu.Lock()
+	if b.t.sent == nil {
+		b.t.sent, b.t.complete = make(map[string]int64), make(map[string]int)
+	}
+	b.t.sent[b.name] += int64(n)
+	if err == io.EOF {
+		b.t.complete[b.name]++
+	}
+	b.t.mu.Unlock()
+	return n, err
+}
+
+func (b *mockLinkBody) Close() error { return b.r.Close() }
 
 func mockResponse(req *http.Request, status int, body []byte) *http.Response {
 	return &http.Response{
