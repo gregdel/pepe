@@ -658,8 +658,10 @@ type playbackRecord struct {
 type playbackTracker struct {
 	mu       sync.RWMutex
 	mediaKey string
-	entryID  int64 // mpv playlist entry ID; 0 until an event names it
-	pos      float64
+	entryID  int64   // mpv playlist entry ID; 0 until an event names it
+	pos      float64 // resume position: time-pos past minimumResumePosition
+	clock    float64 // latest time-pos, for the web remote's progress bar
+	paused   bool
 	duration float64
 	eof      bool
 	ended    bool             // the current entry's record is in records
@@ -703,6 +705,26 @@ func (t *playbackTracker) updatePos(pos float64) {
 	t.mu.Lock()
 	t.pos = pos
 	t.mu.Unlock()
+}
+
+func (t *playbackTracker) updateClock(pos float64) {
+	t.mu.Lock()
+	t.clock = pos
+	t.mu.Unlock()
+}
+
+func (t *playbackTracker) updatePaused(paused bool) {
+	t.mu.Lock()
+	t.paused = paused
+	t.mu.Unlock()
+}
+
+// progress is the playing entry's latest position, its duration (0 when
+// unknown) and whether it is paused.
+func (t *playbackTracker) progress() (pos, duration float64, paused bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.clock, t.duration, t.paused
 }
 
 func (t *playbackTracker) updateDuration(duration float64) {
@@ -815,7 +837,7 @@ func (t *playbackTracker) startEntry(id int64) {
 	t.mediaKey, t.entryID = t.keys[id], id
 	// The duration is kept: mpv sends no change when the next file has the
 	// same length, and a different length arrives as soon as it loads.
-	t.pos, t.eof, t.ended = 0, false, false
+	t.pos, t.clock, t.eof, t.ended = 0, 0, false, false
 	t.mu.Unlock()
 	if t.notify != nil {
 		t.notify() // the player title follows the entry
@@ -992,6 +1014,7 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 5, \"duration\"]}\n")
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 6, \"playlist-pos\"]}\n")
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 7, \"playlist-count\"]}\n")
+	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 8, \"pause\"]}\n")
 	pending := tracker.queuePlaylist(conn)
 	titles := map[string]string{}
 
@@ -1047,8 +1070,15 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 			}
 			tracker.updateTitle(title)
 		case "time-pos":
-			if pos, ok := ev.Data.(float64); ok && pos > minimumResumePosition {
-				tracker.updatePos(pos)
+			if pos, ok := ev.Data.(float64); ok && pos >= 0 {
+				tracker.updateClock(pos)
+				if pos > minimumResumePosition {
+					tracker.updatePos(pos)
+				}
+			}
+		case "pause":
+			if paused, ok := ev.Data.(bool); ok {
+				tracker.updatePaused(paused)
 			}
 		case "duration":
 			if duration, ok := ev.Data.(float64); ok && duration > 0 {

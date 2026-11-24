@@ -9,8 +9,8 @@
   <script src="/logs.js" defer></script>
 </head>
 <body>
-  <main class="logs-page">
-    <header class="logs-header">
+  <header class="logs-header">
+    <div class="logs-bar">
       <a class="icon-button" href="/" aria-label="Back to the remote" title="Back to the remote">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m15 6-6 6 6 6"/></svg>
       </a>
@@ -22,7 +22,9 @@
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
         <span>Copy</span>
       </button>
-    </header>
+    </div>
+  </header>
+  <main class="logs-page">
     <p id="truncated" class="logs-note" hidden>Older entries were dropped.</p>
     <p id="empty" class="logs-note" hidden>No log entries yet.</p>
     <ol id="entries" class="log-list" aria-label="Log entries"></ol>

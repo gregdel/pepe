@@ -13,44 +13,29 @@
     <section class="now" aria-labelledby="now-heading">
       <h2 id="now-heading" class="visually-hidden">Now playing</h2>
       <div class="now-info">
-        <span id="source" class="badge" hidden></span>
         <h1 id="now-playing">Nothing playing</h1>
         <p id="status">Connecting…</p>
-        <a id="logs-link" class="text-link" href="/logs" hidden>View logs</a>
+      </div>
+      <div id="progress" class="progress" hidden>
+        <input id="seek" type="range" min="0" max="0" step="any" value="0" aria-label="Playback position" disabled>
+        <div class="progress-times" aria-hidden="true"><span id="elapsed">0:00</span><span id="total">0:00</span></div>
       </div>
       <div class="playback-bar" role="group" aria-label="Playback controls">
-        <button data-command="seek-back" aria-label="Seek back 10 seconds" title="Seek back 10 seconds" disabled>
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M8 3 4 7l4 4M4 7h9a8 8 0 0 1 0 16" transform="translate(0 -1)"/>
-            <text x="11" y="17">10</text>
-          </svg>
+        <button data-command="playlist-prev" aria-label="Previous" title="Previous" hidden disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="solid" d="M6 5h2v14H6zM19 5v14L9 12z"/></svg>
         </button>
         <button class="playback-toggle" data-command="pause" aria-label="Pause or resume" title="Pause or resume" disabled>
           <svg viewBox="0 0 32 24" aria-hidden="true" focusable="false">
             <path class="solid" d="m3 5 10 7-10 7zM20 5h3v14h-3zM26 5h3v14h-3z"/>
           </svg>
         </button>
-        <button data-command="seek-forward" aria-label="Seek forward 10 seconds" title="Seek forward 10 seconds" disabled>
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="m16 3 4 4-4 4m4-4h-9a8 8 0 0 0 0 16" transform="translate(0 -1)"/>
-            <text x="13" y="17">10</text>
-          </svg>
+        <button data-command="playlist-next" aria-label="Next" title="Next" hidden disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="solid" d="M16 5h2v14h-2zM5 5v14l10-7z"/></svg>
         </button>
         <button class="playback-stop" data-command="stop" aria-label="Stop playback" title="Stop playback" disabled>
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <rect class="solid" x="5" y="5" width="14" height="14" rx="2"/>
           </svg>
-        </button>
-      </div>
-      <div id="playlist" class="playlist" role="group" aria-label="Playlist" hidden>
-        <button data-command="playlist-prev" aria-label="Previous in playlist" title="Previous in playlist" disabled>
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="solid" d="M6 5h2v14H6zM19 5v14L9 12z"/></svg>
-          <span>Previous</span>
-        </button>
-        <span id="playlist-pos"></span>
-        <button data-command="playlist-next" aria-label="Next in playlist" title="Next in playlist" disabled>
-          <span>Next</span>
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="solid" d="M16 5h2v14h-2zM5 5v14l10-7z"/></svg>
         </button>
       </div>
     </section>
@@ -72,7 +57,7 @@
         </ul>
         <button type="submit" class="primary">
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="solid" d="M8 5v14l11-7z"/></svg>
-          <span id="play-label">Play on TV</span>
+          <span id="play-label">Play</span>
         </button>
       </form>
     </section>
@@ -99,14 +84,6 @@
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
           <span>Back</span>
         </button>
-        <button data-action="home">
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 11 12 3l9 8M5 9.5V21h5v-6h4v6h5V9.5"/></svg>
-          <span>Home</span>
-        </button>
-        <button data-action="section">
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4m4 4H7"/></svg>
-          <span>Movies / Shows</span>
-        </button>
         <button data-action="subtitles">
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h4m2 0h4"/></svg>
           <span>Subtitles</span>
@@ -119,8 +96,9 @@
     </section>
 
     <footer class="footer">
-      <a class="icon-button" href="/logs" aria-label="Logs" title="Logs">
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="solid" d="M20 8h-2.81a5.985 5.985 0 0 0-1.82-1.96L17 4.41 15.59 3l-2.17 2.17a6.002 6.002 0 0 0-2.83 0L8.41 3 7 4.41l1.62 1.63C7.88 6.55 7.26 7.22 6.81 8H4v2h2.09c-.05.33-.09.66-.09 1v1H4v2h2v1c0 .34.04.67.09 1H4v2h2.81c1.04 1.79 2.97 3 5.19 3s4.15-1.21 5.19-3H20v-2h-2.09c.05-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.04-.67-.09-1H20V8zm-6 8h-4v-2h4v2zm0-4h-4v-2h4v2z"/></svg>
+      <a class="footer-link" href="/logs">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6"/></svg>
+        <span>Logs</span>
       </a>
     </footer>
 

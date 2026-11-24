@@ -3,21 +3,25 @@
 const app = document.getElementById("app");
 const nowPlaying = document.getElementById("now-playing");
 const statusText = document.getElementById("status");
-const source = document.getElementById("source");
 const feedback = document.getElementById("feedback");
 const urlInput = document.getElementById("url");
 const playLabel = document.getElementById("play-label");
 const siteChips = document.querySelectorAll("[data-site]");
 const commandButtons = document.querySelectorAll("[data-command]");
-const sectionButton = document.querySelector('[data-action="section"]');
 const watchedButton = document.querySelector('[data-action="watched"]');
-const logsLink = document.getElementById("logs-link");
-const playlist = document.getElementById("playlist");
-const playlistPos = document.getElementById("playlist-pos");
+const progress = document.getElementById("progress");
+const seek = document.getElementById("seek");
+const elapsed = document.getElementById("elapsed");
+const total = document.getElementById("total");
 let requests = Promise.resolve();
 let pending = 0;
 let toastTimer = 0;
 let shownCommandError = "";
+// The last polled position, advanced locally between polls while playing.
+let clock = {position: 0, duration: 0, paused: true, at: 0, entry: 0};
+let dragging = false;
+let seekHold = null; // {target, until}: ignore polls until mpv reaches a seek
+let pollTimer = 0, polling = false;
 
 const sites = [
   {name: "YouTube", hosts: ["youtube.com", "youtu.be", "youtube-nocookie.com"]},
@@ -73,7 +77,7 @@ function siteFor(link) {
 function updateSite() {
   const site = urlInput.value.trim() ? siteFor(linkFrom(urlInput.value)) : null;
   siteChips.forEach(chip => chip.classList.toggle("match", site !== null && chip.dataset.site === site.name));
-  playLabel.textContent = site ? "Play on TV · " + site.name : "Play on TV";
+  playLabel.textContent = site ? "Play · " + site.name : "Play";
 }
 
 function press() {
@@ -106,7 +110,7 @@ document.getElementById("url-form").addEventListener("submit", event => {
 document.addEventListener("keydown", event => {
   // Preserve normal editor, button activation, and Tab behavior.
   if (event.target.matches("input, textarea, select, [contenteditable]") || event.ctrlKey || event.altKey || event.metaKey) return;
-  const actions = {ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", Escape: "back", Home: "home"};
+  const actions = {ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", Escape: "back"};
   if (actions[event.key]) {
     event.preventDefault();
     send("/api/action", {action: actions[event.key]});
@@ -118,9 +122,50 @@ function setText(element, text) {
   element.hidden = text === "";
 }
 
-// The now-playing card moves first while playing, but never while the link
-// field is in use: reordering would move it under the user's finger.
-function render(state, title, status, badge, controls, pos = 0, count = 0) {
+function timestamp(seconds) {
+  seconds = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(seconds / 3600), m = Math.floor(seconds / 60) % 60, s = String(seconds % 60).padStart(2, "0");
+  return h ? h + ":" + String(m).padStart(2, "0") + ":" + s : m + ":" + s;
+}
+
+function clockPosition() {
+  const advanced = clock.paused ? 0 : (performance.now() - clock.at) / 1000;
+  return Math.min(clock.position + advanced, clock.duration);
+}
+
+function drawProgress(position) {
+  seek.value = position;
+  seek.style.setProperty("--progress", (clock.duration > 0 ? position / clock.duration * 100 : 0) + "%");
+  setText(elapsed, timestamp(position));
+  seek.setAttribute("aria-valuetext", timestamp(position) + " of " + timestamp(clock.duration));
+}
+
+// Seek once on release, not while dragging: mpv's control queue is short.
+seek.addEventListener("pointerdown", () => { dragging = true; });
+seek.addEventListener("input", () => {
+  dragging = true;
+  drawProgress(Number(seek.value));
+});
+seek.addEventListener("change", () => {
+  dragging = false;
+  const target = Number(seek.value);
+  clock.position = target;
+  clock.at = performance.now();
+  seekHold = {target, until: clock.at + 2000};
+  press();
+  send("/api/player", {command: "seek", position: target, playlist_pos: clock.entry});
+});
+// A release without a change (a tap on the thumb) fires no change event.
+for (const type of ["pointerup", "pointercancel"]) {
+  seek.addEventListener(type, () => { window.setTimeout(() => { dragging = false; }, 0); });
+}
+window.setInterval(() => {
+  if (!progress.hidden && !dragging && !document.hidden) drawProgress(clockPosition());
+}, 250);
+
+// The now-playing card grows while playing, but never while the link field is
+// in use: the resize would move the field under the user's finger.
+function render(state, title, status, controls, pos = 0, count = 0) {
   app.dataset.state = state;
   const layout = state === "running" || state === "offline" ? "playing" : "idle";
   if (app.dataset.layout !== layout && document.activeElement !== urlInput && !urlInput.value) {
@@ -128,30 +173,53 @@ function render(state, title, status, badge, controls, pos = 0, count = 0) {
   }
   setText(nowPlaying, title);
   setText(statusText, status);
-  setText(source, badge);
-  // Any multi-entry mpv playlist: a show's queued episodes or a web playlist.
-  playlist.hidden = state !== "running" || count < 2;
-  playlistPos.textContent = pos > 0 ? pos + " / " + count : "";
-  commandButtons.forEach(button => { button.disabled = !controls(button.dataset.command); });
-  sectionButton.disabled = state === "running";
+  progress.hidden = state !== "running" || clock.duration <= 0;
+  seek.max = clock.duration;
+  seek.disabled = !controls("seek");
+  setText(total, timestamp(clock.duration));
+  if (!progress.hidden && !dragging) drawProgress(clockPosition());
+  // Previous/Next exist for any multi-entry mpv playlist: a show's queued
+  // episodes or a web playlist.
+  commandButtons.forEach(button => {
+    const command = button.dataset.command;
+    if (command.startsWith("playlist-")) button.hidden = state !== "running" || count < 2;
+    button.disabled = !controls(command);
+  });
   watchedButton.disabled = state === "running";
-  logsLink.hidden = state !== "error";
 }
 
+function updateClock(status) {
+  const position = Number(status.position) || 0, now = performance.now();
+  const entry = status.playlist_pos || 0;
+  if (seekHold && entry === clock.entry && now < seekHold.until && Math.abs(position - seekHold.target) > 2) {
+    clock.paused = !!status.paused; // keep the seek target until mpv reaches it
+  } else {
+    seekHold = null;
+    clock = {position, paused: !!status.paused, at: now, entry};
+  }
+  clock.duration = Number(status.duration) || 0;
+}
+
+// Poll only while the page is visible, and at once when it comes back.
 async function poll() {
+  polling = true;
+  pollTimer = 0;
   try {
     const response = await fetch("/api/status", {cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(6000)});
     if (!response.ok) throw new Error("Disconnected");
     const status = await response.json();
     const running = status.state === "Running";
     const title = running ? (status.title || "Untitled video") : "Nothing playing";
-    let text = running ? "" : (status.error || "");
-    if (status.stopping) text = "Stopping…";
-    if (status.queued_commands) text += (text ? " · " : "") + status.queued_commands + " queued";
-    const state = running ? "running" : status.state === "Error" ? "error" : "idle";
-    const badge = running ? (status.source === "web" ? "Link" : "Library") : "";
     const pos = status.playlist_pos || 0, count = status.playlist_count || 0;
-    render(state, title, text, badge, command => {
+    const parts = [];
+    if (running && pos > 0 && count > 1) parts.push((status.source === "web" ? "Video " : "Episode ") + pos + " of " + count);
+    if (!running && status.error) parts.push(status.error);
+    if (status.stopping) parts.push("Stopping…");
+    if (status.queued_commands) parts.push(status.queued_commands + " queued");
+    const state = running ? "running" : status.state === "Error" ? "error" : "idle";
+    if (running) updateClock(status);
+    else clock.duration = 0;
+    render(state, title, parts.join(" · "), command => {
       if (!running || (status.stopping && command !== "stop")) return false;
       if (command === "playlist-prev") return pos > 1;
       if (command === "playlist-next") return pos > 0 && pos < count;
@@ -161,10 +229,20 @@ async function poll() {
     if (status.command_error && status.command_error !== shownCommandError) toast(status.command_error, true);
     shownCommandError = status.command_error || "";
   } catch (_) {
-    render("offline", "Can't reach pépé", "Check that pépé is running on the TV.", "", () => false);
+    clock.duration = 0;
+    render("offline", "Can't reach pépé", "Check that pépé is running on the TV.", () => false);
     document.title = "pépé";
   } finally {
-    window.setTimeout(poll, 1000);
+    polling = false;
+    if (!document.hidden) pollTimer = window.setTimeout(poll, 1000);
   }
 }
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    window.clearTimeout(pollTimer);
+    pollTimer = 0;
+  } else if (!polling && !pollTimer) {
+    poll();
+  }
+});
 poll();

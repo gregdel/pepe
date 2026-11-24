@@ -35,28 +35,22 @@ body {
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
-/* Layout: one column on phones; the remote moves to its own column on wide
-   screens. data-layout puts the now-playing card first while playing. */
+/* Layout: one phone-width column on every screen, so the remote looks the
+   same everywhere. The now-playing card always leads; data-layout only
+   changes its size. */
 main {
   display: grid; gap: 1rem; align-items: start;
   max-width: 30rem; margin: 0 auto;
   padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
     calc(5rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
-  grid-template-areas: "link" "now" "remote" "footer";
+  grid-template-areas: "now" "link" "remote" "footer";
 }
-main[data-layout="playing"] { grid-template-areas: "now" "link" "remote" "footer"; }
 .now { grid-area: now; }
 .link { grid-area: link; }
 .remote { grid-area: remote; }
 .footer { grid-area: footer; display: flex; justify-content: center; }
 @media (min-width: 720px) {
-  main {
-    max-width: 62rem; gap: 1.5rem; padding-top: max(2rem, env(safe-area-inset-top));
-    grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
-    grid-template-rows: auto 1fr auto;
-    grid-template-areas: "link remote" "now remote" ". footer";
-  }
-  main[data-layout="playing"] { grid-template-areas: "now remote" "link remote" ". footer"; }
+  main { gap: 1.5rem; padding-top: max(2rem, env(safe-area-inset-top)); }
 }
 
 section {
@@ -92,12 +86,10 @@ h1 {
 }
 #status { margin: .2rem 0 0; color: var(--subtle); font-size: .9rem; line-height: 1.4; overflow-wrap: anywhere; }
 main[data-state="error"] #status, main[data-state="offline"] #status { color: var(--error); }
-.badge {
-  display: inline-block; margin-bottom: .5rem; padding: .2rem .6rem; border-radius: var(--radius-row);
-  background: var(--surface-2); color: var(--primary);
-  font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
-}
-main[data-layout="idle"] .playback-bar, main[data-state="offline"] .playback-bar { display: none; }
+/* The progress bar follows data-layout like the buttons, so a card held
+   compact while a link is typed never shows half its controls. */
+main[data-layout="idle"] .playback-bar, main[data-state="offline"] .playback-bar,
+main[data-layout="idle"] .progress { display: none; }
 main[data-layout="idle"] .now { padding: 1rem 1.25rem; }
 main[data-layout="idle"][data-state="idle"] h1 { color: var(--subtle); font-weight: 400; }
 main[data-layout="playing"] .now {
@@ -108,16 +100,44 @@ main[data-layout="playing"] h1 { font-size: 1.5rem; font-weight: 700; }
 .playback-bar { display: flex; align-items: center; justify-content: center; gap: .75rem; }
 .playback-bar button { flex: 0 0 3.5rem; height: 3.5rem; padding: 0; border-radius: 50%; }
 .playback-bar svg { width: 1.75rem; height: 1.75rem; }
-.playback-bar text { font-size: 8px; font-weight: 700; text-anchor: middle; }
 .playback-bar .playback-toggle {
   flex-basis: 4.5rem; height: 4.5rem; background: var(--select-bg); border-color: var(--primary); color: var(--select-fg);
 }
 .playback-toggle svg { width: 2.25rem; }
 .playback-bar .playback-stop { margin-left: .25rem; border-radius: var(--radius-row); }
-main[data-layout="idle"] .playlist, main[data-state="offline"] .playlist { display: none; }
-.playlist { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: .75rem; }
-.playlist button { padding: .5rem .75rem; }
-#playlist-pos { color: var(--subtle); font-size: .95rem; font-variant-numeric: tabular-nums; }
+/* Progress: a native range, so touch dragging, keyboard and screen readers
+   work; --progress (set by remote.js) paints the elapsed part of the track. */
+.progress { display: grid; gap: .1rem; }
+.progress input[type="range"] {
+  -webkit-appearance: none; appearance: none; display: block;
+  width: 100%; height: 2.25rem; margin: 0; padding: 0;
+  border: 0; border-radius: 0; background: transparent; cursor: pointer;
+}
+.progress input[type="range"]:disabled { cursor: default; opacity: .4; }
+.progress input[type="range"]::-webkit-slider-runnable-track {
+  height: .375rem; border-radius: .375rem;
+  background: linear-gradient(var(--primary), var(--primary)) 0 / var(--progress, 0%) 100% no-repeat, var(--outline-strong);
+}
+.progress input[type="range"]::-moz-range-track {
+  height: .375rem; border-radius: .375rem;
+  background: linear-gradient(var(--primary), var(--primary)) 0 / var(--progress, 0%) 100% no-repeat, var(--outline-strong);
+}
+.progress input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 1.25rem; height: 1.25rem; margin-top: -.4375rem;
+  border: 0; border-radius: 50%; background: var(--fg);
+  transition: transform .1s;
+}
+.progress input[type="range"]::-moz-range-thumb {
+  width: 1.25rem; height: 1.25rem; border: 0; border-radius: 50%;
+  background: var(--fg); transition: transform .1s;
+}
+.progress input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.2); }
+.progress input[type="range"]:active::-moz-range-thumb { transform: scale(1.2); }
+.progress input[type="range"]:focus { border: 0; }
+.progress-times {
+  display: flex; justify-content: space-between; color: var(--subtle);
+  font-size: .85rem; font-variant-numeric: tabular-nums;
+}
 
 /* Link */
 #url-form { display: grid; gap: .9rem; }
@@ -158,7 +178,7 @@ input:focus { border-color: var(--primary); }
 }
 .dpad .ok:not(:disabled):active { background: var(--select-pressed); }
 @media (hover: hover) { .dpad .ok:not(:disabled):hover { background: var(--select-pressed); } }
-.keys { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .5rem; }
+.keys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; }
 .keys button {
   flex-direction: column; gap: .35rem; min-height: 4.5rem; padding: .6rem .25rem;
   font-size: .8rem; line-height: 1.2; text-align: center;
@@ -173,16 +193,32 @@ input:focus { border-color: var(--primary); }
 }
 .icon-button:active { background: var(--pressed); color: var(--fg); }
 @media (hover: hover) { .icon-button:hover { background: var(--surface-2); color: var(--fg); } }
-.icon-button:focus-visible, .text-link:focus-visible { outline: 3px solid var(--primary); outline-offset: 3px; }
-.text-link { display: inline-block; margin-top: .4rem; color: var(--primary); font-size: .9rem; font-weight: 500; }
+/* Full width like the cards above it, and drawn as one. */
+.footer-link {
+  display: flex; align-items: center; justify-content: center; gap: .5rem;
+  width: 100%; min-height: 3.25rem; padding: .5rem 1.1rem; background: var(--surface);
+  border: 1px solid var(--outline); border-radius: var(--radius-card); color: var(--subtle);
+  font-size: .9rem; font-weight: 500; text-decoration: none;
+  transition: background-color .15s, color .15s;
+}
+.footer-link svg { width: 1.25rem; height: 1.25rem; }
+.footer-link:active { background: var(--pressed); color: var(--fg); }
+@media (hover: hover) { .footer-link:hover { background: var(--surface-2); color: var(--fg); } }
+.icon-button:focus-visible, .footer-link:focus-visible { outline: 3px solid var(--primary); outline-offset: 3px; }
 
 /* Logs page */
-main.logs-page { display: block; max-width: 56rem; padding-top: 0; }
+/* The bar spans the screen edge to edge; its content lines up with the list. */
+main.logs-page { display: block; max-width: 56rem; padding-top: .25rem; }
 .logs-header {
-  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: .75rem;
-  margin: 0 -.25rem; padding: max(.75rem, env(safe-area-inset-top)) .25rem .75rem;
-  background: var(--bg); border-bottom: 1px solid var(--outline);
+  position: sticky; top: 0; z-index: 1;
+  padding: max(.5rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) .5rem max(1rem, env(safe-area-inset-left));
+  background: var(--surface); border-bottom: 1px solid var(--outline);
 }
+/* main.logs-page's content width: 56rem less its 1rem side padding. */
+.logs-bar { display: flex; align-items: center; gap: .5rem; max-width: 54rem; margin: 0 auto; }
+.logs-bar .icon-button { margin-left: -.75rem; } /* chevron over the entries' text */
+.logs-bar #copy { min-height: 2.75rem; padding: .5rem .9rem; font-size: .9rem; }
+.logs-bar #copy svg { width: 1.25rem; height: 1.25rem; }
 .logs-title { flex: 1; min-width: 0; }
 .logs-title h1 { font-size: 1.25rem; font-weight: 700; }
 #log-count { margin: .1rem 0 0; color: var(--subtle); font-size: .85rem; }
@@ -213,7 +249,6 @@ main.logs-page { display: block; max-width: 56rem; padding-top: 0; }
   main { gap: .75rem; padding-left: .75rem; padding-right: .75rem; }
   section { padding: 1rem; }
   .playback-bar { gap: .4rem; }
-  .keys { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

@@ -389,10 +389,30 @@ for key in pairs(forced) do
     assert(repeatable[key] == (key == "F9" or key == "F10"),
         "only continuous seek bindings should repeat: " .. key)
 end
-forced.F9()
-assert(commands[#commands] == "seek -10")
-forced.F10()
-assert(commands[#commands] == "seek 10")
+-- Media keys take mpv's complex key events: act on press, ignore release.
+local down, held, up = {event = "down"}, {event = "repeat"}, {event = "up"}
+local function media(key, event, want)
+    local before = #commands
+    forced[key](event)
+    assert(#commands == before + (want and 1 or 0) and (not want or commands[#commands] == want),
+        key .. " " .. event.event .. " sent " .. tostring(commands[#commands]))
+end
+-- A single file: Rewind/Fast forward seek and repeat; Previous/Next change chapter.
+media("F9", down, "seek -10")
+media("F9", held, "seek -10")
+media("F10", down, "seek 10")
+media("F11", down, "add chapter -1")
+media("F12", down, "add chapter 1")
+media("F10", up)
+-- A playlist: all four change entry once per press, never on repeat.
+props["playlist-count"], props["playlist-pos-1"] = 8, 3
+media("F9", down, "playlist-prev")
+media("F10", down, "playlist-next")
+media("F11", down, "playlist-prev")
+media("F12", down, "playlist-next")
+media("F10", held)
+media("F10", up)
+props["playlist-count"], props["playlist-pos-1"] = nil, nil
 forced.s()
 assert(commands[#commands] == "cycle sub")
 forced.ENTER()
@@ -545,7 +565,25 @@ set("pause", true)
 at(108, 340, 7, "}{\\b0\\1c&HABA0A0&}3 / 8  ·  {\\b1\\1c&HECE8E8&}ESCAPED_TITLE")
 contains("PAUSED")
 events.shutdown()
+
+-- A playlist names the started entry in the startup panel, and the CEC
+-- hints add Rewind/Fast forward for previous/next.
+options = {controls = "hdmi-cec", help = true}
+observers, events, bindings, forced, messages = {}, {}, {}, {}, {}
+props.pause = false
+dofile(script)
+events["file-loaded"]()
+remote_bars()
+contains("Back Return  ·  « » Previous/next")
+at(640, 282, 8, "}{\\b0\\1c&HABA0A0&}3 / 8  ·  {\\b1\\1c&HECE8E8&}ESCAPED_TITLE")
+events.shutdown()
 props["playlist-count"], props["playlist-pos-1"] = nil, nil
+observers, events, bindings, forced, messages = {}, {}, {}, {}, {}
+dofile(script)
+events["file-loaded"]()
+absent("Previous/next")
+absent("ESCAPED_TITLE")
+events.shutdown()
 
 os.time, os.date = real_time, real_date
 print("Playback OSD tests passed")

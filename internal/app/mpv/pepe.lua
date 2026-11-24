@@ -75,9 +75,23 @@ local function playlist_position()
     return string.format("%d / %d", pos, count)
 end
 
+-- A queued show's position leads the title, e.g. "3 / 8 · Title".
+local function heading(title)
+    local value = escape(title)
+    local position_label = playlist_position()
+    if position_label then
+        value = string.format("{\\b0\\1c&H%s&}%s  ·  {\\b1\\1c&H%s&}",
+            opts.color_subtle, position_label, opts.color_fg) .. value
+    end
+    return value
+end
+
 local function hints(events, left, center, right, top)
     if opts.controls == "hdmi-cec" then
-        text(events, center, top, 8, 22, opts.color_fg, "OK Pause/resume  ·  Back Return")
+        local line = "OK Pause/resume  ·  Back Return"
+        -- Roboto has no media symbols; « » stand for Rewind/Fast forward.
+        if playlist_position() then line = line .. "  ·  « » Previous/next" end
+        text(events, center, top, 8, 22, opts.color_fg, line)
         -- One row in the same order as the remote, with bars above the labels
         -- so all actions also fit in narrow windows. Red (w) is inert here.
         local buttons = {
@@ -139,7 +153,13 @@ render = function()
     local panel = opts.color_panel
     local events = {}
     if not paused or not opts.panel then
-        rectangle(events, left - 28, top, right + 28, top + 160, panel, "00")
+        -- In a playlist, name the entry that just started or was skipped to.
+        local panel_top = playlist_position() and top - 56 or top
+        rectangle(events, left - 28, panel_top, right + 28, top + 160, panel, "00")
+        if panel_top < top then
+            text(events, center, top - 36, 8, 26, fg, heading(title),
+                string.format("\\b1\\clip(%d,%d,%d,%d)", left, panel_top, right, top))
+        end
         hints(events, left, center, right, top + 20)
         text(events, center, top + 100, 8, 22, muted, seek_hint)
         local data = table.concat(events, "\n")
@@ -158,14 +178,9 @@ render = function()
         end
     end
     rectangle(events, left - 28, top, right + 28, bottom, panel, "00")
-    -- A long title is single-line and clipped before the pause badge. A
-    -- queued show's position leads it, in the same event so it never overlaps.
-    local heading = escape(title)
-    local position_label = playlist_position()
-    if position_label then
-        heading = string.format("{\\b0\\1c&H%s&}%s  ·  {\\b1\\1c&H%s&}", muted, position_label, fg) .. heading
-    end
-    text(events, left, top + 22, 7, 30, fg, heading,
+    -- A long title is single-line and clipped before the pause badge. The
+    -- playlist position shares its event, so the two never overlap.
+    text(events, left, top + 22, 7, 30, fg, heading(title),
         string.format("\\b1\\clip(%d,%d,%d,%d)", left, top, right - 160, top + 64))
     rectangle(events, right - 128, top + 29, right - 123, top + 49, accent)
     rectangle(events, right - 118, top + 29, right - 113, top + 49, accent)
@@ -331,14 +346,29 @@ if opts.controls == "hdmi-cec" then
         {"F4", opts.volume_keys and "osd-msg-bar add volume -5" or "ignore", {repeatable = opts.volume_keys}},
         {"F5", "set pause no"}, {"F6", "set pause yes"},
         {"F7", "cycle pause"}, {"F8", "quit"},
-        {"F9", "seek -10", {repeatable = true}},
-        {"F10", "seek 10", {repeatable = true}},
-        {"F11", "add chapter -1"}, {"F12", "add chapter 1"},
     }
     for _, binding in ipairs(bindings) do
         local command = binding[2]
         mp.add_forced_key_binding(binding[1], "cec-" .. binding[1],
             function() mp.command(command) end, binding[3])
+    end
+    -- Most TV remotes only send Rewind/Fast forward. In a playlist they and
+    -- Previous/Next change entry, once per press so holding never skips
+    -- several episodes; otherwise they seek (repeating) or change chapter.
+    local media_keys = {
+        {"F9", "seek -10", "playlist-prev", true}, {"F10", "seek 10", "playlist-next", true},
+        {"F11", "add chapter -1", "playlist-prev", false}, {"F12", "add chapter 1", "playlist-next", false},
+    }
+    for _, key in ipairs(media_keys) do
+        local single, playlist = key[2], key[3]
+        mp.add_forced_key_binding(key[1], "cec-" .. key[1], function(event)
+            if event.event == "up" then return end
+            if not playlist_position() then
+                mp.command(single)
+            elseif event.event ~= "repeat" then
+                mp.command(playlist)
+            end
+        end, {complex = true, repeatable = key[4]})
     end
     mp.add_forced_key_binding("r", "cec-help", toggle_help)
     mp.add_forced_key_binding("TAB", "cec-subtitles", select_subtitles)

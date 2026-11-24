@@ -271,6 +271,8 @@ these files.
   it is unsupported) and has no literal colours except shadow black. Primary buttons are the focus fill, accent text and focus
   outlines are `colorPrimary`, and a matched or current chip uses the
   current-item look (`surface-2` with `colorPrimary`).
+  The playback progress bar matches the OSD's: a `colorPrimary` fill on an
+  `outline-strong` track with a `colorFg` thumb.
 - **QR code** (Web remote page): black on white for scanning, the one
   intentionally bright surface in the UI.
 

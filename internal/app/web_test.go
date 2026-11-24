@@ -35,6 +35,8 @@ func TestWebPageControlsAndCopy(t *testing.T) {
 		"Right opens details. OK plays from details.",
 		"Replaces current playback. Website support depends on your existing mpv setup.",
 		"HTTP or HTTPS video URL", "pépé remote", `class="brand"`,
+		`data-action="home"`, `data-action="section"`, `class="badge"`,
+		`data-command="seek-back"`, `data-command="seek-forward"`,
 	} {
 		if strings.Contains(page, removed) {
 			t.Errorf("page still contains %q", removed)
@@ -44,9 +46,10 @@ func TestWebPageControlsAndCopy(t *testing.T) {
 		`<title>pépé</title>`, `placeholder="Paste a video link"`, `data-site="arte.tv"`,
 		`aria-label="Video link"`, `+ direct links`, `id="url-form"`, `data-action="right"`, `data-command="stop"`,
 		`id="now-playing"`, `class="playback-bar"`, `aria-label="Playback controls"`,
-		`aria-label="Seek back 10 seconds"`, `aria-label="Pause or resume"`,
-		`aria-label="Seek forward 10 seconds"`, `aria-label="Stop playback"`,
+		`aria-label="Pause or resume"`, `aria-label="Stop playback"`,
 		`data-command="playlist-prev"`, `data-command="playlist-next"`,
+		`id="seek" type="range"`, `aria-label="Playback position"`,
+		`data-action="back"`, `data-action="subtitles"`, `data-action="watched"`, `href="/logs"`,
 	} {
 		if !strings.Contains(page, retained) {
 			t.Errorf("page is missing %q", retained)
@@ -432,6 +435,63 @@ func TestWebStatusReportsPlaylist(t *testing.T) {
 		if !command.valid() || len(command.args()) != 1 || command.args()[0] != want {
 			t.Fatalf("%s args = %v", command, command.args())
 		}
+	}
+}
+
+// The progress bar reads the tracker at request time: time-pos does not wake
+// the event loop, so a published snapshot would be stale.
+func TestWebStatusReportsLiveProgress(t *testing.T) {
+	a := &App{webUI: &webUI{commands: make(chan webCommand, webQueueSize)}}
+	a.playerStatus = PlayerStatusRunning
+	a.playerTracker = newPlaybackTracker("key", nil)
+	a.playerTracker.startEntry(1) // the launched file
+	a.publishWebStatus()
+	a.playerTracker.updateDuration(3600)
+	a.playerTracker.updateClock(2.5) // below the resume threshold
+	a.playerTracker.updatePaused(true)
+	var status webStatus
+	if err := json.Unmarshal(webRequest(a.webUI.handler(), "GET", "/api/status", "").Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Position != 2.5 || status.Duration != 3600 || !status.Paused {
+		t.Fatalf("progress = %v / %v paused=%t", status.Position, status.Duration, status.Paused)
+	}
+	if _, pos, _ := a.playerTracker.snapshot(); pos != 0 {
+		t.Fatal("the progress clock changed the resume position")
+	}
+	a.playerTracker.startEntry(2)
+	if pos, _, _ := a.playerTracker.progress(); pos != 0 {
+		t.Fatal("a new entry kept the previous entry's position")
+	}
+}
+
+func TestWebSeek(t *testing.T) {
+	a := &App{webUI: &webUI{commands: make(chan webCommand, webQueueSize)}}
+	a.playerStatus = PlayerStatusRunning
+	a.playerSession = 1
+	a.playerTracker = newPlaybackTracker("key", nil)
+	a.playerTracker.updatePlaylist("playlist-count", 8)
+	a.playerTracker.updatePlaylist("playlist-pos", 2)
+	a.playerControls = &playerControls{commands: make(chan []any, 16)}
+	a.publishWebStatus()
+	handler := a.webUI.handler()
+	for _, body := range []string{`{"command":"seek"}`, `{"command":"seek","position":-1}`, `{"command":"seek","position":"10"}`} {
+		if response := webRequest(handler, "POST", "/api/player", body); response.Code != http.StatusBadRequest {
+			t.Fatalf("%s accepted: %d", body, response.Code)
+		}
+	}
+	if response := webRequest(handler, "POST", "/api/player", `{"command":"seek","position":754.5,"playlist_pos":3}`); response.Code != http.StatusAccepted {
+		t.Fatal(response.Body.String())
+	}
+	a.drainWebCommands()
+	if got, _ := json.Marshal(<-a.playerControls.commands); string(got) != `["seek",754.5,"absolute"]` || a.webCommandError != "" {
+		t.Fatalf("seek sent %s, error %q", got, a.webCommandError)
+	}
+	// A seek meant for the previous episode never lands in the next one.
+	webRequest(handler, "POST", "/api/player", `{"command":"seek","position":10,"playlist_pos":2}`)
+	a.drainWebCommands()
+	if len(a.playerControls.commands) != 0 || a.webCommandError != "Playback changed; try again." {
+		t.Fatal("stale seek reached mpv")
 	}
 }
 

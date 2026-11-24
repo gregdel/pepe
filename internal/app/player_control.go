@@ -19,6 +19,9 @@ const (
 	// Previous/next mpv playlist entry: queued episodes or a web playlist.
 	playerControlPlaylistPrev playerControl = "playlist-prev"
 	playerControlPlaylistNext playerControl = "playlist-next"
+	// Absolute seek from the web remote's progress bar; it carries a
+	// position, so it is not a valid() fixed command.
+	playerControlSeek playerControl = "seek"
 )
 
 func (command playerControl) valid() bool {
@@ -145,6 +148,22 @@ func (a *App) handlePlayerControl(command playerControl) {
 		return
 	}
 	a.queuePlayerCommand(command.args())
+}
+
+// handlePlayerSeek seeks the playing entry to position seconds. playlistPos is
+// the entry the phone showed, so a seek never lands in the next episode.
+func (a *App) handlePlayerSeek(position float64, playlistPos int) {
+	if a.playerStatus != PlayerStatusRunning {
+		a.webCommandError = "No playback is running."
+		return
+	}
+	if a.playerTracker != nil {
+		if pos, _ := a.playerTracker.playlist(); pos != playlistPos {
+			a.webCommandError = "Playback changed; try again."
+			return
+		}
+	}
+	a.queuePlayerCommand([]any{"seek", position, "absolute"})
 }
 
 func (a *App) queuePlayerCommand(args []any) {

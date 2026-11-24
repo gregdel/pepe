@@ -130,7 +130,7 @@ func TestPlayerIPCPlaylist(t *testing.T) {
 	tracker := a.commandTracker(command)
 	conn, scanner := trackerIPCPeer(t, tracker)
 
-	for _, property := range []string{"duration", "playlist-pos", "playlist-count"} {
+	for _, property := range []string{"duration", "playlist-pos", "playlist-count", "pause"} {
 		if !scanner.Scan() || !strings.Contains(scanner.Text(), `"`+property+`"`) {
 			t.Fatalf("missing %s subscription: %s", property, scanner.Text())
 		}

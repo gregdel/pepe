@@ -39,6 +39,9 @@ type webCommand struct {
 	url     string
 	control playerControl
 	session uint64
+	// A seek's absolute target and the playlist entry the phone showed.
+	seekTo      float64
+	playlistPos int
 }
 
 type webStatus struct {
@@ -51,7 +54,12 @@ type webStatus struct {
 	QueuedCommands int          `json:"queued_commands"`
 	PlaylistPos    int          `json:"playlist_pos"`   // 1-based; 0 when unknown
 	PlaylistCount  int          `json:"playlist_count"` // mpv playlist entries
+	Position       float64      `json:"position"`       // seconds into the playing entry
+	Duration       float64      `json:"duration"`       // seconds; 0 when unknown
+	Paused         bool         `json:"paused"`
 	session        uint64       // transport-only identity; never exposed to the browser
+	// tracker is read at request time: time-pos does not wake the event loop.
+	tracker *playbackTracker
 }
 
 // webUI owns only transport state. Handlers never access mutable App state.
@@ -182,6 +190,9 @@ func (web *webUI) handler() http.Handler {
 		status := web.status
 		web.mu.RUnlock()
 		status.QueuedCommands = len(web.commands)
+		if status.tracker != nil {
+			status.Position, status.Duration, status.Paused = status.tracker.progress()
+		}
 		writeWebJSON(w, http.StatusOK, status)
 	})
 	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
@@ -236,9 +247,20 @@ func (web *webUI) handler() http.Handler {
 	})
 	mux.HandleFunc("POST /api/player", func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
-			Command playerControl `json:"command"`
+			Command     playerControl `json:"command"`
+			Position    *float64      `json:"position"`
+			PlaylistPos int           `json:"playlist_pos"`
 		}
 		if !decodeWebJSON(w, r, &request) {
+			return
+		}
+		if request.Command == playerControlSeek {
+			// JSON cannot encode NaN or infinities.
+			if request.Position == nil || *request.Position < 0 {
+				writeWebError(w, http.StatusBadRequest, "invalid seek position")
+				return
+			}
+			web.accept(w, webCommand{control: playerControlSeek, seekTo: *request.Position, playlistPos: request.PlaylistPos})
 			return
 		}
 		if !request.Command.valid() {
@@ -331,6 +353,8 @@ func (a *App) drainWebCommands() {
 			case command.control != "":
 				if command.session != a.playerSession {
 					a.webCommandError = "Playback changed; try again."
+				} else if command.control == playerControlSeek {
+					a.handlePlayerSeek(command.seekTo, command.playlistPos)
 				} else {
 					a.handlePlayerControl(command.control)
 				}
@@ -361,6 +385,7 @@ func (a *App) publishWebStatus() {
 		}
 		if a.playerTracker != nil {
 			status.PlaylistPos, status.PlaylistCount = a.playerTracker.playlist()
+			status.tracker = a.playerTracker
 		}
 	}
 	if a.playerError != "" {

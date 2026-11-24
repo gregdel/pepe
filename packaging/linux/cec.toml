@@ -21,6 +21,8 @@ protocol = "cec"
 0x44 = "KEY_F5" # Play
 0x45 = "KEY_F8" # Stop
 0x46 = "KEY_F6" # Pause
+# Rewind/Fast forward seek; Previous/Next change chapter. In a playlist
+# (queued episodes) all four change entry.
 0x48 = "KEY_F9" # Rewind
 0x49 = "KEY_F10" # Fast forward
 0x4b = "KEY_F12" # Next
