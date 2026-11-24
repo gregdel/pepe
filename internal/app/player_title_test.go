@@ -84,12 +84,16 @@ func TestWebResolvedTitleWithoutFrames(t *testing.T) {
 	// A new session starts with its own empty tracker, never the previous title.
 	a.playerStatus = PlayerStatusRunning
 	a.playerFromWeb = true
-	a.playerTracker = newPlaybackTracker("")
+	a.playerTracker = newPlaybackTracker("", nil)
 	check(webPlaybackTitle, PlayerStatusRunning)
+	// Catalog playback keeps its title until mpv reports the force-media-title
+	// pépé set on the playing file, launched or queued.
 	a.playerFromWeb = false
 	a.playerTitle = "Catalog (2024)"
-	a.playerTracker.updateTitle("Unrelated mpv title")
+	a.playerTracker = newPlaybackTracker("", nil)
 	check("Catalog (2024)", PlayerStatusRunning)
+	a.playerTracker.updateTitle("Catalog S01E02")
+	check("Catalog S01E02", PlayerStatusRunning)
 }
 
 func TestPlaybackTitleInvalidAndDuplicateEvents(t *testing.T) {

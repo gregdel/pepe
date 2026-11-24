@@ -52,6 +52,18 @@ type playerCommand struct {
 	mode       PlayerMode
 	fromWeb    bool
 	scripted   bool // pepe.lua handles remote actions
+	// before and after are queued around the launched file over IPC.
+	before, after []playlistEntry
+}
+
+// playlistEntry is a queued episode. Command-line options apply to every
+// playlist entry, so each entry sets its own start, title and subtitles.
+type playlistEntry struct {
+	mediaKey     string
+	title        string
+	url          string
+	subtitleURLs []string
+	start        float64
 }
 
 type playerResult struct {
@@ -99,6 +111,8 @@ type playbackSource struct {
 	video     papi.Downloadable
 	subtitles []*papi.Subtitle
 	url       string // nonempty only for credential-free web playback
+	// before and after are the show's other episodes, in order.
+	before, after []playbackSource
 }
 
 func movieMediaKey(id string) string {
@@ -132,17 +146,45 @@ func (a *App) launchEpisode(node *DynamicNode) {
 		a.setPlayerError("episode is not available")
 		return
 	}
-	ep := node.Episode
+	show, _ := a.client.getShow(node.ShowID)
+	source := episodeSource(show, node)
+	// Queue the whole show around the episode so playback continues and
+	// mpv's previous/next reach every episode.
+	if show != nil {
+		var queue []*DynamicNode
+		for _, season := range createSeasonNodes(show) {
+			queue = append(queue, season.Children...)
+		}
+		for i, other := range queue {
+			if other.Episode != nil && other.Episode.Season == node.Episode.Season && other.Episode.Episode == node.Episode.Episode {
+				for _, earlier := range queue[:i] {
+					source.before = append(source.before, episodeSource(show, earlier))
+				}
+				for _, later := range queue[i+1:] {
+					source.after = append(source.after, episodeSource(show, later))
+				}
+				break
+			}
+		}
+	}
+	a.launchPlayback(source)
+}
+
+func episodeSource(show *papi.Show, node *DynamicNode) playbackSource {
 	title := node.Label
-	if show, ok := a.client.getShow(node.ShowID); ok && show != nil && show.Title != "" {
+	if show != nil && show.Title != "" {
 		title = show.Title + " " + title
 	}
-	a.launchPlayback(playbackSource{
+	ep := node.Episode
+	if ep == nil {
+		return playbackSource{title: title}
+	}
+	return playbackSource{
 		mediaKey:  episodeMediaKey(node.ShowID, ep.Season, ep.Episode),
 		title:     title,
 		video:     ep,
 		subtitles: ep.Subtitles,
-	})
+	}
 }
 
 const (
@@ -221,7 +263,7 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 	var subtitleURLs []string
 	var startPos float64
 	if source.url != "" {
-		if source.mediaKey != "" || source.video != nil || len(source.subtitles) != 0 {
+		if source.mediaKey != "" || source.video != nil || len(source.subtitles) != 0 || len(source.before) != 0 || len(source.after) != 0 {
 			return playerCommand{}, fmt.Errorf("web playback cannot include catalog media")
 		}
 		var err error
@@ -242,6 +284,7 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 		subtitleURLs = a.externalSubtitleURLs(source.subtitles)
 		startPos = a.progress.position(source.mediaKey)
 	}
+	before, after := a.playlistEntries(source.before), a.playlistEntries(source.after)
 
 	runtimeDir, configPath, sockPath, err := createPlayerRuntime(token)
 	if err != nil {
@@ -254,6 +297,8 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 		runtimeDir: runtimeDir,
 		mode:       detectPlayerMode(),
 		fromWeb:    source.url != "",
+		before:     before,
+		after:      after,
 	}
 	mpvTitle := source.title
 	if command.fromWeb {
@@ -284,6 +329,29 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 		command.args = append([]string{command.args[0], "--managed-runtime=" + runtimeDir}, command.args[1:]...)
 	}
 	return command, nil
+}
+
+// playlistEntries resolves queued episodes; one without a video URL is left out.
+func (a *App) playlistEntries(sources []playbackSource) []playlistEntry {
+	entries := make([]playlistEntry, 0, len(sources))
+	for _, source := range sources {
+		if source.mediaKey == "" || source.video == nil {
+			continue
+		}
+		videoURL, err := a.client.getDownloadURL(source.video)
+		if err != nil {
+			a.logger().Warn("episode left out of the playlist", "title", source.title, "error", err)
+			continue
+		}
+		entries = append(entries, playlistEntry{
+			mediaKey:     source.mediaKey,
+			title:        source.title,
+			url:          videoURL,
+			subtitleURLs: a.externalSubtitleURLs(source.subtitles),
+			start:        a.progress.position(source.mediaKey),
+		})
+	}
+	return entries
 }
 
 func (a *App) externalSubtitleURLs(subtitles []*papi.Subtitle) []string {
@@ -344,11 +412,12 @@ func (a *App) startPlayer(command playerCommand) bool {
 
 	started := time.Now()
 	a.logger().Info("player started", "player", command.args[0], "mode", command.mode, "script", command.scripted,
-		"title", command.title, "media", command.args[len(command.args)-1])
+		"title", command.title, "media", command.args[len(command.args)-1], "playlist", 1+len(command.before)+len(command.after))
 	done := make(chan playerResult, 1)
 	stop := make(chan struct{})
 	policy := a.playerPolicy.withDefaults()
-	tracker := startIPC(command.sockPath, command.mediaKey, policy.connectTimeout, a.invalidate)
+	tracker := a.commandTracker(command)
+	startIPC(command.sockPath, tracker, policy.connectTimeout)
 	a.playerTracker = tracker
 	a.playerDone = done
 	a.playerStop = stop
@@ -413,12 +482,34 @@ func (a *App) startPlayer(command playerCommand) bool {
 	return true
 }
 
+// applyPlaybackRecords stores entries that ended during playback, so a long
+// playlist does not lose them if the player is later killed.
+func (a *App) applyPlaybackRecords(tracker *playbackTracker) {
+	if tracker == nil {
+		return
+	}
+	for _, record := range tracker.takeRecords() {
+		a.progress.recordPlayback(record.mediaKey, record.pos, record.duration, record.eof)
+	}
+}
+
+// applyPlaybackSnapshot stores the remaining progress once the player exited.
 func (a *App) applyPlaybackSnapshot(tracker *playbackTracker) {
 	if tracker == nil {
 		return
 	}
-	mediaKey, pos, eof := tracker.snapshot()
-	a.progress.recordPlayback(mediaKey, pos, tracker.durationSeconds(), eof)
+	a.applyPlaybackRecords(tracker)
+	if record, ok := tracker.unfinished(); ok {
+		a.progress.recordPlayback(record.mediaKey, record.pos, record.duration, record.eof)
+	}
+}
+
+// commandTracker tracks command's playback, including its queued episodes.
+func (a *App) commandTracker(command playerCommand) *playbackTracker {
+	tracker := newPlaybackTracker(command.mediaKey, a.invalidate)
+	tracker.before, tracker.after = command.before, command.after
+	tracker.logger = a.logger()
+	return tracker
 }
 
 // macOSMPVFallbacks are tried when the default "mpv" is not on PATH, as for apps
@@ -554,23 +645,43 @@ func buildMPVArgs(mpvPath, title, videoURL string, subtitleURLs []string, mode P
 	return args
 }
 
-// playbackTracker stores IPC state. Only title changes wake the UI.
-type playbackTracker struct {
-	mu       sync.RWMutex
+// playbackRecord is where playback of one playlist entry stopped.
+type playbackRecord struct {
 	mediaKey string
 	pos      float64
 	duration float64
 	eof      bool
-	title    string
-	onTitle  func()
-	done     chan struct{}
-	stop     chan struct{}
-	stopOnce sync.Once
 }
 
-func newPlaybackTracker(mediaKey string) *playbackTracker {
+// playbackTracker stores IPC state for the current playlist entry. Title
+// changes and ended entries wake the UI.
+type playbackTracker struct {
+	mu       sync.RWMutex
+	mediaKey string
+	entryID  int64 // mpv playlist entry ID; 0 until an event names it
+	pos      float64
+	duration float64
+	eof      bool
+	ended    bool             // the current entry's record is in records
+	records  []playbackRecord // ended entries the event loop has not applied
+	keys     map[int64]string // playlist entry ID → media key
+	title    string
+	// playlistPos (1-based) and playlistCount follow mpv's playlist.
+	playlistPos, playlistCount int
+	notify                     func()
+	logger                     *slog.Logger
+	// before and after are queued around the launched file once IPC connects.
+	before, after []playlistEntry
+	done          chan struct{}
+	stop          chan struct{}
+	stopOnce      sync.Once
+}
+
+func newPlaybackTracker(mediaKey string, notify func()) *playbackTracker {
 	return &playbackTracker{
 		mediaKey: mediaKey,
+		keys:     map[int64]string{},
+		notify:   notify,
 		done:     make(chan struct{}),
 		stop:     make(chan struct{}),
 	}
@@ -600,21 +711,14 @@ func (t *playbackTracker) updateDuration(duration float64) {
 	t.mu.Unlock()
 }
 
-// durationSeconds is the length mpv reported, or 0 when unknown.
-func (t *playbackTracker) durationSeconds() float64 {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.duration
-}
-
 func (t *playbackTracker) updateTitle(title string) {
 	title = strings.TrimSpace(title)
 	t.mu.Lock()
 	changed := t.title != title
 	t.title = title
 	t.mu.Unlock()
-	if changed && t.onTitle != nil {
-		t.onTitle()
+	if changed && t.notify != nil {
+		t.notify()
 	}
 }
 
@@ -624,11 +728,45 @@ func (t *playbackTracker) resolvedTitle() string {
 	return t.title
 }
 
+// updatePlaylist stores mpv's playlist-pos (0-based) or playlist-count.
+func (t *playbackTracker) updatePlaylist(name string, value int) {
+	t.mu.Lock()
+	old := [2]int{t.playlistPos, t.playlistCount}
+	if name == "playlist-pos" {
+		t.playlistPos = value + 1
+	} else {
+		t.playlistCount = value
+	}
+	changed := old != [2]int{t.playlistPos, t.playlistCount}
+	t.mu.Unlock()
+	if changed && t.notify != nil {
+		t.notify()
+	}
+}
+
+// playlist is the playing entry's 1-based position and the entry count, or
+// zeros until mpv reports them.
+func (t *playbackTracker) playlist() (pos, count int) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.playlistPos, t.playlistCount
+}
+
+// updatePlayerTitle follows mpv's title for the playing entry: the
+// force-media-title pépé sets on the launched and each queued file, or the
+// yt-dlp title for web playback.
 func (a *App) updatePlayerTitle() {
-	if a.playerStatus != PlayerStatusRunning || !a.playerFromWeb || a.playerTracker == nil || a.playerStopping {
+	if a.playerStatus != PlayerStatusRunning || a.playerTracker == nil || a.playerStopping {
 		return
 	}
-	a.playerTitle = a.playerTracker.resolvedTitle()
+	title := a.playerTracker.resolvedTitle()
+	if !a.playerFromWeb {
+		if title != "" {
+			a.playerTitle = title
+		}
+		return
+	}
+	a.playerTitle = title
 	if a.playerTitle == "" {
 		a.playerTitle = webPlaybackTitle
 	}
@@ -646,6 +784,78 @@ func (t *playbackTracker) snapshot() (mediaKey string, pos float64, eof bool) {
 	return t.mediaKey, t.pos, t.eof
 }
 
+// bindEntry maps a queued entry's playlist ID, from mpv's loadfile reply.
+func (t *playbackTracker) bindEntry(id int64, mediaKey string) {
+	t.mu.Lock()
+	t.keys[id] = mediaKey
+	t.mu.Unlock()
+}
+
+// claimEntry names the launched entry: the first playlist ID seen that no
+// loadfile reply claimed. The caller holds t.mu.
+func (t *playbackTracker) claimEntry(id int64) {
+	if t.entryID != 0 || id == 0 {
+		return
+	}
+	if _, queued := t.keys[id]; !queued {
+		t.entryID = id
+		t.keys[id] = t.mediaKey
+	}
+}
+
+// startEntry follows mpv's start-file event.
+func (t *playbackTracker) startEntry(id int64) {
+	t.mu.Lock()
+	t.claimEntry(id)
+	if id == t.entryID && !t.ended {
+		t.mu.Unlock()
+		return // the launched file, already current
+	}
+	// Unknown entries (added by the user) are tracked without a key.
+	t.mediaKey, t.entryID = t.keys[id], id
+	// The duration is kept: mpv sends no change when the next file has the
+	// same length, and a different length arrives as soon as it loads.
+	t.pos, t.eof, t.ended = 0, false, false
+	t.mu.Unlock()
+	if t.notify != nil {
+		t.notify() // the player title follows the entry
+	}
+}
+
+// endEntry records where the current entry stopped, for its end-file event.
+func (t *playbackTracker) endEntry(id int64, eof bool) {
+	t.mu.Lock()
+	t.claimEntry(id)
+	if t.ended || id != 0 && id != t.entryID {
+		t.mu.Unlock()
+		return
+	}
+	t.eof = t.eof || eof
+	t.ended = true
+	t.records = append(t.records, playbackRecord{mediaKey: t.mediaKey, pos: t.pos, duration: t.duration, eof: t.eof})
+	t.mu.Unlock()
+	if t.notify != nil {
+		t.notify()
+	}
+}
+
+// takeRecords returns and forgets the entries that ended.
+func (t *playbackTracker) takeRecords() []playbackRecord {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	records := t.records
+	t.records = nil
+	return records
+}
+
+// unfinished is the current entry when no end-file recorded it, as when mpv
+// is killed.
+func (t *playbackTracker) unfinished() (playbackRecord, bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return playbackRecord{mediaKey: t.mediaKey, pos: t.pos, duration: t.duration, eof: t.eof}, !t.ended
+}
+
 func (t *playbackTracker) wait(timeout time.Duration) {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -655,20 +865,78 @@ func (t *playbackTracker) wait(timeout time.Duration) {
 	}
 }
 
-// startIPC launches ipcLoop in a goroutine and returns a playback tracker.
-func startIPC(sockPath, mediaKey string, connectTimeout time.Duration, onTitle func()) *playbackTracker {
-	tracker := newPlaybackTracker(mediaKey)
-	tracker.onTitle = onTitle
+// startIPC launches ipcLoop in a goroutine.
+func startIPC(sockPath string, tracker *playbackTracker, connectTimeout time.Duration) {
 	go ipcLoop(sockPath, tracker, connectTimeout)
-	return tracker
 }
 
-// mpvEvent is the JSON event structure sent by mpv over IPC.
+// mpvEvent is the JSON event or reply structure sent by mpv over IPC.
 type mpvEvent struct {
-	Event  string `json:"event"`
-	Name   string `json:"name"`
-	Data   any    `json:"data"`
-	Reason string `json:"reason"`
+	Event           string `json:"event"`
+	Name            string `json:"name"`
+	Data            any    `json:"data"`
+	Reason          string `json:"reason"`
+	PlaylistEntryID int64  `json:"playlist_entry_id"`
+	RequestID       int64  `json:"request_id"`
+	Error           string `json:"error"`
+}
+
+// mpvPathList escapes a -set value of an mpv path list option such as
+// sub-files, whose separator is ':' on Unix.
+func mpvPathList(paths []string) string {
+	escaped := make([]string, len(paths))
+	escaper := strings.NewReplacer(`\`, `\\`, `:`, `\:`)
+	for i, path := range paths {
+		escaped[i] = escaper.Replace(path)
+	}
+	return strings.Join(escaped, ":")
+}
+
+// loadfileCommand queues an entry with file-local options, which mpv
+// restores when the entry ends (mpv 0.38+ argument order).
+func loadfileCommand(entry playlistEntry, flags string, index int, requestID int64) ([]byte, error) {
+	start := "none"
+	if entry.start > minimumResumePosition {
+		start = fmt.Sprintf("%d", int(entry.start))
+	}
+	return json.Marshal(map[string]any{
+		"command": map[string]any{
+			"name":  "loadfile",
+			"url":   entry.url,
+			"flags": flags,
+			"index": index,
+			"options": map[string]string{
+				"start":             start,
+				"title":             entry.title,
+				"force-media-title": entry.title,
+				"sub-files":         mpvPathList(entry.subtitleURLs),
+			},
+		},
+		"request_id": requestID,
+	})
+}
+
+// queuePlaylist inserts the earlier entries before the launched file and
+// appends the later ones. It returns the pending request IDs.
+func (t *playbackTracker) queuePlaylist(conn net.Conn) map[int64]string {
+	pending := map[int64]string{}
+	var requestID int64
+	send := func(entry playlistEntry, flags string, index int) {
+		requestID++
+		line, err := loadfileCommand(entry, flags, index, requestID)
+		if err != nil {
+			return
+		}
+		pending[requestID] = entry.mediaKey
+		_, _ = conn.Write(append(line, '\n'))
+	}
+	for i, entry := range t.before {
+		send(entry, "insert-at", i)
+	}
+	for _, entry := range t.after {
+		send(entry, "append", -1)
+	}
+	return pending
 }
 
 // ipcLoop connects to the mpv IPC socket and processes events.
@@ -722,6 +990,9 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 3, \"force-media-title\"]}\n")
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 4, \"metadata/by-key/title\"]}\n")
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 5, \"duration\"]}\n")
+	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 6, \"playlist-pos\"]}\n")
+	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 7, \"playlist-count\"]}\n")
+	pending := tracker.queuePlaylist(conn)
 	titles := map[string]string{}
 
 	scanner := bufio.NewScanner(conn)
@@ -731,11 +1002,34 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 		if err := json.Unmarshal(line, &ev); err != nil {
 			continue
 		}
-		if ev.Event == "end-file" && ev.Reason == "eof" {
-			tracker.markEOF()
-			return
-		}
-		if ev.Event != "property-change" {
+		switch ev.Event {
+		case "":
+			mediaKey, ok := pending[ev.RequestID]
+			if !ok {
+				continue
+			}
+			delete(pending, ev.RequestID)
+			data, _ := ev.Data.(map[string]any)
+			id, _ := data["playlist_entry_id"].(float64)
+			if ev.Error != "success" || id <= 0 {
+				if tracker.logger != nil {
+					tracker.logger.Warn("mpv did not queue an episode", "media", mediaKey, "error", ev.Error)
+				}
+				continue
+			}
+			tracker.bindEntry(int64(id), mediaKey)
+			continue
+		case "start-file":
+			tracker.startEntry(ev.PlaylistEntryID)
+			continue
+		case "end-file":
+			// A redirect replaces the entry with its expansion (playlists).
+			if ev.Reason != "redirect" {
+				tracker.endEntry(ev.PlaylistEntryID, ev.Reason == "eof")
+			}
+			continue
+		case "property-change":
+		default:
 			continue
 		}
 		switch ev.Name {
@@ -760,10 +1054,18 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 			if duration, ok := ev.Data.(float64); ok && duration > 0 {
 				tracker.updateDuration(duration)
 			}
+		case "playlist-pos", "playlist-count":
+			if value, ok := ev.Data.(float64); ok {
+				tracker.updatePlaylist(ev.Name, int(value))
+			}
 		case "eof-reached":
+			// With keep-open, mpv stays on the ended last entry.
+			// A late true after start-file must not mark the next entry:
+			// its position is 0 until time-pos passes minimumResumePosition.
 			if reached, ok := ev.Data.(bool); ok && reached {
-				tracker.markEOF()
-				return
+				if _, pos, _ := tracker.snapshot(); pos > 0 {
+					tracker.markEOF()
+				}
 			}
 		}
 	}

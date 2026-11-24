@@ -46,6 +46,7 @@ func TestWebPageControlsAndCopy(t *testing.T) {
 		`id="now-playing"`, `class="playback-bar"`, `aria-label="Playback controls"`,
 		`aria-label="Seek back 10 seconds"`, `aria-label="Pause or resume"`,
 		`aria-label="Seek forward 10 seconds"`, `aria-label="Stop playback"`,
+		`data-command="playlist-prev"`, `data-command="playlist-next"`,
 	} {
 		if !strings.Contains(page, retained) {
 			t.Errorf("page is missing %q", retained)
@@ -413,6 +414,24 @@ func TestWebQueuedControlsDoNotTargetReplacement(t *testing.T) {
 	a.drainWebCommands()
 	if a.playerStopping || a.webCommandError != "Playback changed; try again." {
 		t.Fatal("stale Stop affected replacement")
+	}
+}
+
+func TestWebStatusReportsPlaylist(t *testing.T) {
+	a := &App{webUI: &webUI{commands: make(chan webCommand, webQueueSize)}}
+	a.playerStatus = PlayerStatusRunning
+	a.playerTracker = newPlaybackTracker("key", nil)
+	a.playerTracker.updatePlaylist("playlist-count", 8)
+	a.playerTracker.updatePlaylist("playlist-pos", 2)
+	a.publishWebStatus()
+	body := webRequest(a.webUI.handler(), "GET", "/api/status", "").Body.String()
+	if !strings.Contains(body, `"playlist_pos":3`) || !strings.Contains(body, `"playlist_count":8`) {
+		t.Fatalf("status = %s", body)
+	}
+	for command, want := range map[playerControl]string{playerControlPlaylistPrev: "playlist-prev", playerControlPlaylistNext: "playlist-next"} {
+		if !command.valid() || len(command.args()) != 1 || command.args()[0] != want {
+			t.Fatalf("%s args = %v", command, command.args())
+		}
 	}
 }
 

@@ -49,6 +49,8 @@ type webStatus struct {
 	Error          string       `json:"error"`
 	CommandError   string       `json:"command_error"`
 	QueuedCommands int          `json:"queued_commands"`
+	PlaylistPos    int          `json:"playlist_pos"`   // 1-based; 0 when unknown
+	PlaylistCount  int          `json:"playlist_count"` // mpv playlist entries
 	session        uint64       // transport-only identity; never exposed to the browser
 }
 
@@ -356,6 +358,9 @@ func (a *App) publishWebStatus() {
 		status.Source = "catalog"
 		if a.playerFromWeb {
 			status.Source = "web"
+		}
+		if a.playerTracker != nil {
+			status.PlaylistPos, status.PlaylistCount = a.playerTracker.playlist()
 		}
 	}
 	if a.playerError != "" {

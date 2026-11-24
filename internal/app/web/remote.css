@@ -114,6 +114,10 @@ main[data-layout="playing"] h1 { font-size: 1.5rem; font-weight: 700; }
 }
 .playback-toggle svg { width: 2.25rem; }
 .playback-bar .playback-stop { margin-left: .25rem; border-radius: var(--radius-row); }
+main[data-layout="idle"] .playlist, main[data-state="offline"] .playlist { display: none; }
+.playlist { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: .75rem; }
+.playlist button { padding: .5rem .75rem; }
+#playlist-pos { color: var(--subtle); font-size: .95rem; font-variant-numeric: tabular-nums; }
 
 /* Link */
 #url-form { display: grid; gap: .9rem; }

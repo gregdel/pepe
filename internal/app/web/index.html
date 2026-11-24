@@ -42,6 +42,17 @@
           </svg>
         </button>
       </div>
+      <div id="playlist" class="playlist" role="group" aria-label="Playlist" hidden>
+        <button data-command="playlist-prev" aria-label="Previous in playlist" title="Previous in playlist" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="solid" d="M6 5h2v14H6zM19 5v14L9 12z"/></svg>
+          <span>Previous</span>
+        </button>
+        <span id="playlist-pos"></span>
+        <button data-command="playlist-next" aria-label="Next in playlist" title="Next in playlist" disabled>
+          <span>Next</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="solid" d="M16 5h2v14h-2zM5 5v14l10-7z"/></svg>
+        </button>
+      </div>
     </section>
 
     <section class="link" aria-labelledby="url-heading">

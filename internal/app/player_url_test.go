@@ -214,7 +214,7 @@ func TestHeadlessWebPlayingBar(t *testing.T) {
 				f.app.playerStatus = PlayerStatusRunning
 				f.app.playerFromWeb = true
 				f.app.playerTitle = webPlaybackTitle
-				f.app.playerTracker = newPlaybackTracker("")
+				f.app.playerTracker = newPlaybackTracker("", nil)
 				resolvedTitle := "A resolved web video — Linux systems, explained"
 				f.app.playerTracker.updateTitle(resolvedTitle)
 				f.app.applyListingMode(ListingModeDateAdded)

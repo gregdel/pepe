@@ -14,6 +14,14 @@ import (
 // Connect a fake mpv peer and consume the tracker's property subscriptions.
 func playbackIPCPeer(t *testing.T, key string, onTitle func()) (*playbackTracker, net.Conn) {
 	t.Helper()
+	tracker := newPlaybackTracker(key, onTitle)
+	conn, _ := trackerIPCPeer(t, tracker)
+	return tracker, conn
+}
+
+// trackerIPCPeer connects tracker to a fake mpv peer, past its subscriptions.
+func trackerIPCPeer(t *testing.T, tracker *playbackTracker) (net.Conn, *bufio.Scanner) {
+	t.Helper()
 	dir, _, socket, err := createPlayerRuntime("secret")
 	if err != nil {
 		t.Fatal(err)
@@ -27,7 +35,7 @@ func playbackIPCPeer(t *testing.T, key string, onTitle func()) (*playbackTracker
 	if err := listener.SetDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	tracker := startIPC(socket, key, time.Second, onTitle)
+	startIPC(socket, tracker, time.Second)
 	t.Cleanup(func() {
 		tracker.stopIPC()
 		select {
@@ -50,7 +58,7 @@ func playbackIPCPeer(t *testing.T, key string, onTitle func()) (*playbackTracker
 			t.Fatalf("missing %s subscription: %s, %v", property, scanner.Text(), scanner.Err())
 		}
 	}
-	return tracker, conn
+	return conn, scanner
 }
 
 func TestPlayerIPCEndFileResume(t *testing.T) {
@@ -119,7 +127,7 @@ func TestPlayerIPCRedirectContinuesTracking(t *testing.T) {
 
 func TestPlaybackTrackerFinishDrainsBeforeStopping(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		tracker := newPlaybackTracker("movie:first")
+		tracker := newPlaybackTracker("movie:first", nil)
 		go func() {
 			time.Sleep(10 * time.Millisecond)
 			select {

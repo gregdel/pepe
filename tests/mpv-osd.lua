@@ -524,5 +524,28 @@ dofile(script)
 assert(next(forced) == nil and props["volume-max"] == 130 and props.volume == 120)
 events.shutdown()
 
+-- A playlist shows the entry position and the keyboard previous/next keys; a
+-- single file shows neither.
+options = {controls = "keyboard", help = true}
+observers, events, bindings, forced, messages = {}, {}, {}, {}, {}
+props.pause = false
+dofile(script)
+events["file-loaded"]()
+absent("< > Previous/next")
+set("pause", true)
+at(108, 340, 7, "\\b1\\clip(108,318,1012,382)}ESCAPED_TITLE")
+events.shutdown()
+props["playlist-count"], props["playlist-pos-1"] = 8, 3
+observers, events, bindings, forced, messages = {}, {}, {}, {}, {}
+props.pause = false
+dofile(script)
+events["file-loaded"]()
+contains("< > Previous/next")
+set("pause", true)
+at(108, 340, 7, "}{\\b0\\1c&HABA0A0&}3 / 8  ·  {\\b1\\1c&HECE8E8&}ESCAPED_TITLE")
+contains("PAUSED")
+events.shutdown()
+props["playlist-count"], props["playlist-pos-1"] = nil, nil
+
 os.time, os.date = real_time, real_date
 print("Playback OSD tests passed")

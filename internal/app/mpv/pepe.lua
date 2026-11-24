@@ -67,6 +67,14 @@ end
 -- Arrows seek 5s, the web remote 10s; both seek 1 min with Up/Down.
 local seek_hint = "Left/Right Seek  ·  Up/Down Seek 1 min"
 
+-- Position in a multi-entry playlist (queued episodes or a web playlist), e.g. "3 / 8".
+local function playlist_position()
+    local count = mp.get_property_number("playlist-count", 0)
+    local pos = mp.get_property_number("playlist-pos-1", 0)
+    if not finite(count) or not finite(pos) or count < 2 or pos < 1 then return nil end
+    return string.format("%d / %d", pos, count)
+end
+
 local function hints(events, left, center, right, top)
     if opts.controls == "hdmi-cec" then
         text(events, center, top, 8, 22, opts.color_fg, "OK Pause/resume  ·  Back Return")
@@ -84,7 +92,9 @@ local function hints(events, left, center, right, top)
         end
     else
         text(events, center, top, 8, 22, opts.color_fg, "Space Pause/resume  ·  q Return")
-        text(events, center, top + 32, 8, 22, opts.color_subtle, "j Cycle subtitles  ·  Tab Subtitle tracks")
+        local line = "j Cycle subtitles  ·  Tab Subtitle tracks"
+        if playlist_position() then line = line .. "  ·  < > Previous/next" end
+        text(events, center, top + 32, 8, 22, opts.color_subtle, line)
     end
 end
 
@@ -148,8 +158,14 @@ render = function()
         end
     end
     rectangle(events, left - 28, top, right + 28, bottom, panel, "00")
-    -- A long title is single-line and clipped before the pause badge.
-    text(events, left, top + 22, 7, 30, fg, escape(title),
+    -- A long title is single-line and clipped before the pause badge. A
+    -- queued show's position leads it, in the same event so it never overlaps.
+    local heading = escape(title)
+    local position_label = playlist_position()
+    if position_label then
+        heading = string.format("{\\b0\\1c&H%s&}%s  ·  {\\b1\\1c&H%s&}", muted, position_label, fg) .. heading
+    end
+    text(events, left, top + 22, 7, 30, fg, heading,
         string.format("\\b1\\clip(%d,%d,%d,%d)", left, top, right - 160, top + 64))
     rectangle(events, right - 128, top + 29, right - 123, top + 49, accent)
     rectangle(events, right - 118, top + 29, right - 113, top + 49, accent)

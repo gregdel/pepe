@@ -472,7 +472,7 @@ func TestBuildMPVArgsUsesNamedResumeThreshold(t *testing.T) {
 }
 
 func TestPlaybackTrackerSnapshot(t *testing.T) {
-	tracker := newPlaybackTracker("movie:tt123")
+	tracker := newPlaybackTracker("movie:tt123", nil)
 	tracker.updatePos(91.5)
 
 	mediaKey, pos, eof := tracker.snapshot()
@@ -488,7 +488,7 @@ func TestPlaybackTrackerSnapshot(t *testing.T) {
 }
 
 func TestApplyPlaybackSnapshotStoresResumePosition(t *testing.T) {
-	tracker := newPlaybackTracker("movie:tt123")
+	tracker := newPlaybackTracker("movie:tt123", nil)
 	tracker.updatePos(91.5)
 	close(tracker.done)
 
@@ -502,7 +502,7 @@ func TestApplyPlaybackSnapshotStoresResumePosition(t *testing.T) {
 
 func TestPlayerCompletionAppliesItsLaunchResumeTracker(t *testing.T) {
 	key := episodeMediaKey("show", 3, 4)
-	tracker := newPlaybackTracker(key)
+	tracker := newPlaybackTracker(key, nil)
 	tracker.updatePos(180)
 	close(tracker.done)
 	done := make(chan playerResult, 1)
@@ -526,7 +526,7 @@ func TestPlayerCompletionAppliesItsLaunchResumeTracker(t *testing.T) {
 
 func TestApplyPlaybackSnapshotStoresEpisodeResumePosition(t *testing.T) {
 	key := episodeMediaKey("show", 3, 4)
-	tracker := newPlaybackTracker(key)
+	tracker := newPlaybackTracker(key, nil)
 	tracker.updatePos(180)
 	close(tracker.done)
 
@@ -538,7 +538,7 @@ func TestApplyPlaybackSnapshotStoresEpisodeResumePosition(t *testing.T) {
 }
 
 func TestApplyPlaybackSnapshotClearsResumeOnEOF(t *testing.T) {
-	tracker := newPlaybackTracker("movie:tt123")
+	tracker := newPlaybackTracker("movie:tt123", nil)
 	tracker.updatePos(91.5)
 	tracker.markEOF()
 	close(tracker.done)

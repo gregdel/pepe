@@ -16,11 +16,15 @@ const (
 	playerControlBack  playerControl = "seek-back"
 	playerControlNext  playerControl = "seek-forward"
 	playerControlStop  playerControl = "stop"
+	// Previous/next mpv playlist entry: queued episodes or a web playlist.
+	playerControlPlaylistPrev playerControl = "playlist-prev"
+	playerControlPlaylistNext playerControl = "playlist-next"
 )
 
 func (command playerControl) valid() bool {
 	switch command {
-	case playerControlPause, playerControlBack, playerControlNext, playerControlStop:
+	case playerControlPause, playerControlBack, playerControlNext, playerControlStop,
+		playerControlPlaylistPrev, playerControlPlaylistNext:
 		return true
 	default:
 		return false
@@ -35,6 +39,10 @@ func (command playerControl) args() []any {
 		return []any{"seek", -10, "relative"}
 	case playerControlNext:
 		return []any{"seek", 10, "relative"}
+	case playerControlPlaylistPrev:
+		return []any{"playlist-prev"}
+	case playerControlPlaylistNext:
+		return []any{"playlist-next"}
 	default:
 		return nil
 	}

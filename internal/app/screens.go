@@ -119,6 +119,23 @@ func (s *showPage) down() {
 	}
 }
 
+// revealEpisode focuses the episode with key on the open show page, so
+// Enter resumes where a playlist stopped.
+func (a *App) revealEpisode(key string) {
+	if a.detail == nil || a.detail.kind != detailShow || a.detail.show == nil {
+		return
+	}
+	s := a.detail.show
+	for si, season := range s.seasons {
+		for ei, node := range season.Children {
+			if node.Episode != nil && episodeMediaKey(node.ShowID, node.Episode.Season, node.Episode.Episode) == key {
+				s.seasonCursor, s.epCursor, s.focus = si, ei, focusEpisodes
+				return
+			}
+		}
+	}
+}
+
 // left switches to the previous season.
 func (s *showPage) left() { s.switchSeason(-1) }
 

@@ -62,7 +62,7 @@ func TestRecordPlaybackWatchedRules(t *testing.T) {
 }
 
 func TestApplyPlaybackSnapshotUsesDuration(t *testing.T) {
-	tracker := newPlaybackTracker("movie:tt123")
+	tracker := newPlaybackTracker("movie:tt123", nil)
 	tracker.updatePos(5500)
 	tracker.updateDuration(6000)
 	close(tracker.done)
@@ -101,7 +101,7 @@ func TestToggleWatched(t *testing.T) {
 
 func TestCloseRecordsRunningPlayback(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "progress.json")
-	tracker := newPlaybackTracker("movie:tt123")
+	tracker := newPlaybackTracker("movie:tt123", nil)
 	tracker.updatePos(1800)
 	tracker.updateDuration(6000)
 	a := New(nil, nil, nil, nil, nil)

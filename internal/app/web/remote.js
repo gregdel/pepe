@@ -12,6 +12,8 @@ const commandButtons = document.querySelectorAll("[data-command]");
 const sectionButton = document.querySelector('[data-action="section"]');
 const watchedButton = document.querySelector('[data-action="watched"]');
 const logsLink = document.getElementById("logs-link");
+const playlist = document.getElementById("playlist");
+const playlistPos = document.getElementById("playlist-pos");
 let requests = Promise.resolve();
 let pending = 0;
 let toastTimer = 0;
@@ -118,7 +120,7 @@ function setText(element, text) {
 
 // The now-playing card moves first while playing, but never while the link
 // field is in use: reordering would move it under the user's finger.
-function render(state, title, status, badge, controls) {
+function render(state, title, status, badge, controls, pos = 0, count = 0) {
   app.dataset.state = state;
   const layout = state === "running" || state === "offline" ? "playing" : "idle";
   if (app.dataset.layout !== layout && document.activeElement !== urlInput && !urlInput.value) {
@@ -127,6 +129,9 @@ function render(state, title, status, badge, controls) {
   setText(nowPlaying, title);
   setText(statusText, status);
   setText(source, badge);
+  // Any multi-entry mpv playlist: a show's queued episodes or a web playlist.
+  playlist.hidden = state !== "running" || count < 2;
+  playlistPos.textContent = pos > 0 ? pos + " / " + count : "";
   commandButtons.forEach(button => { button.disabled = !controls(button.dataset.command); });
   sectionButton.disabled = state === "running";
   watchedButton.disabled = state === "running";
@@ -145,7 +150,13 @@ async function poll() {
     if (status.queued_commands) text += (text ? " · " : "") + status.queued_commands + " queued";
     const state = running ? "running" : status.state === "Error" ? "error" : "idle";
     const badge = running ? (status.source === "web" ? "Link" : "Library") : "";
-    render(state, title, text, badge, command => running && (!status.stopping || command === "stop"));
+    const pos = status.playlist_pos || 0, count = status.playlist_count || 0;
+    render(state, title, text, badge, command => {
+      if (!running || (status.stopping && command !== "stop")) return false;
+      if (command === "playlist-prev") return pos > 1;
+      if (command === "playlist-next") return pos > 0 && pos < count;
+      return true;
+    }, pos, count);
     document.title = running ? title + " · pépé" : "pépé";
     if (status.command_error && status.command_error !== shownCommandError) toast(status.command_error, true);
     shownCommandError = status.command_error || "";

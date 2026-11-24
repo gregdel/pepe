@@ -290,7 +290,8 @@ func TestPlayerIPCTracksDelayedStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	tracker := startIPC(socket, "movie:delayed", 5*time.Second, nil)
+	tracker := newPlaybackTracker("movie:delayed", nil)
+	startIPC(socket, tracker, 5*time.Second)
 	defer tracker.stopIPC()
 	time.Sleep(3200 * time.Millisecond) // Beyond the unchanged desktop timeout.
 	listener, err := net.Listen("unix", socket)
@@ -337,7 +338,8 @@ func TestPlayerIPCDeadlineAndCancellation(t *testing.T) {
 				timeout = 15 * time.Second
 			}
 			started := time.Now()
-			tracker := startIPC(socket, "movie:missing", timeout, nil)
+			tracker := newPlaybackTracker("movie:missing", nil)
+			startIPC(socket, tracker, timeout)
 			defer tracker.stopIPC()
 			if cancel {
 				tracker.stopIPC()

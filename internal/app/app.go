@@ -580,10 +580,15 @@ func (a *App) run(nextEvent func() event.Event) error {
 
 // drainChannels checks async goroutine results without blocking.
 func (a *App) drainChannels() {
+	a.applyPlaybackRecords(a.playerTracker)
 	if a.playerDone != nil {
 		select {
 		case result := <-a.playerDone:
 			a.applyPlaybackSnapshot(result.tracker)
+			if result.tracker != nil {
+				lastKey, _, _ := result.tracker.snapshot()
+				a.revealEpisode(lastKey)
+			}
 			if result.retainedRuntime != "" {
 				a.playerCleanupDir = result.retainedRuntime
 				a.pendingPlayback = nil
