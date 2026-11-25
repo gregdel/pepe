@@ -50,6 +50,9 @@ func TestWebPageControlsAndCopy(t *testing.T) {
 		`data-command="playlist-prev"`, `data-command="playlist-next"`,
 		`id="seek" type="range"`, `aria-label="Playback position"`,
 		`data-action="back"`, `data-action="subtitles"`, `data-action="watched"`, `href="/logs"`,
+		`role="search"`, `id="search" type="search"`, `aria-label="Search movies and shows"`, `aria-label="Close search"`,
+		`aria-label="Clear search"`, `name="kind" id="kind-movie" value="movie"`, `name="kind" id="kind-show" value="show"`,
+		`id="results-live" class="visually-hidden" role="status" aria-live="polite"`, `id="result-template"`,
 	} {
 		if !strings.Contains(page, retained) {
 			t.Errorf("page is missing %q", retained)
@@ -93,6 +96,10 @@ func TestWebHTTPValidationAndAssets(t *testing.T) {
 		{"POST", "/api/player", `{"command":"run"}`, 400},
 		{"POST", "/api/player", `{"command":["run","sh"]}`, 400},
 		{"POST", "/api/play", `{"url":"https://media/` + strings.Repeat("x", 17<<10) + `"}`, 413},
+		{"GET", "/api/catalog", "", 200},
+		{"GET", "/api/artwork/movie/tt0000001", "", 404},
+		{"POST", "/api/open", `{"kind":"movie","id":"tt0000001"}`, 404},
+		{"POST", "/api/open", `{"kind":"episode","id":"tt0000001"}`, 400},
 	} {
 		t.Run(tc.method+tc.path+fmt.Sprint(tc.status)+fmt.Sprint(len(tc.body)), func(t *testing.T) {
 			response := webRequest(handler, tc.method, tc.path, tc.body)
@@ -101,6 +108,10 @@ func TestWebHTTPValidationAndAssets(t *testing.T) {
 			}
 			if response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("X-Frame-Options") != "DENY" || response.Header().Get("Content-Security-Policy") == "" {
 				t.Fatal("missing security headers")
+			}
+			// Search posters are same-origin images; nothing else may load.
+			if csp := response.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") || !strings.Contains(csp, "img-src 'self';") {
+				t.Fatalf("CSP = %q", csp)
 			}
 			if strings.Contains(response.Body.String(), "secret=private") {
 				t.Fatal("URL leaked in error response")

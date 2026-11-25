@@ -48,6 +48,9 @@ type APIClient struct {
 	movieItems []*listingItem
 	showItems  []*listingItem
 	snapshot   LibrarySnapshot
+	// generation versions web artwork URLs: seeded from the clock so it never
+	// repeats across restarts, then incremented by each published library.
+	generation uint64
 
 	log *slog.Logger
 }
@@ -106,6 +109,7 @@ func NewEmptyAPIClient(log *slog.Logger) *APIClient {
 		movies:        make(map[string]*papi.Movie),
 		shows:         make(map[string]*papi.Show),
 		snapshot:      emptyLibrarySnapshot(),
+		generation:    uint64(time.Now().UnixMilli()), // exact as a JS number (< 2^53)
 		log:           log,
 	}
 }
@@ -174,6 +178,7 @@ func (c *APIClient) publishLibrary(movies map[string]*papi.Movie, shows map[stri
 	c.movieItems = movieItems
 	c.showItems = showItems
 	c.snapshot = snapshot
+	c.generation++
 }
 
 func (c *APIClient) getSnapshot() LibrarySnapshot {

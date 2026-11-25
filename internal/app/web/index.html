@@ -10,6 +10,64 @@
 </head>
 <body>
   <main id="app" data-layout="idle" data-state="connecting">
+    <form id="search-form" class="search-bar" role="search" novalidate>
+      <button type="button" id="search-close" class="icon-button" aria-label="Close search" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m15 6-6 6 6 6"/></svg>
+      </button>
+      <div class="field">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>
+        <input id="search" type="search" aria-label="Search movies and shows" aria-controls="results" placeholder="Search movies and shows" maxlength="200" enterkeyhint="search" autocomplete="off" autocapitalize="none" spellcheck="false">
+        <button type="button" id="search-clear" class="search-clear" aria-label="Clear search" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 7 10 10M17 7 7 17"/></svg>
+        </button>
+      </div>
+    </form>
+
+    <section id="search-view" class="search-view" aria-labelledby="results-heading" hidden>
+      <fieldset class="filters">
+        <legend class="visually-hidden">Type</legend>
+        <input class="visually-hidden" type="radio" name="kind" id="kind-all" value="" checked>
+        <label for="kind-all">All <span class="count" data-count=""></span></label>
+        <input class="visually-hidden" type="radio" name="kind" id="kind-movie" value="movie">
+        <label for="kind-movie">Movies <span class="count" data-count="movie"></span></label>
+        <input class="visually-hidden" type="radio" name="kind" id="kind-show" value="show">
+        <label for="kind-show">Shows <span class="count" data-count="show"></span></label>
+      </fieldset>
+      <h2 id="results-heading" class="results-heading">Recently added</h2>
+      <div id="search-message" class="search-message" hidden>
+        <p></p>
+        <button type="button" hidden></button>
+      </div>
+      <ul id="results" class="results"></ul>
+      <p id="results-more" class="results-more" hidden></p>
+      <p id="results-live" class="visually-hidden" role="status" aria-live="polite"></p>
+    </section>
+
+    <template id="result-template">
+      <li class="result">
+        <button type="button" class="result-open">
+          <span class="poster">
+            <svg class="glyph-movie" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 3v18M16 3v18M4 8h4m-4 4h4m-4 4h4m8-8h4m-4 4h4m-4 4h4"/></svg>
+            <svg class="glyph-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="m8 2 4 4 4-4"/></svg>
+          </span>
+          <span class="result-text">
+            <span class="result-title"></span>
+            <span class="result-meta">
+              <span class="kind-badge">
+                <svg class="glyph-movie" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 3v18M16 3v18M4 8h4m-4 4h4m-4 4h4m8-8h4m-4 4h4m-4 4h4"/></svg>
+                <svg class="glyph-show" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="m8 2 4 4 4-4"/></svg>
+                <span class="result-kind"></span>
+              </span>
+              <span class="result-year"></span>
+            </span>
+          </span>
+        </button>
+        <button type="button" class="result-play">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="solid" d="M8 5v14l11-7z"/></svg>
+        </button>
+      </li>
+    </template>
+
     <section class="now" aria-labelledby="now-heading">
       <h2 id="now-heading" class="visually-hidden">Now playing</h2>
       <div class="now-info">

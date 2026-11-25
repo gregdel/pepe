@@ -42,6 +42,9 @@ type webCommand struct {
 	// A seek's absolute target and the playlist entry the phone showed.
 	seekTo      float64
 	playlistPos int
+	// A searched title to show on the TV, or with play, a movie to play.
+	media *MediaItem
+	play  bool
 }
 
 type webStatus struct {
@@ -52,10 +55,11 @@ type webStatus struct {
 	Error          string       `json:"error"`
 	CommandError   string       `json:"command_error"`
 	QueuedCommands int          `json:"queued_commands"`
-	PlaylistPos    int          `json:"playlist_pos"`   // 1-based; 0 when unknown
-	PlaylistCount  int          `json:"playlist_count"` // mpv playlist entries
-	Position       float64      `json:"position"`       // seconds into the playing entry
-	Duration       float64      `json:"duration"`       // seconds; 0 when unknown
+	CatalogVersion uint64       `json:"catalog_version"` // changes when the library is replaced
+	PlaylistPos    int          `json:"playlist_pos"`    // 1-based; 0 when unknown
+	PlaylistCount  int          `json:"playlist_count"`  // mpv playlist entries
+	Position       float64      `json:"position"`        // seconds into the playing entry
+	Duration       float64      `json:"duration"`        // seconds; 0 when unknown
 	Paused         bool         `json:"paused"`
 	session        uint64       // transport-only identity; never exposed to the browser
 	// tracker is read at request time: time-pos does not wake the event loop.
@@ -67,6 +71,7 @@ type webUI struct {
 	commands   chan webCommand
 	logs       *LogBuffer // guarded by mu; concurrency-safe, entries are already redacted
 	invalidate func()
+	client     *APIClient // concurrency-safe; the only library state handlers read
 	server     *http.Server
 	listener   net.Listener
 	serveDone  chan struct{}
@@ -105,7 +110,7 @@ func (a *App) startWebUI(addr string) error {
 	}
 	web := &webUI{
 		commands: make(chan webCommand, webQueueSize), invalidate: a.invalidate,
-		logs:     a.logs,
+		logs: a.logs, client: a.client,
 		listener: listener, serveDone: make(chan struct{}),
 	}
 	web.server = &http.Server{
@@ -193,6 +198,7 @@ func (web *webUI) handler() http.Handler {
 		if status.tracker != nil {
 			status.Position, status.Duration, status.Paused = status.tracker.progress()
 		}
+		status.CatalogVersion = web.client.catalogGeneration()
 		writeWebJSON(w, http.StatusOK, status)
 	})
 	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
@@ -269,13 +275,14 @@ func (web *webUI) handler() http.Handler {
 		}
 		web.accept(w, webCommand{control: request.Command})
 	})
+	web.catalogRoutes(mux)
 	protected := http.NewCrossOriginProtection().Handler(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		protected.ServeHTTP(w, r)
 	})
 }
@@ -346,6 +353,8 @@ func (a *App) drainWebCommands() {
 		case command := <-a.webUI.commands:
 			a.webCommandError = ""
 			switch {
+			case command.media != nil:
+				a.openFromWeb(command.media.Type, command.media.ID, command.play)
 			case command.url != "":
 				if err := a.launchURL(command.url); err != nil {
 					a.webCommandError = err.Error()
