@@ -127,6 +127,7 @@ func (a *App) showEpisodeList(gtx C, s *showPage) D {
 		}
 
 		episodes := season.Children
+		playing := a.playingMediaKey()
 		key := episodeMotionKey{showID: s.showID, season: s.seasonCursor}
 		return a.focusList(gtx, &s.epList, &s.epMotion, key, len(episodes), s.epCursor, s.focus == focusEpisodes, rowFocus,
 			func(gtx C, i int) D {
@@ -157,7 +158,20 @@ func (a *App) showEpisodeList(gtx C, s *showPage) D {
 								return a.label(gtx, sp, title, titleCol, weight)
 							}),
 							layout.Rigid(func(gtx C) D {
-								if node.Episode == nil || !a.progress.watched(episodeMediaKey(node.ShowID, node.Episode.Season, node.Episode.Episode)) {
+								if node.Episode == nil {
+									return D{}
+								}
+								key := episodeMediaKey(node.ShowID, node.Episode.Season, node.Episode.Episode)
+								if key == playing {
+									col := colorPrimary
+									if selected {
+										col = colorSelectFg
+									}
+									return layout.Inset{Left: dp12}.Layout(gtx, func(gtx C) D {
+										return a.nowPlayingMark(gtx, spTiny, "", col)
+									})
+								}
+								if !a.progress.watched(key) {
 									return D{}
 								}
 								return layout.Inset{Left: dp12}.Layout(gtx, func(gtx C) D {
@@ -216,7 +230,18 @@ func (a *App) showEpisodeInfo(gtx C, s *showPage) D {
 
 	// The resume position replaces the Play button's label: Enter resumes,
 	// so it gets its own line rather than being clamped off the meta line.
-	if pos := a.progress.position(key); pos > 0 {
+	// While the episode plays, the saved position is stale and Enter does
+	// nothing, so the line says it is playing instead.
+	if key == a.playingMediaKey() {
+		sections = append(sections, spacerFn(dp12))
+		sections = append(sections, func(gtx C) D {
+			return a.nowPlayingMark(gtx, spMeta, "Now playing", colorPrimary)
+		})
+	} else if reason := a.playerErrorFor(key); reason != "" {
+		sections = append(sections, spacerFn(dp12), func(gtx C) D {
+			return a.playbackError(gtx, reason)
+		})
+	} else if pos := a.progress.position(key); pos > 0 {
 		resume := "Resume from " + formatResumePos(pos)
 		sections = append(sections, spacerFn(dp12))
 		sections = append(sections, func(gtx C) D {
@@ -244,10 +269,6 @@ func (a *App) showEpisodeInfo(gtx C, s *showPage) D {
 		sections = append(sections, func(gtx C) D {
 			return a.body(gtx, spMeta, technical, colorSubtle, 1)
 		})
-	}
-
-	if a.playerStatus == PlayerStatusError {
-		sections = append(sections, spacerFn(dp12), a.renderPlayerStatus)
 	}
 
 	gtx.Constraints.Min = image.Point{}

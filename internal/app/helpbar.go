@@ -72,13 +72,19 @@ func (a *App) contextHints() []hint {
 	}
 
 	if d := a.detail; d != nil {
-		hints := []hint{{key: "↑↓", label: "scroll"}, {key: "enter", label: "play"}}
+		// Enter does nothing on the title already playing.
+		playing := a.playingMediaKey()
+		hints := []hint{{key: "↑↓", label: "scroll"}}
+		if playing == "" || playing != movieMediaKey(d.movieID) {
+			hints = append(hints, hint{key: "enter", label: "play"})
+		}
 		if d.kind == detailShow {
 			if d.show.focus == focusTabs {
 				hints = []hint{{key: "←→", label: "seasons"}, {key: "↓/enter", label: "episodes"}}
 			} else {
 				hints = []hint{{key: "↑↓", label: "episodes"}}
-				if d.show.currentEpisode() != nil {
+				if ep := d.show.currentEpisode(); ep != nil && (ep.Episode == nil || playing == "" ||
+					playing != episodeMediaKey(ep.ShowID, ep.Episode.Season, ep.Episode.Episode)) {
 					hints = append(hints, hint{key: "enter", label: "play episode"})
 				}
 			}

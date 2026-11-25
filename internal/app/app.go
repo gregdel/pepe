@@ -112,9 +112,10 @@ type App struct {
 
 	// player
 	playerStatus     PlayerStatus
-	playerMode       PlayerMode
 	playerTitle      string
-	playerError      string
+	playerError      string // raw, for the log and web status
+	playerErrorKey   string // media key whose launch failed
+	playerErrorMsg   string // shown on playerErrorKey's detail page
 	playerFromWeb    bool
 	playerScripted   bool
 	playerStopping   bool
@@ -607,11 +608,14 @@ func (a *App) drainChannels() {
 				a.playerStatus = PlayerStatusIdle
 				a.launchPlayback(*next)
 			} else if result.err != nil {
-				a.playerStatus = PlayerStatusError
-				a.playerError = result.err.Error()
+				key := ""
+				if result.tracker != nil {
+					key, _, _ = result.tracker.snapshot()
+				}
+				a.recordPlayerError(key, result.err)
 			} else {
 				a.playerStatus = PlayerStatusIdle
-				a.playerError = ""
+				a.clearPlayerError()
 			}
 		default:
 		}
@@ -722,17 +726,19 @@ func (a *App) layoutPlayingBar(gtx C) D {
 				}),
 				layout.Stacked(func(gtx C) D {
 					return layout.Inset{Left: a.viewportInsets.Left, Right: a.viewportInsets.Right, Top: a.viewportInsets.Top, Bottom: dp8}.Layout(gtx, func(gtx C) D {
-						status := "Now playing"
+						status, title := "Now playing", a.playerTitle
 						if a.playerFromWeb {
 							status = "Now playing from Web UI"
 						}
-						if a.playerStopping || a.pendingPlayback != nil {
+						if next := a.pendingPlayback; next != nil {
+							status, title = "Starting…", next.title
+						} else if a.playerStopping {
 							status = "Stopping playback"
 						}
 						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 							layout.Rigid(func(gtx C) D { return a.label(gtx, spMeta, status, colorPrimary, font.Bold) }),
 							layout.Rigid(layout.Spacer{Width: dp12}.Layout),
-							layout.Flexed(1, func(gtx C) D { return a.label(gtx, spMeta, a.playerTitle, colorFg, font.Medium) }),
+							layout.Flexed(1, func(gtx C) D { return a.label(gtx, spMeta, title, colorFg, font.Medium) }),
 						)
 					})
 				}),

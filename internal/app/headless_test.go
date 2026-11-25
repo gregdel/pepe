@@ -258,7 +258,6 @@ func TestHeadlessPlayingBarAndSwitchInputs(t *testing.T) {
 	f := newHeadlessFixture(t)
 	f.app.playerStatus = PlayerStatusRunning
 	f.app.playerTitle = "Old Movie"
-	f.app.playerMode = PlayerModeKMS
 	stop := make(chan struct{})
 	f.app.playerStop = stop
 	completion := make(chan playerResult, 1)
@@ -291,6 +290,13 @@ func TestHeadlessPlayingBarAndSwitchInputs(t *testing.T) {
 	default:
 		t.Fatal("current player was not asked to stop")
 	}
+	if err := f.driver.Frame(); err != nil {
+		t.Fatal(err)
+	}
+	if tree := f.driver.Tree(); !headlessHasLabel(tree, "Starting…") || !headlessHasLabel(tree, "New Movie (2026)") || headlessHasLabel(tree, "Old Movie") {
+		t.Fatal("switch indicator does not name the next title")
+	}
+	f.app.pendingPlayback = nil
 	if err := f.driver.Frame(); err != nil {
 		t.Fatal(err)
 	}

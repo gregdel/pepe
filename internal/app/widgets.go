@@ -550,18 +550,38 @@ func (a *App) playButton(gtx C, id, semanticLabel, text string, action func()) D
 // watchedMark draws a check followed by "Watched", or only the check when
 // text is empty, one text line high.
 func (a *App) watchedMark(gtx C, size unit.Sp, text string, col color.NRGBA) D {
+	return a.iconMark(gtx, watchedIcon, size, text, col, font.Normal)
+}
+
+// nowPlayingMark marks the title mpv is playing: a play icon followed by
+// "Now playing", or only the icon, labelled for the semantic tree, when
+// text is empty.
+func (a *App) nowPlayingMark(gtx C, size unit.Sp, text string, col color.NRGBA) D {
+	if text != "" {
+		return a.iconMark(gtx, playIcon, size, text, col, font.Medium)
+	}
+	macro := op.Record(gtx.Ops)
+	dims := a.iconMark(gtx, playIcon, size, "", col, font.Medium)
+	call := macro.Stop()
+	defer clip.Rect{Max: dims.Size}.Push(gtx.Ops).Pop()
+	semantic.LabelOp("Now playing").Add(gtx.Ops)
+	call.Add(gtx.Ops)
+	return dims
+}
+
+func (a *App) iconMark(gtx C, icon *widget.Icon, size unit.Sp, text string, col color.NRGBA, weight font.Weight) D {
 	gtx.Constraints.Min = image.Point{}
 	measure := op.Record(gtx.Ops)
 	line := a.label(gtx, size, "M", col, font.Normal)
 	measure.Stop()
-	icon := layout.Rigid(inlineIcon(watchedIcon, line.Size.Y, line.Size.Y, col))
+	mark := layout.Rigid(inlineIcon(icon, line.Size.Y, line.Size.Y, col))
 	if text == "" {
-		return layout.Flex{Alignment: layout.Middle}.Layout(gtx, icon)
+		return layout.Flex{Alignment: layout.Middle}.Layout(gtx, mark)
 	}
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-		icon,
+		mark,
 		layout.Rigid(layout.Spacer{Width: dp6}.Layout),
-		layout.Rigid(func(gtx C) D { return a.label(gtx, size, text, col, font.Normal) }),
+		layout.Rigid(func(gtx C) D { return a.label(gtx, size, text, col, weight) }),
 	)
 }
 

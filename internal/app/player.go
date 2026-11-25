@@ -125,12 +125,12 @@ func episodeMediaKey(showID string, season, episode int) string {
 
 func (a *App) launchMovie(media *MediaItem) {
 	if media == nil {
-		a.setPlayerError("movie is not available")
+		a.setPlayerError("", errors.New("movie is not available"))
 		return
 	}
 	movie, ok := a.client.getMovie(media.ID)
 	if !ok {
-		a.setPlayerError("movie is not available")
+		a.setPlayerError(movieMediaKey(media.ID), errors.New("movie is not available"))
 		return
 	}
 	a.launchPlayback(playbackSource{
@@ -143,7 +143,7 @@ func (a *App) launchMovie(media *MediaItem) {
 
 func (a *App) launchEpisode(node *DynamicNode) {
 	if node == nil || node.Episode == nil {
-		a.setPlayerError("episode is not available")
+		a.setPlayerError("", errors.New("episode is not available"))
 		return
 	}
 	show, _ := a.client.getShow(node.ShowID)
@@ -220,6 +220,9 @@ func (a *App) launchURL(raw string) error {
 }
 
 func (a *App) launchPlayback(source playbackSource) {
+	if source.mediaKey != "" && source.mediaKey == a.playingMediaKey() {
+		return // already playing: restarting would only reload it
+	}
 	if a.playerStatus == PlayerStatusRunning {
 		a.pendingPlayback = &source
 		a.requestPlayerStop()
@@ -230,19 +233,77 @@ func (a *App) launchPlayback(source playbackSource) {
 	}
 	command, err := a.buildPlayerCommand(source)
 	if err != nil {
-		a.setPlayerError(err.Error())
+		a.setPlayerError(source.mediaKey, err)
 		return
 	}
 	a.startPlayer(command)
 }
 
-func (a *App) setPlayerError(message string) {
+// playingMediaKey is the media key of the entry mpv is playing, or "" when
+// nothing is playing, playback is being stopped, or the entry is not
+// catalog media.
+func (a *App) playingMediaKey() string {
+	if a.playerStatus != PlayerStatusRunning || a.playerStopping || a.pendingPlayback != nil || a.playerTracker == nil {
+		return ""
+	}
+	key, _, _ := a.playerTracker.snapshot()
+	return key
+}
+
+func (a *App) setPlayerError(mediaKey string, err error) {
 	if a.playerStatus == PlayerStatusRunning {
 		return
 	}
-	a.logger().Error("playback failed", "error", message)
+	a.logger().Error("playback failed", "error", err)
+	a.recordPlayerError(mediaKey, err)
+}
+
+// recordPlayerError keeps the raw error for the log and web status, and a
+// short reason shown only on mediaKey's detail page.
+func (a *App) recordPlayerError(mediaKey string, err error) {
 	a.playerStatus = PlayerStatusError
-	a.playerError = message
+	a.playerError = err.Error()
+	a.playerErrorKey = mediaKey
+	a.playerErrorMsg = playbackErrorReason(err)
+}
+
+func (a *App) clearPlayerError() {
+	a.playerError, a.playerErrorKey, a.playerErrorMsg = "", "", ""
+}
+
+// playerErrorFor is the failure reason to show for mediaKey, if its last
+// playback attempt failed.
+func (a *App) playerErrorFor(mediaKey string) string {
+	if a.playerStatus != PlayerStatusError || mediaKey == "" || mediaKey != a.playerErrorKey {
+		return ""
+	}
+	return a.playerErrorMsg
+}
+
+var (
+	errMPVNotFound        = errors.New("mpv not found: install mpv 0.41+ with Lua, or set mpv_path in the config")
+	errVideoURL           = errors.New("video URL")
+	errLauncherTeardown   = errors.New("managed launcher teardown is unconfirmed; private runtime retained")
+	errLauncherBlocked    = errors.New("previous launcher teardown is unconfirmed; playback is blocked")
+	errPlayerCommandEmpty = errors.New("player command is empty")
+)
+
+// playbackErrorReason turns a playback error into a short status line. Raw
+// errors can carry private URLs and paths, so they stay in the log.
+func playbackErrorReason(err error) string {
+	var exitErr *exec.ExitError
+	switch {
+	case errors.Is(err, errMPVNotFound):
+		return "mpv isn't installed"
+	case errors.Is(err, errLauncherTeardown), errors.Is(err, errLauncherBlocked):
+		return "The previous player didn't close · restart pépé"
+	case errors.Is(err, errVideoURL):
+		return "This file isn't available"
+	case errors.As(err, &exitErr) && exitErr.ExitCode() == 2:
+		// mpv's exit status when no file could be played.
+		return "mpv couldn't open this file"
+	}
+	return "Playback failed"
 }
 
 // requestPlayerStop is event-loop-only and safe to call repeatedly.
@@ -278,7 +339,7 @@ func (a *App) buildPlayerCommand(source playbackSource) (playerCommand, error) {
 		var err error
 		videoURL, err = a.client.getDownloadURL(source.video)
 		if err != nil {
-			return playerCommand{}, fmt.Errorf("video URL: %w", err)
+			return playerCommand{}, fmt.Errorf("%w: %w", errVideoURL, err)
 		}
 		token = a.client.getToken()
 		subtitleURLs = a.externalSubtitleURLs(source.subtitles)
@@ -372,7 +433,7 @@ func (a *App) startPlayer(command playerCommand) bool {
 	if a.playerCleanupDir != "" {
 		if !launcherComplete(a.playerCleanupDir) {
 			_ = os.RemoveAll(command.runtimeDir)
-			a.setPlayerError("previous launcher teardown is unconfirmed; playback is blocked")
+			a.setPlayerError(command.mediaKey, errLauncherBlocked)
 			return false
 		}
 		_ = os.RemoveAll(a.playerCleanupDir)
@@ -384,7 +445,7 @@ func (a *App) startPlayer(command playerCommand) bool {
 	}
 	if len(command.args) == 0 {
 		_ = os.RemoveAll(command.runtimeDir)
-		a.setPlayerError("player command is empty")
+		a.setPlayerError(command.mediaKey, errPlayerCommandEmpty)
 		return false
 	}
 
@@ -403,10 +464,10 @@ func (a *App) startPlayer(command playerCommand) bool {
 	if err != nil {
 		_ = os.RemoveAll(command.runtimeDir)
 		if errors.Is(err, exec.ErrNotFound) {
-			a.setPlayerError("mpv not found: install mpv 0.41+ with Lua, or set mpv_path in the config")
+			a.setPlayerError(command.mediaKey, errMPVNotFound)
 			return false
 		}
-		a.setPlayerError(err.Error())
+		a.setPlayerError(command.mediaKey, err)
 		return false
 	}
 
@@ -423,13 +484,12 @@ func (a *App) startPlayer(command playerCommand) bool {
 	a.playerStop = stop
 	a.playerStatus = PlayerStatusRunning
 	a.playerTitle = command.title
-	a.playerMode = command.mode
 	a.playerSocket = command.sockPath
 	a.playerSession++
 	a.playerFromWeb = command.fromWeb
 	a.playerScripted = command.scripted
 	a.playerStopping = false
-	a.playerError = ""
+	a.clearPlayerError()
 	if a.invalidate != nil {
 		a.invalidate()
 	}
@@ -464,7 +524,7 @@ func (a *App) startPlayer(command playerCommand) bool {
 		result := playerResult{err: err, tracker: tracker}
 		if policy.managedLauncher && !launcherComplete(command.runtimeDir) {
 			result.retainedRuntime = command.runtimeDir
-			result.err = errors.Join(err, errors.New("managed launcher teardown is unconfirmed; private runtime retained"))
+			result.err = errors.Join(err, errLauncherTeardown)
 		} else {
 			_ = os.RemoveAll(command.runtimeDir)
 		}

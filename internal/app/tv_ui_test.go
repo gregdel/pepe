@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -298,14 +299,14 @@ func TestTVDetailsAndOverlays(t *testing.T) {
 					t.Fatal("administrative detail remains in main flow")
 				}
 				tvCapture(t, f, fmt.Sprintf("movie-%d-art-%d", size.X, shade))
-				f.app.playerStatus = PlayerStatusError
-				f.app.playerError = "Fixture playback error"
+				f.app.recordPlayerError(movieMediaKey("movie-new"), errors.New("Fixture playback error"))
 				if err := f.driver.Frame(); err != nil {
 					t.Fatal(err)
 				}
-				if !headlessHasLabel(f.driver.Tree(), "Fixture playback error") {
-					t.Fatal("playback failure is hidden")
+				if !headlessHasLabel(f.driver.Tree(), "Playback failed") || headlessHasLabel(f.driver.Tree(), "Fixture playback error") {
+					t.Fatal("playback failure is hidden or shows the raw error")
 				}
+				tvCapture(t, f, fmt.Sprintf("movie-%d-art-%d-error", size.X, shade))
 				f.app.playerStatus = PlayerStatusIdle
 				f.app.popDetail()
 				show := f.app.client.shows["show-one"]

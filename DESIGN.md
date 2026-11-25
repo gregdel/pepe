@@ -122,7 +122,10 @@ The layouts, as a map for changing them.
     tabs above the episode list and the focused episode's info block.
 - **Playing bar:** while mpv runs, a `colorSurface` band across the top with
   a hairline under it. The status is in `colorPrimary` bold and the title in
-  `colorFg`.
+  `colorFg`: "Now playing" and the playing title, "Starting…" and the next
+  title while a switch stops the current one, or "Stopping playback". It is
+  the only global player status; detail pages show only how playback
+  relates to their own title, never player internals.
 - **Help bar:** always at the bottom, on `colorBg`. It stays readable above a
   popup's dimmer.
 
@@ -245,6 +248,14 @@ pops, because Gio blends in linear light.
 - **Watch state:** a check icon in `colorSubtle`. Detail pages add the label
   "Watched"; episode rows show only the icon. The resume position gets its
   own `colorFg` line in the episode info block, since Enter resumes from it.
+- **Now playing:** on the title mpv is playing, Enter does nothing and the
+  help bar drops its play hint. The movie's Play button reads "Now playing";
+  the episode row shows a play icon in `colorPrimary` instead of the check,
+  and the info block's resume line becomes "Now playing" with the icon.
+- **Playback failure:** only on the failed title's detail page, right under
+  its Play button (movies) or in place of the resume line (episodes): a
+  short reason in `colorError` and "Details in Logs" in `colorSubtle`. Raw
+  errors can carry private URLs and paths, so they stay in the log.
 - **Empty, loading and error states:** a single plain line ("No episodes",
   "Searching…") in `colorFg` or `colorSubtle`; errors in `colorError`. No
   spinners, so idle stays free.

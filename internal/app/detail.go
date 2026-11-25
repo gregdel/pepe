@@ -87,8 +87,11 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen, alpha float32) D {
 	movieID := movie.ImdbID
 	id := d.movieID
 
+	key := movieMediaKey(movieID)
 	playText := "Play"
-	if pos := a.progress.position(movieMediaKey(movieID)); pos > 0 {
+	if key == a.playingMediaKey() {
+		playText = "Now playing" // Enter does not restart it
+	} else if pos := a.progress.position(key); pos > 0 {
 		playText = "Resume " + formatResumePos(pos)
 	}
 
@@ -104,7 +107,7 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen, alpha float32) D {
 		})
 	}
 
-	if a.progress.watched(movieMediaKey(movieID)) {
+	if a.progress.watched(key) {
 		sections = append(sections, spacerFn(dp8))
 		sections = append(sections, func(gtx C) D {
 			return a.watchedMark(gtx, spMeta, "Watched", colorSubtle)
@@ -118,6 +121,12 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen, alpha float32) D {
 			a.launchMovie(&MediaItem{ID: d.movieID, Title: d.movieTitle, Type: mediaKindMovie})
 		})
 	})
+
+	if reason := a.playerErrorFor(key); reason != "" {
+		sections = append(sections, spacerFn(dp12), func(gtx C) D {
+			return a.playbackError(gtx, reason)
+		})
+	}
 
 	if movie.Plot != "" {
 		p := movie.Plot
@@ -152,10 +161,6 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen, alpha float32) D {
 	sections = append(sections, func(gtx C) D {
 		return a.body(gtx, spMeta, subText, colorSubtle, 1)
 	})
-
-	if a.playerStatus != "" && a.playerStatus != PlayerStatusIdle {
-		sections = append(sections, spacerFn(dp16), a.renderPlayerStatus)
-	}
 
 	return a.detailShell(gtx, alpha, moviePosterWidth+detailColumnGap+movieDetailWidth, func(gtx C) D {
 		return a.movieFanart(gtx, movieID)
@@ -214,27 +219,13 @@ func buildMetaLine(year, runtime int, quality string, rating float64, genres []s
 	return strings.Join(parts, "  ·  ")
 }
 
-// ── Player status ─────────────────────────────────────────────────────────────
+// ── Playback failure ──────────────────────────────────────────────────────────
 
-func (a *App) renderPlayerStatus(gtx C) D {
-	status := a.playerStatus
-	if status == "" || status == PlayerStatusIdle {
-		return D{}
-	}
-
-	var lines []labelLine
-	statusText := string(status)
-	if status == PlayerStatusRunning {
-		statusText = "Playing"
-	}
-	lines = append(lines, labelLine{text: "Player", color: colorPrimary, size: spTiny, weight: font.Bold})
-	lines = append(lines, labelLine{text: fmt.Sprintf("Status: %s", statusText), color: colorFg, size: sp})
-	if a.playerMode != "" {
-		lines = append(lines, labelLine{text: fmt.Sprintf("Mode: %s", a.playerMode), color: colorFg, size: sp})
-	}
-	if status == PlayerStatusError && a.playerError != "" {
-		lines = append(lines, labelLine{text: "Error:", color: colorFg, size: sp})
-		lines = append(lines, labelLine{text: a.playerError, color: colorError, size: sp})
-	}
-	return a.renderLines(gtx, lines)
+// playbackError shows why the title's last launch failed; the raw error,
+// which can hold private URLs and paths, is only in the log.
+func (a *App) playbackError(gtx C, reason string) D {
+	return a.renderLines(gtx, []labelLine{
+		{text: reason, color: colorError, size: spMeta},
+		{text: "Details in Logs", color: colorSubtle, size: spMeta},
+	})
 }
