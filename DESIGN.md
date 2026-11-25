@@ -273,7 +273,8 @@ these files.
   current-item look (`surface-2` with `colorPrimary`).
   The playback progress bar matches the OSD's: a `colorPrimary` fill on an
   `outline-strong` track with a `colorFg` thumb.
-  Search is a full-screen view behind the top search bar. Its filter chips
+  Search is a full-screen view behind the top search bar, on plain `bg`
+  without the page glow, which the opaque sticky bar would cut. Its filter chips
   (All, Movies, Shows) use the current-item look for the checked one. A result
   row is a `surface` card: a 2:3 poster on a `surface-2` placeholder showing
   a film or TV glyph in `muted` until the image loads (or for good if it fails),

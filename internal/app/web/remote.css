@@ -47,6 +47,9 @@ main {
   grid-template-areas: "search" "now" "link" "remote" "footer";
 }
 main[data-view="search"] { grid-template-areas: "search" "results"; }
+/* The opaque sticky bar would cut the glow with a hard edge; results go
+   without it. */
+body:has(main[data-view="search"]) { background: var(--bg); }
 main[data-view="search"] > :is(.now, .link, .remote, .footer) { display: none; }
 .search-bar { grid-area: search; }
 .search-view { grid-area: results; }

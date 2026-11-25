@@ -249,7 +249,7 @@ func TestConfiguredWebUIBindFailureIsNotFatal(t *testing.T) {
 	defer func() { _ = busy.Close() }()
 	a := New(nil, nil, nil, nil, nil)
 	defer a.Close()
-	a.startConfiguredWebUI(busy.Addr().String())
+	a.StartWebUI(busy.Addr().String())
 	if a.webUI != nil || a.webUIStartError == "" {
 		t.Fatal("bind failure was not recorded")
 	}

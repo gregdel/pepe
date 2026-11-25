@@ -24,10 +24,10 @@ type webRemotePage struct {
 	message string
 }
 
-// startConfiguredWebUI starts the configured web remote. A failure (address in
-// use, privileged port) is logged and shown on the Web remote page instead of
+// StartWebUI starts the web remote on addr. A failure (address in use,
+// privileged port) is logged and shown on the Web remote page instead of
 // stopping pépé, so the address can be fixed in Settings.
-func (a *App) startConfiguredWebUI(addr string) {
+func (a *App) StartWebUI(addr string) {
 	if err := a.startWebUI(addr); err != nil {
 		a.logger().Error("web remote disabled", "address", addr, "error", err)
 		a.webUIStartError = err.Error()

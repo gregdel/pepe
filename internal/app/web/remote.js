@@ -527,9 +527,11 @@ function leaveSearch() {
 }
 
 // Close through history, so the phone's Back and the close button agree.
+// The view hides at once; the popstate that follows finds it closed.
 function closeSearch() {
-  if (history.state && history.state.search) history.back();
-  else leaveSearch();
+  const pushed = history.state && history.state.search;
+  leaveSearch();
+  if (pushed) history.back();
 }
 
 function openTitle(item, play) {
@@ -538,6 +540,11 @@ function openTitle(item, play) {
     toast(play ? "Playing on TV" : playerRunning ? "Opens on TV when playback stops" : "Opened on TV");
   });
   closeSearch();
+  // The search is done: the next one starts on recently added, keeping the
+  // stored kind filter, a per-viewer preference.
+  searchInput.value = "";
+  searchScroll = 0;
+  renderSearch();
 }
 
 window.addEventListener("popstate", () => {

@@ -496,7 +496,7 @@ func Run(w *gioapp.Window, client *APIClient, sseCh <-chan struct{}, config *Con
 		a.startWithLoadError(loadErr)
 	}
 	if config != nil {
-		a.startConfiguredWebUI(config.WebUIAddr)
+		a.StartWebUI(config.WebUIAddr)
 		a.openProgress(config)
 	}
 	defer a.pumpEvents(wake)()

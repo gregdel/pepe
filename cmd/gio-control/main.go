@@ -82,6 +82,11 @@ func run() int {
 		return 1
 	}
 	defer cleanup()
+	// Serve the web remote beside the headless UI, so a phone page can be
+	// checked against the same app; its commands drain on the next frame.
+	if addr := os.Getenv("GIO_CONTROL_WEB_UI_ADDR"); addr != "" {
+		ui.StartWebUI(addr)
+	}
 
 	drv, err := driver.New(driver.Config{
 		Width: defaultWidth, Height: defaultHeight, PxPerDp: 1, PxPerSp: 1,

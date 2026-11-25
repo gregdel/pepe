@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Drive the headless pépé UI from a shell, through a gio-control socket server.
 #
-#   scripts/gio start [--mock]   build and start the server (--mock: offline
-#                                catalog and stub mpv, never plays media)
-#   scripts/gio restart [--mock] rebuild, then restart, e.g. after UI edits
+#   scripts/gio start [--mock] [--web ADDR]
+#                                build and start the server (--mock: offline
+#                                catalog and stub mpv, never plays media;
+#                                --web: also serve the web remote on ADDR,
+#                                e.g. 127.0.0.1:8099)
+#   scripts/gio restart [--mock] [--web ADDR]
+#                                rebuild, then restart, e.g. after UI edits
 #                                (a failed build keeps the old server)
 #                                (start and restart clear old screenshots)
 #   scripts/gio stop             stop the server
@@ -61,14 +65,24 @@ server_running() {
 }
 
 parse_start_args() {
-	case ${1:-} in
-	--mock) mock=1 ;;
-	"") mock=0 ;;
-	*)
-		echo "usage: scripts/gio $command [--mock]" >&2
-		exit 2
-		;;
-	esac
+	mock=0 web=""
+	while (($#)); do
+		case $1 in
+		--mock) mock=1 ;;
+		--web)
+			[[ -n ${2:-} ]] || start_usage
+			web=$2
+			shift
+			;;
+		*) start_usage ;;
+		esac
+		shift
+	done
+}
+
+start_usage() {
+	echo "usage: scripts/gio $command [--mock] [--web ADDR]" >&2
+	exit 2
 }
 
 # build compiles beside the current binary, so a failed build leaves a running
@@ -100,6 +114,11 @@ launch() {
 		else
 			unset GIO_CONTROL_MOCK_MPV
 		fi
+		if [[ -n $web ]]; then
+			export GIO_CONTROL_WEB_UI_ADDR=$web
+		else
+			unset GIO_CONTROL_WEB_UI_ADDR
+		fi
 		setsid "$bin" serve --socket "$sock" >"$log" 2>&1 </dev/null &
 		echo $!
 	)
@@ -108,6 +127,10 @@ launch() {
 	local _
 	for _ in $(seq 1 600); do
 		if grep -m 1 '"event":"ready"' "$log" 2>/dev/null; then
+			# The web remote starts before ready; a bind failure only logs.
+			if [[ -n $web ]]; then
+				grep -m 1 'web remote disabled' "$log" >&2 || true
+			fi
 			return
 		fi
 		if ! kill -0 "$pid" 2>/dev/null; then
@@ -180,7 +203,7 @@ stop) stop ;;
 restart) restart "$@" ;;
 log) tail -n "${1:-50}" "$log" ;;
 help | -h | --help)
-	sed -n '2,14s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"
+	sed -n '2,18s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"
 	if [[ -x $bin ]]; then
 		echo
 		"$bin" call --help 2>&1 || true
