@@ -129,19 +129,19 @@ func TestTVBrowseLayout(t *testing.T) {
 			}
 			snapshot := buildLibrarySnapshot(radixListingBuilder{}, movies, nil)
 			f.app.client.publishLibrary(movieMap, nil, movies, nil, snapshot)
-			f.app.applyLibrarySnapshot(snapshot)
+			f.app.applyRefreshResult(snapshot)
 			if err := f.driver.Resize(size.X, size.Y); err != nil {
 				t.Fatal(err)
 			}
 			tvAssertSafeButton(t, f, "Movies")
-			tvAssertSafeButton(t, f, "Smart list")
+			tvAssertSafeButton(t, f, "Last added")
 			tvCapture(t, f, fmt.Sprintf("home-%d", size.X))
 			headlessKey(t, f, "LeftArrow")
 			// Labels are visible in addition to the button's accessibility label.
-			if !headlessHasLabel(f.driver.Tree(), "Last added") {
+			if !headlessHasLabel(f.driver.Tree(), "Smart list") {
 				t.Fatal("expanded mode rail has no labels")
 			}
-			tvAssertSafeButton(t, f, "Last added")
+			tvAssertSafeButton(t, f, "Smart list")
 			tvCapture(t, f, fmt.Sprintf("rail-%d", size.X))
 			headlessKey(t, f, "RightArrow")
 			headlessKey(t, f, "RightArrow")

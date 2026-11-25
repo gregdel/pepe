@@ -35,10 +35,10 @@ func newSettingsFixture(t *testing.T, content string, overrides map[string]strin
 	f.app.closeWindow = func() { *closed = true }
 	f.app.configSource = ConfigSource{Path: path, Overrides: overrides}
 	headlessKey(t, f, "LeftArrow")
-	headlessKey(t, f, "UpArrow") // Smart list wraps to Settings
+	headlessKey(t, f, "UpArrow") // Last added wraps to Settings
 	headlessKey(t, f, "RightArrow")
 	if f.app.browse.settings == nil || f.app.browse.focus != browseFocusContent {
-		t.Fatal("Up from Smart list did not open the Settings page")
+		t.Fatal("Up from Last added did not open the Settings page")
 	}
 	return f, path, closed
 }

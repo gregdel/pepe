@@ -128,9 +128,9 @@ var (
 type railEntry int
 
 const (
-	railSmartList  = railEntry(ListingModeTitle)
 	railLastAdded  = railEntry(ListingModeDateAdded)
-	railWebRemote  = railLastAdded + 1
+	railSmartList  = railEntry(ListingModeTitle)
+	railWebRemote  = railEntry(listingModeCount)
 	railLogs       = railWebRemote + 1
 	railSettings   = railLogs + 1
 	railEntryCount = railSettings + 1
@@ -243,10 +243,10 @@ const (
 func (a *App) layoutModeOption(gtx C, mode railEntry) D {
 	active := a.railOption() == mode
 	focused := a.browse.focus == browseFocusModeRail && active
-	icon := radixModeIcon
+	icon := dateAddedModeIcon
 	switch mode {
-	case railLastAdded:
-		icon = dateAddedModeIcon
+	case railSmartList:
+		icon = radixModeIcon
 	case railWebRemote:
 		icon = webRemoteIcon
 	case railLogs:

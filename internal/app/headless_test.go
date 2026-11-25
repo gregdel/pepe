@@ -219,8 +219,8 @@ func TestHeadlessEmptyCatalogNavigationAndRefresh(t *testing.T) {
 	if err := d.Key("DownArrow", nil); err != nil {
 		t.Fatal(err)
 	}
-	if a.browse.library.mode != ListingModeDateAdded {
-		t.Fatalf("listing mode = %v, want DateAdded", a.browse.library.mode)
+	if a.browse.library.mode != ListingModeTitle {
+		t.Fatalf("listing mode = %v, want Title", a.browse.library.mode)
 	}
 	if err := d.Key("RightArrow", nil); err != nil {
 		t.Fatal(err)
@@ -324,12 +324,9 @@ func TestHeadlessLastAddedPreviews(t *testing.T) {
 func TestHeadlessLastAddedMovieDetailAndBack(t *testing.T) {
 	f := newHeadlessFixture(t)
 
-	headlessKey(t, f, "LeftArrow")
-	headlessKey(t, f, "DownArrow")
-	if f.app.browse.library.mode != ListingModeDateAdded || f.app.browse.focus != browseFocusModeRail {
-		t.Fatalf("mode-rail state = (mode=%v, focus=%v)", f.app.browse.library.mode, f.app.browse.focus)
+	if f.app.browse.library.mode != ListingModeDateAdded {
+		t.Fatalf("default listing mode = %v, want Last added", f.app.browse.library.mode)
 	}
-	headlessKey(t, f, "RightArrow")
 	headlessKey(t, f, "RightArrow")
 	if !f.app.browse.nav.isAtSectionRoot() || f.app.browse.nav.section != SectionMovies {
 		t.Fatalf("movie section state = (root=%t, section=%v)", f.app.browse.nav.isAtSectionRoot(), f.app.browse.nav.section)
@@ -628,8 +625,7 @@ func TestHeadlessDuplicateTitlesHaveDistinctPointerTargets(t *testing.T) {
 	items := []*listingItem{first, second}
 	snapshot := buildLibrarySnapshot(radixListingBuilder{}, items, nil)
 	f.app.client.publishLibrary(map[string]*papi.Movie{first.media.ID: first.movie, second.media.ID: second.movie}, nil, items, nil, snapshot)
-	f.app.applyLibrarySnapshot(snapshot)
-	f.app.applyListingMode(ListingModeDateAdded)
+	f.app.applyRefreshResult(snapshot)
 	headlessKey(t, f, "RightArrow")
 
 	matches := func() []driver.Node {
@@ -674,18 +670,18 @@ func TestHeadlessRailNestedLabelClick(t *testing.T) {
 	f := newHeadlessFixture(t)
 	headlessKey(t, f, "LeftArrow")
 	for _, byID := range []bool{true, false} {
-		matches := headlessLabelNodes(f.driver.Tree(), "Last added")
+		matches := headlessLabelNodes(f.driver.Tree(), "Smart list")
 		if len(matches) != 2 || matches[0].Class != "button" || matches[1].ParentID != matches[0].ID {
 			t.Fatalf("rail semantics = %+v, want button and nested label", matches)
 		}
-		target := driver.ClickTarget{Label: "Last added", Occurrence: 2}
+		target := driver.ClickTarget{Label: "Smart list", Occurrence: 2}
 		if byID {
 			id := matches[1].ID
 			target = driver.ClickTarget{ID: &id}
 		}
 		headlessClick(t, f, target)
-		if f.app.browse.library.mode != ListingModeDateAdded || f.app.browse.focus != browseFocusModeRail {
-			t.Fatalf("nested rail click (by ID %t) did not select Last added", byID)
+		if f.app.browse.library.mode != ListingModeTitle || f.app.browse.focus != browseFocusModeRail {
+			t.Fatalf("nested rail click (by ID %t) did not select Smart list", byID)
 		}
 		headlessKey(t, f, "UpArrow")
 	}
@@ -694,11 +690,11 @@ func TestHeadlessRailNestedLabelClick(t *testing.T) {
 func TestHeadlessClickAppliesBeforeNextFrame(t *testing.T) {
 	f := newHeadlessFixture(t)
 	headlessKey(t, f, "LeftArrow")
-	if err := f.driver.Click(driver.ClickTarget{Label: "Last added", Occurrence: 2}); err != nil {
+	if err := f.driver.Click(driver.ClickTarget{Label: "Smart list", Occurrence: 2}); err != nil {
 		t.Fatal(err)
 	}
 	// The click frame is drawn entirely with the state it started with.
-	if f.app.browse.library.mode != ListingModeTitle {
+	if f.app.browse.library.mode != ListingModeDateAdded {
 		t.Fatal("click changed the listing during the frame that received it")
 	}
 	frame := f.driver.FrameNumber()
@@ -708,7 +704,7 @@ func TestHeadlessClickAppliesBeforeNextFrame(t *testing.T) {
 	if f.driver.FrameNumber() == frame {
 		t.Fatal("click did not request an immediate redraw")
 	}
-	if f.app.browse.library.mode != ListingModeDateAdded {
+	if f.app.browse.library.mode != ListingModeTitle {
 		t.Fatal("click was not applied on the next frame")
 	}
 }

@@ -88,9 +88,7 @@ func TestSSEDuringRefreshCoalescesAndFollowsUpAfterFailure(t *testing.T) {
 			invalidated := make(chan struct{}, 8)
 			a := New(client, events, nil, func() { invalidated <- struct{}{} }, nil)
 			defer a.Close()
-			if mode != ListingModeTitle {
-				a.applyListingMode(mode)
-			}
+			a.applyListingMode(mode)
 			a.browse.nav.resetToSection(SectionMovies, a.sectionRoot(SectionMovies))
 			a.detail = &detailScreen{kind: detailMovie, movieID: "tt100"}
 

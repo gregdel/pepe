@@ -46,12 +46,12 @@ func TestWebRemoteURLs(t *testing.T) {
 
 func TestWebRemoteNavigationPreservesListing(t *testing.T) {
 	a := newModeTestApp(nil, nil)
-	a.applyListingMode(ListingModeDateAdded)
+	a.applyListingMode(ListingModeTitle)
 	a.browse.nav.resetToSection(SectionShows, a.sectionRoot(SectionShows))
 	nav, snapshot := a.browse.nav, a.browse.library.showRadix
 	a.browse.focus = browseFocusModeRail
 	a.navigateDown()
-	if a.browse.remote == nil || a.browse.library.mode != ListingModeDateAdded || a.browse.nav != nav || a.browse.library.showRadix != snapshot {
+	if a.browse.remote == nil || a.browse.library.mode != ListingModeTitle || a.browse.nav != nav || a.browse.library.showRadix != snapshot {
 		t.Fatal("opening remote changed the catalog or navigation")
 	}
 	a.navigateRight()
@@ -68,16 +68,16 @@ func TestWebRemoteNavigationPreservesListing(t *testing.T) {
 		t.Fatal("Left did not return to the remote's rail entry")
 	}
 	a.navigateEscape()
-	if a.browse.remote != nil || a.browse.nav != nav || a.railOption() != railLastAdded {
+	if a.browse.remote != nil || a.browse.nav != nav || a.railOption() != railSmartList {
 		t.Fatal("Back did not restore the existing listing")
 	}
 	a.navigateUp()
-	if a.railOption() != railSmartList {
-		t.Fatal("Up from Last added did not select Smart list")
+	if a.railOption() != railLastAdded {
+		t.Fatal("Up from Smart list did not select Last added")
 	}
 	a.navigateUp()
 	if a.browse.settings == nil || a.browse.remote != nil {
-		t.Fatal("Up from Smart list did not wrap to Settings")
+		t.Fatal("Up from Last added did not wrap to Settings")
 	}
 	a.navigateUp()
 	if a.browse.logs == nil || a.browse.settings != nil {
@@ -90,8 +90,8 @@ func TestWebRemoteNavigationPreservesListing(t *testing.T) {
 	a.navigateDown()
 	a.navigateDown()
 	a.navigateDown()
-	if a.railOption() != railSmartList || a.browse.onPage() {
-		t.Fatal("Down from Settings did not wrap to Smart list")
+	if a.railOption() != railLastAdded || a.browse.onPage() {
+		t.Fatal("Down from Settings did not wrap to Last added")
 	}
 	a.selectRailOption(railWebRemote)
 	a.navigateHome()

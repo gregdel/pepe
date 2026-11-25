@@ -180,9 +180,9 @@ func TestPerfScenario(t *testing.T) {
 	}
 	defer d.Close()
 
-	// Home → mode rail → Last added → content: a flat, newest-first list of
-	// titles, each with a row poster and sharp fanart.
-	for _, k := range []string{"LeftArrow", "DownArrow", "RightArrow", "RightArrow"} {
+	// Home → Movies in Last added, the default listing: a flat, newest-first
+	// list of titles, each with a row poster and sharp fanart.
+	for _, k := range []string{"RightArrow"} {
 		if err := d.Key(k, nil); err != nil {
 			t.Fatal(err)
 		}

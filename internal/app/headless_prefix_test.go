@@ -32,7 +32,9 @@ func newHeadlessPrefixFixture(t *testing.T, kind MediaKind) *headlessFixture {
 	}
 	snapshot := buildLibrarySnapshot(radixListingBuilder{}, movies, shows)
 	f.app.client.publishLibrary(movieMap, showMap, movies, shows, snapshot)
-	f.app.applyLibrarySnapshot(snapshot)
+	// Prefix groups belong to the Smart list.
+	f.app.applyRefreshResult(snapshot)
+	f.app.applyListingMode(ListingModeTitle)
 	return f
 }
 

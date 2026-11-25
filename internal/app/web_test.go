@@ -281,7 +281,7 @@ func TestHeadlessWebNavigationAndPopupPriority(t *testing.T) {
 	remote("home")
 	remote("left")
 	remote("down")
-	if f.app.browse.focus != browseFocusModeRail || f.app.browse.library.mode != ListingModeDateAdded {
+	if f.app.browse.focus != browseFocusModeRail || f.app.browse.library.mode != ListingModeTitle {
 		t.Fatal("remote mode rail navigation changed")
 	}
 	remote("right") // mode rail -> content

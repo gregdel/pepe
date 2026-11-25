@@ -28,8 +28,9 @@ import (
 type ListingMode int
 
 const (
-	ListingModeTitle ListingMode = iota
-	ListingModeDateAdded
+	ListingModeDateAdded ListingMode = iota // the default listing
+	ListingModeTitle
+	listingModeCount
 )
 
 type browseFocus int
@@ -345,7 +346,6 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 	if client == nil {
 		client = NewEmptyAPIClient(nil)
 	}
-	snapshot := client.getSnapshot()
 	th := newAppTheme()
 
 	keyTag := new(bool)
@@ -360,7 +360,7 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 
 	app := &App{
 		client:           client,
-		browse:           browseState{library: libraryView{LibrarySnapshot: snapshot, mode: ListingModeTitle}, nav: newNavigationState(), focus: browseFocusContent},
+		browse:           browseState{library: libraryView{mode: ListingModeDateAdded}, nav: newNavigationState(), focus: browseFocusContent},
 		playerStatus:     PlayerStatusIdle,
 		mpvPath:          mpvPath,
 		playerFullscreen: playerFullscreen,
@@ -379,6 +379,7 @@ func New(client *APIClient, sseCh <-chan struct{}, config *Config, invalidate, c
 		sseCh:            sseCh,
 		logs:             NewLogBuffer(),
 	}
+	app.browse.library.LibrarySnapshot = app.snapshotForMode(app.browse.library.mode)
 	if config != nil {
 		app.controls = config.Controls
 		app.hideHelp = config.HelpBar != nil && !*config.HelpBar

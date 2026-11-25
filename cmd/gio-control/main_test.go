@@ -26,8 +26,11 @@ func TestMockPlaybackUIUsesOfflineCatalog(t *testing.T) {
 	if !hasLabel(drv.Tree(), "17 movies · 2 shows") {
 		t.Fatal("mock UI did not load the offline catalog")
 	}
-	if err := drv.Key("RightArrow", nil); err != nil {
-		t.Fatal(err)
+	// Smart list (second rail entry), then Movies.
+	for _, key := range []string{"LeftArrow", "DownArrow", "RightArrow", "RightArrow"} {
+		if err := drv.Key(key, nil); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// Titles sharing a prefix are grouped; this one stands alone.
 	const title = "Corrupt Artwork (2010)"

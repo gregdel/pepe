@@ -9,6 +9,8 @@ import (
 	"github.com/odwrtw/polochon/lib/papi"
 )
 
+// newModeTestApp starts in the Smart list, unlike New, so its radix trees
+// are the client's default snapshot; Up on the rail selects Last added.
 func newModeTestApp(movieItems, showItems []*listingItem) *App {
 	snapshot := buildLibrarySnapshot(radixListingBuilder{}, movieItems, showItems)
 	client := &APIClient{
@@ -33,9 +35,9 @@ func TestModeRailAppliesImmediately(t *testing.T) {
 	if a.browse.focus != browseFocusModeRail {
 		t.Fatal("Left from Home did not focus the mode rail")
 	}
-	a.navigateDown()
+	a.navigateUp()
 	if a.browse.library.mode != ListingModeDateAdded || a.browse.focus != browseFocusModeRail {
-		t.Errorf("Down = (mode %v, focus %v), want Date added with rail focus", a.browse.library.mode, a.browse.focus)
+		t.Errorf("Up = (mode %v, focus %v), want Date added with rail focus", a.browse.library.mode, a.browse.focus)
 	}
 	a.navigateRight()
 	if a.browse.focus != browseFocusContent || !a.browse.nav.isAtRoot() {
@@ -66,10 +68,10 @@ func TestRemoteFlowAppliesDateModeAndReentersSection(t *testing.T) {
 	if a.browse.focus != browseFocusModeRail {
 		t.Fatal("second Left from Home did not focus the mode rail")
 	}
-	a.navigateDown()
+	a.navigateUp()
 
 	if a.browse.library.mode != ListingModeDateAdded || a.browse.focus != browseFocusModeRail {
-		t.Errorf("mode after Down = %v with focus %v, want Date added with rail focus", a.browse.library.mode, a.browse.focus)
+		t.Errorf("mode after Up = %v with focus %v, want Date added with rail focus", a.browse.library.mode, a.browse.focus)
 	}
 	if !a.browse.nav.isAtRoot() || a.browse.nav.cursor != int(SectionShows) {
 		t.Error("changing mode did not preserve Home with Shows selected")
@@ -88,7 +90,7 @@ func TestChangingModeFromHomePreservesSelectedSection(t *testing.T) {
 	a := newModeTestApp(nil, nil)
 	a.browse.nav.cursor = int(SectionShows)
 	a.navigateLeft()
-	a.navigateDown()
+	a.navigateUp()
 
 	a.navigateRight()
 
@@ -103,7 +105,7 @@ func TestChangingModeFromHomePreservesSelectedSection(t *testing.T) {
 func TestModeRailExitKeepsActiveListing(t *testing.T) {
 	a := newModeTestApp(nil, nil)
 	a.navigateLeft()
-	a.navigateDown()
+	a.navigateUp()
 	a.navigateRight()
 
 	if a.browse.library.mode != ListingModeDateAdded {
