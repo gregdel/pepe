@@ -1076,7 +1076,18 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 6, \"playlist-pos\"]}\n")
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 7, \"playlist-count\"]}\n")
 	_, _ = fmt.Fprintf(conn, "{\"command\": [\"observe_property\", 8, \"pause\"]}\n")
-	pending := tracker.queuePlaylist(conn)
+	// mpv runs IPC commands while it waits for scripts to load, before it
+	// picks the entry to play: entries inserted then would start first. So
+	// queue only once the launched file is current: its start-file, or a
+	// playlist position when mpv was already playing as IPC connected.
+	pending := map[int64]string{}
+	queued := false
+	queue := func() {
+		if !queued {
+			queued = true
+			pending = tracker.queuePlaylist(conn)
+		}
+	}
 	titles := map[string]string{}
 
 	scanner := bufio.NewScanner(conn)
@@ -1105,6 +1116,7 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 			continue
 		case "start-file":
 			tracker.startEntry(ev.PlaylistEntryID)
+			queue()
 			continue
 		case "end-file":
 			// A redirect replaces the entry with its expansion (playlists).
@@ -1148,6 +1160,9 @@ func ipcLoop(sockPath string, tracker *playbackTracker, connectTimeout time.Dura
 		case "playlist-pos", "playlist-count":
 			if value, ok := ev.Data.(float64); ok {
 				tracker.updatePlaylist(ev.Name, int(value))
+				if ev.Name == "playlist-pos" && value >= 0 {
+					queue()
+				}
 			}
 		case "eof-reached":
 			// With keep-open, mpv stays on the ended last entry.

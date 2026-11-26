@@ -135,6 +135,17 @@ func TestPlayerIPCPlaylist(t *testing.T) {
 			t.Fatalf("missing %s subscription: %s", property, scanner.Text())
 		}
 	}
+	send := func(lines ...string) {
+		t.Helper()
+		for _, line := range lines {
+			if _, err := fmt.Fprintln(conn, line); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// Episodes are queued only once mpv plays the launched entry, numbered 1:
+	// inserted earlier, mpv would start at the first one.
+	send(`{"event":"property-change","name":"playlist-pos","data":-1}`, `{"event":"start-file","playlist_entry_id":1}`)
 	var lines []loadfileLine
 	for range 4 {
 		var line loadfileLine
@@ -164,14 +175,6 @@ func TestPlayerIPCPlaylist(t *testing.T) {
 		}
 	}
 
-	send := func(lines ...string) {
-		t.Helper()
-		for _, line := range lines {
-			if _, err := fmt.Fprintln(conn, line); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
 	awaitRecord := func() {
 		t.Helper()
 		for {
@@ -188,13 +191,12 @@ func TestPlayerIPCPlaylist(t *testing.T) {
 			}
 		}
 	}
-	// mpv numbers the launched entry 1; S01E05 failed to queue.
+	// S01E05 failed to queue.
 	send(
 		fmt.Sprintf(`{"request_id":%d,"error":"success","data":{"playlist_entry_id":2}}`, lines[0].RequestID),
 		fmt.Sprintf(`{"request_id":%d,"error":"success","data":{"playlist_entry_id":3}}`, lines[1].RequestID),
 		fmt.Sprintf(`{"request_id":%d,"error":"success","data":{"playlist_entry_id":4}}`, lines[2].RequestID),
 		fmt.Sprintf(`{"request_id":%d,"error":"invalid parameter"}`, lines[3].RequestID),
-		`{"event":"start-file","playlist_entry_id":1}`,
 		`{"event":"property-change","name":"duration","data":1300}`,
 		`{"event":"property-change","name":"time-pos","data":1250}`,
 		`{"event":"end-file","reason":"eof","playlist_entry_id":1}`,

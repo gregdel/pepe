@@ -31,6 +31,13 @@ mp.register_event("playback-restart", function()
 end)
 `
 
+// slowScriptLoad delays mpv's first file like real scripts (ytdl, pepe.lua):
+// mpv runs IPC commands while it waits for them to load.
+const slowScriptLoad = `
+local t = os.clock()
+while os.clock() - t < 1 do end
+`
+
 // Opt-in real-mpv test of queued episodes: per-entry options never leak
 // from the launched file, and each entry is recorded under its own key.
 // PEPE_TEST_MPV=1 go test ./internal/app -run TestMPVInterfaceIntegration -count=1
@@ -48,6 +55,10 @@ func TestMPVInterfaceIntegrationPlaylist(t *testing.T) {
 	if err := os.WriteFile(script, []byte(playlistCheckScript), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	slow := filepath.Join(dir, "slow.lua")
+	if err := os.WriteFile(slow, []byte(slowScriptLoad), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	const video = "av://lavfi:color=size=64x36:rate=10:duration=3"
 	socket := filepath.Join(dir, "mpv.sock")
 	tracker := newPlaybackTracker("launched", nil)
@@ -58,7 +69,7 @@ func TestMPVInterfaceIntegrationPlaylist(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "mpv", "--no-config", "--load-scripts=no", "--vo=null", "--ao=null",
-		"--msg-level=all=warn", "--script="+script, "--start=2", "--title=Launched", "--force-media-title=Launched",
+		"--msg-level=all=warn", "--script="+script, "--script="+slow, "--start=2", "--title=Launched", "--force-media-title=Launched",
 		"--sub-file="+filepath.Join(dir, "launched.srt"), "--input-ipc-server="+socket, video)
 	output, err := cmd.CombinedOutput()
 	tracker.finishIPC()
