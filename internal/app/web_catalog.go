@@ -21,11 +21,12 @@ const (
 
 // webTitle is one search entry; the phone matches titles itself.
 type webTitle struct {
-	Kind  MediaKind `json:"kind"`
-	ID    string    `json:"id"`
-	Title string    `json:"title"`
-	Year  int       `json:"year,omitempty"`
-	Added int64     `json:"added,omitempty"` // unix seconds
+	Kind     MediaKind `json:"kind"`
+	ID       string    `json:"id"`
+	Title    string    `json:"title"`
+	AltTitle string    `json:"alt_title,omitempty"` // localized title, also searched
+	Year     int       `json:"year,omitempty"`
+	Added    int64     `json:"added,omitempty"` // unix seconds
 }
 
 // webCatalog lists movies then shows with the generation that identifies the
@@ -40,6 +41,9 @@ func (c *APIClient) webCatalog() (uint64, []webTitle) {
 	for _, items := range [][]*listingItem{c.movieItems, c.showItems} {
 		for _, item := range items {
 			title := webTitle{Kind: item.media.Type, ID: item.media.ID, Title: item.media.Title, Year: item.media.Year}
+			if item.movie != nil {
+				title.Title, title.AltTitle = movieTitlesRaw(item.movie)
+			}
 			if added := item.dateAdded(); !added.IsZero() {
 				title.Added = added.Unix()
 			}

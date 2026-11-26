@@ -227,6 +227,14 @@ func (a *App) previewMediaContent(gtx C, media *MediaItem, meta string, poster l
 				layout.Rigid(func(gtx C) D {
 					return a.body(gtx, spTitle, media.Title, colorFg, 2)
 				}),
+				layout.Rigid(func(gtx C) D {
+					if media.AltTitle == "" {
+						return D{}
+					}
+					return layout.Inset{Top: dp8}.Layout(gtx, func(gtx C) D {
+						return a.body(gtx, spMeta, media.AltTitle, colorFg, 1)
+					})
+				}),
 				layout.Rigid(layout.Spacer{Height: dp8}.Layout),
 				layout.Rigid(func(gtx C) D {
 					if meta == "" {

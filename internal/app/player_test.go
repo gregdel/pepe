@@ -237,14 +237,17 @@ while :; do sleep 0.1; done
 func TestMoviePlaybackTitleUsesMetadata(t *testing.T) {
 	client := NewEmptyAPIClient(nil)
 	for _, tc := range []struct {
-		year int
-		want string
+		original string
+		year     int
+		want     string
 	}{
-		{2024, "Fixture Movie (2024)"},
-		{0, "Fixture Movie"},
+		{"", 2024, "Fixture Movie (2024)"},
+		{"", 0, "Fixture Movie"},
+		{"Film d'essai", 2024, "Film d'essai (2024)"},
 	} {
 		t.Run(tc.want, func(t *testing.T) {
 			client.movies["movie-one"] = testMovie("movie-one", "Fixture Movie", tc.year)
+			client.movies["movie-one"].OriginalTitle = tc.original
 			a := &App{client: client, playerStatus: PlayerStatusRunning}
 			a.launchMovie(&MediaItem{ID: "movie-one", Title: "Stale listing title"})
 			if a.pendingPlayback == nil || a.pendingPlayback.title != tc.want {

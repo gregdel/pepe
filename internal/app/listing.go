@@ -15,12 +15,14 @@ type listingItem struct {
 }
 
 func newMovieListingItem(movie *papi.Movie) *listingItem {
+	title, alt := movieTitles(movie)
 	return &listingItem{
 		media: &MediaItem{
-			ID:    movie.ImdbID,
-			Title: movie.Title,
-			Year:  movie.Year,
-			Type:  mediaKindMovie,
+			ID:       movie.ImdbID,
+			Title:    title,
+			AltTitle: alt,
+			Year:     movie.Year,
+			Type:     mediaKindMovie,
 		},
 		movie: movie,
 	}
@@ -94,6 +96,23 @@ func (radixListingBuilder) build(items []*listingItem) mediaListing {
 		if strippedTitle, hasThe := stripThePrefix(displayTitle); hasThe {
 			titles = append(titles, strippedTitle)
 			titleToMedia[strippedTitle] = item.media
+		}
+	}
+	// Localized titles are aliases: they never take a key from a shown title.
+	for _, item := range items {
+		if item.media.AltTitle == "" {
+			continue
+		}
+		altTitle := formatTitle(item.media.AltTitle, item.media.Year)
+		aliases := []string{altTitle}
+		if strippedTitle, hasThe := stripThePrefix(altTitle); hasThe {
+			aliases = append(aliases, strippedTitle)
+		}
+		for _, alias := range aliases {
+			if _, taken := titleToMedia[alias]; !taken {
+				titles = append(titles, alias)
+				titleToMedia[alias] = item.media
+			}
 		}
 	}
 

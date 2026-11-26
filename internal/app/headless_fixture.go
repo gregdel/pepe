@@ -16,6 +16,7 @@ import (
 // mockTitle is one title of the offline catalog. A nil artwork has no file.
 type mockTitle struct {
 	id, title, plot string
+	original        string // movies only; empty when it is the title
 	year            int
 	fanart, poster  *mockArtwork
 }
@@ -23,7 +24,7 @@ type mockTitle struct {
 // mockMovies are the offline catalog's movies, newest first. Each one's plot
 // says which case its artwork covers; shared title prefixes form groups.
 func mockMovies() []mockTitle {
-	white := color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
+	whiteColor := color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
 	movie := func(id, title string, year int, plot string, p mockPattern) mockTitle {
 		return mockTitle{id: id, title: title, year: year, plot: plot, fanart: mockFanart(p), poster: mockPoster(p)}
 	}
@@ -31,7 +32,7 @@ func mockMovies() []mockTitle {
 	portrait.fanart.size = image.Pt(600, 1200)
 	wide := movie("mock-wide", "Ultra Wide Fanart", 2015, "Very wide fanart, cropped to cover the box.", oceanPattern)
 	wide.fanart.size = image.Pt(3200, 600)
-	tiny := movie("mock-tiny", "Tiny Fanart", 2014, "A one-pixel white fanart, scaled up.", solidPattern(white))
+	tiny := movie("mock-tiny", "Tiny Fanart", 2014, "A one-pixel white fanart, scaled up.", solidPattern(whiteColor))
 	tiny.fanart.size = image.Pt(1, 1)
 	missing := movie("mock-missing", "Missing Fanart", 2013, "The title has a poster but no fanart file.", sunsetPattern)
 	missing.fanart = nil
@@ -41,11 +42,13 @@ func mockMovies() []mockTitle {
 	flaky.fanart.transient = 2
 	corrupt := movie("mock-corrupt", "Corrupt Artwork", 2010, "The fanart is a truncated PNG: a permanent failure.", sunsetPattern)
 	corrupt.fanart.corrupt = true
+	white := movie("mock-white", "Bright White", 2024, "Uniform white artwork: the brightest case for text contrast. Its original title differs, so the localized one shows beneath.", solidPattern(whiteColor))
+	white.original = "Éclat Blanc"
 
 	return []mockTitle{
 		movie("demo-one", "First Movie", 2025, "A warm sunset scene with a bright sun beside the preview text.", sunsetPattern),
 		movie("demo-two", "Second Movie", 2026, "A pale sky over deep water with fine wave crests.", oceanPattern),
-		movie("mock-white", "Bright White", 2024, "Uniform white artwork: the brightest case for text contrast.", solidPattern(white)),
+		white,
 		movie("mock-horizon", "Bright Horizon", 2023, "Dark at the top, bright where the preview text sits.", horizonPattern),
 		movie("mock-black", "Pitch Black", 2022, "Uniform black artwork.", solidPattern(color.NRGBA{A: 0xff})),
 		movie("mock-yellow", "Saturated Yellow", 2021, "Saturated yellow: very bright, highly chromatic artwork.", solidPattern(color.NRGBA{R: 0xff, G: 0xe0, A: 0xff})),
@@ -109,15 +112,16 @@ func NewHeadlessPlaybackClient(log *slog.Logger) (*APIClient, error) {
 	var movieItems []*listingItem
 	for i, m := range mockMovies() {
 		movie := &papi.Movie{Movie: &polochon.Movie{
-			BaseVideo: mockVideo(2_400_000_000, "1080p", mockDateAdded(i)),
-			ImdbID:    m.id,
-			Title:     m.title,
-			Year:      m.year,
-			Plot:      m.plot,
-			Tagline:   "Generated artwork for offline testing",
-			Rating:    7.5,
-			Runtime:   95 + 5*i,
-			Genres:    []string{"Test", "Artwork"},
+			BaseVideo:     mockVideo(2_400_000_000, "1080p", mockDateAdded(i)),
+			ImdbID:        m.id,
+			Title:         m.title,
+			OriginalTitle: m.original,
+			Year:          m.year,
+			Plot:          m.plot,
+			Tagline:       "Generated artwork for offline testing",
+			Rating:        7.5,
+			Runtime:       95 + 5*i,
+			Genres:        []string{"Test", "Artwork"},
 		}}
 		movie.FanartFile = mockFile(arts, m.id, "fanart", m.fanart, movie)
 		movie.ThumbFile = mockFile(arts, m.id, "poster", m.poster, movie)

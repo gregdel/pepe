@@ -113,6 +113,14 @@ The layouts, as a map for changing them.
 
   The preview sits right of the column, with its text at the bottom over the
   scrim.
+- **Movie titles:** a movie is shown under its original title. When its
+  localized title differs, the preview and detail page add it as one `spMeta`
+  line under the title (`colorFg` over the preview scrim, `colorSubtle` on the
+  detail panel); catalog rows show only the original title, and the Smart list
+  also lists the localized title as an alias. The TV shows only what Roboto
+  can draw: an original title in another script (CJK, Arabic, Thai…) gives way
+  to the localized title alone. The web search, drawn with the phone's fonts,
+  always shows the original title.
 - **Rail pages** (Settings, Logs, Web remote) replace the list and preview.
   They sit on `colorBg`, with no backdrop.
 - **Detail pages:**
@@ -289,7 +297,8 @@ these files.
   (All, Movies, Shows) use the current-item look for the checked one. A result
   row is a `surface` card: a 2:3 poster on a `surface-2` placeholder showing
   a film or TV glyph in `muted` until the image loads (or for good if it fails),
-  the title (two lines at most), then a type badge (glyph in `colorPrimary`
+  the title (two lines at most), the localized title of a movie on one
+  `subtle` line when it differs, then a type badge (glyph in `colorPrimary`
   and the word Movie or Show, never colour alone) and the year in `subtle`.
   Movies add a separate play button in `colorPrimary`; the row itself opens
   the title on the TV.

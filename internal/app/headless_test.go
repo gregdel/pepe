@@ -327,6 +327,37 @@ func TestHeadlessLastAddedPreviews(t *testing.T) {
 	}
 }
 
+func TestHeadlessOriginalTitleWithLocalizedTitle(t *testing.T) {
+	f := newHeadlessFixture(t)
+	client := f.app.client
+	movie := client.movies["movie-new"]
+	movie.OriginalTitle = "Nouveau Film"
+	client.movieItems[1] = newMovieListingItem(movie)
+	f.app.dateAddedSnapshot = nil
+	f.app.applyLibrarySnapshot(f.app.snapshotForMode(ListingModeDateAdded))
+
+	headlessKey(t, f, "RightArrow")
+	tree := f.driver.Tree()
+	for _, label := range []string{"Nouveau Film (2026)", "Nouveau Film", "New Movie"} {
+		if !headlessHasLabel(tree, label) {
+			t.Errorf("movie preview semantic tree does not contain %q", label)
+		}
+	}
+	if headlessHasLabel(tree, "New Movie (2026)") {
+		t.Error("Last added lists the localized title as a row")
+	}
+
+	headlessKey(t, f, "RightArrow")
+	if f.app.detail == nil || f.app.detail.movieID != "movie-new" {
+		t.Fatalf("movie detail = %#v, want movie-new", f.app.detail)
+	}
+	for _, label := range []string{"Nouveau Film", "New Movie"} {
+		if !headlessHasLabel(f.driver.Tree(), label) {
+			t.Errorf("movie detail semantic tree does not contain %q", label)
+		}
+	}
+}
+
 func TestHeadlessLastAddedMovieDetailAndBack(t *testing.T) {
 	f := newHeadlessFixture(t)
 

@@ -93,6 +93,71 @@ func TestRadixListingBuilderAttachesMedia(t *testing.T) {
 	}
 }
 
+func testOriginalMovie(id, title, original string, year int) *papi.Movie {
+	movie := testMovie(id, title, year)
+	movie.OriginalTitle = original
+	return movie
+}
+
+func TestMovieTitlesPreferOriginal(t *testing.T) {
+	for _, tc := range []struct{ title, original, wantTitle, wantAlt string }{
+		{"Le Voyage de Chihiro", "Sen to Chihiro", "Sen to Chihiro", "Le Voyage de Chihiro"},
+		{"Fixture", "", "Fixture", ""},
+		{"Fixture", "  ", "Fixture", ""},
+		{"The Matrix", "the matrix", "the matrix", ""},
+		{"", "Original", "Original", ""},
+		// Roboto cannot draw these: the TV shows the localized title alone.
+		{"Spirited Away", "千と千尋の神隠し", "Spirited Away", ""},
+		{"", "기생충", "기생충", ""},
+		{"پیکه", "PK", "PK", ""},
+	} {
+		title, alt := movieTitles(testOriginalMovie("tt1", tc.title, tc.original, 0))
+		if title != tc.wantTitle || alt != tc.wantAlt {
+			t.Errorf("movieTitles(%q, %q) = (%q, %q), want (%q, %q)", tc.title, tc.original, title, alt, tc.wantTitle, tc.wantAlt)
+		}
+	}
+}
+
+func TestListingsShowOriginalTitleAndAliasLocalized(t *testing.T) {
+	spirited := newMovieListingItem(testOriginalMovie("tt001", "The Spirited Away", "Sen to Chihiro", 2001))
+	plain := newMovieListingItem(testMovie("tt002", "Avatar", 2009))
+	// Its localized title is another movie's shown title, which keeps it.
+	clash := newMovieListingItem(testOriginalMovie("tt003", "Avatar", "Abatâ", 2009))
+	items := []*listingItem{spirited, plain, clash}
+
+	radix := (radixListingBuilder{}).build(items)
+	want := []string{"Abatâ (2009)", "Avatar (2009)", "Sen to Chihiro (2001)", "Spirited Away (2001)", "The Spirited Away (2001)"}
+	got := radix.tree.AllStrings()
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("radix strings = %q, want %q", got, want)
+	}
+	for title, media := range map[string]*MediaItem{
+		"Sen to Chihiro (2001)":    spirited.media,
+		"The Spirited Away (2001)": spirited.media,
+		"Spirited Away (2001)":     spirited.media,
+		"Avatar (2009)":            plain.media,
+		"Abatâ (2009)":             clash.media,
+	} {
+		if node := radix.tree.Lookup(title); node == nil || node.Media != media || radix.titleToMedia[title] != media {
+			t.Errorf("%q does not resolve to %q", title, media.ID)
+		}
+	}
+
+	dated := (dateAddedListingBuilder{}).build(items)
+	var rows []string
+	for _, child := range dated.tree.Root().Children {
+		rows = append(rows, child.FullString)
+	}
+	sort.Strings(rows)
+	if want := []string{"Abatâ (2009)", "Avatar (2009)", "Sen to Chihiro (2001)"}; !reflect.DeepEqual(rows, want) {
+		t.Fatalf("last added rows = %q, want %q", rows, want)
+	}
+	if spirited.movie.Title != "The Spirited Away" || spirited.media.AltTitle != "The Spirited Away" {
+		t.Errorf("listing item = %+v, movie title %q", spirited.media, spirited.movie.Title)
+	}
+}
+
 func TestBuildLibrarySnapshotPreservesLegacyCollisions(t *testing.T) {
 	movieFirst := newMovieListingItem(testMovie("tt001", "Duplicate", 2000))
 	movieLast := newMovieListingItem(testMovie("tt002", "Duplicate", 2000))

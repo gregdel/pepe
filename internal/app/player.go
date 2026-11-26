@@ -133,9 +133,10 @@ func (a *App) launchMovie(media *MediaItem) {
 		a.setPlayerError(movieMediaKey(media.ID), errors.New("movie is not available"))
 		return
 	}
+	title, _ := movieTitles(movie)
 	a.launchPlayback(playbackSource{
 		mediaKey:  movieMediaKey(movie.ImdbID),
-		title:     formatTitle(movie.Title, movie.Year),
+		title:     formatTitle(title, movie.Year),
 		video:     movie,
 		subtitles: movie.Subtitles,
 	})

@@ -42,3 +42,17 @@ func newAppTheme() *material.Theme {
 	th.Face = embeddedFontFaces[0].Font.Typeface
 	return th
 }
+
+// robotoFont is read-only, so it is safe from any goroutine. Gio's Face()
+// allocates a new font.Face, whose cmap cache is also written on lookup.
+var robotoFont = embeddedFontFaces[0].Face.Face().Font
+
+// fontCovers reports whether Roboto, the only font, can draw every rune of s.
+func fontCovers(s string) bool {
+	for _, r := range s {
+		if _, ok := robotoFont.NominalGlyph(r); !ok {
+			return false
+		}
+	}
+	return true
+}

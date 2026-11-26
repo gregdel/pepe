@@ -330,11 +330,11 @@ function subsequence(token, text) {
   return at - first + 1 > token.length * 3 ? 0 : Math.min(45, 10 + score);
 }
 
-// Best score of one query token in a title; 0 means no match.
-function tokenScore(token, entry) {
+// Best score of one query token in one of a title's names; 0 means no match.
+function tokenScore(token, name, year) {
   let best = 0;
-  entry.words.forEach((word, i) => {
-    const lead = i === 0 || (i === 1 && articles.has(entry.words[0]));
+  name.words.forEach((word, i) => {
+    const lead = i === 0 || (i === 1 && articles.has(name.words[0]));
     if (word.startsWith(token)) {
       best = Math.max(best, (lead ? 100 : 90) + (word.length === token.length ? 10 : 0));
     } else if (token.length >= 4 && (oneEdit(token, word.slice(0, token.length)) || oneEdit(token, word))) {
@@ -342,9 +342,20 @@ function tokenScore(token, entry) {
     }
   });
   if (best >= 90) return best;
-  if (/^\d{4}$/.test(token) && Number(token) === entry.item.year) return 80;
-  if (entry.text.includes(token)) return Math.max(best, 60);
-  return Math.max(best, token.length >= 3 ? subsequence(token, entry.text) : 0);
+  if (/^\d{4}$/.test(token) && Number(token) === year) return 80;
+  if (name.text.includes(token)) return Math.max(best, 60);
+  return Math.max(best, token.length >= 3 ? subsequence(token, name.text) : 0);
+}
+
+// Every token must match the same name: the original or the localized title.
+function nameScore(tokens, name, year) {
+  let score = 0;
+  for (const token of tokens) {
+    const s = tokenScore(token, name, year);
+    if (!s) return 0;
+    score += s;
+  }
+  return score;
 }
 
 function search(query) {
@@ -354,12 +365,7 @@ function search(query) {
   }
   const matches = [];
   for (const entry of catalog.entries) {
-    let score = 0;
-    for (const token of tokens) {
-      const s = tokenScore(token, entry);
-      if (!s) { score = 0; break; }
-      score += s;
-    }
+    const score = Math.max(...entry.names.map(name => nameScore(tokens, name, entry.item.year)));
     if (score) matches.push({entry, score});
   }
   matches.sort((a, b) => b.score - a.score || a.entry.text.length - b.entry.text.length || a.entry.text.localeCompare(b.entry.text));
@@ -375,8 +381,12 @@ async function loadCatalog() {
     if (!response.ok) throw new Error("Unavailable");
     const data = await response.json();
     const entries = data.titles.map(item => {
-      const text = fold(item.title);
-      return {item, text, words: text.split(" ")};
+      const titles = item.alt_title ? [item.title || "", item.alt_title] : [item.title || ""];
+      const names = titles.map(title => {
+        const text = fold(title);
+        return {text, words: text.split(" ")};
+      });
+      return {item, text: names[0].text, names};
     });
     catalog = {version: data.version, entries};
     rows = new Map();
@@ -407,6 +417,9 @@ function resultRow(item) {
   row = resultTemplate.content.firstElementChild.cloneNode(true);
   row.dataset.kind = item.kind;
   row.querySelector(".result-title").textContent = item.title;
+  const alt = row.querySelector(".result-alt");
+  if (item.alt_title) alt.textContent = item.alt_title;
+  else alt.remove();
   row.querySelector(".result-kind").textContent = kindNames[item.kind];
   row.querySelector(".result-year").textContent = item.year ? String(item.year) : "";
   const image = new Image(240, 360);

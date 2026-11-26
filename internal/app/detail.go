@@ -99,6 +99,12 @@ func (a *App) layoutMovieDetail(gtx C, d *detailScreen, alpha float32) D {
 	sections = append(sections, func(gtx C) D {
 		return a.body(gtx, spTitle, d.movieTitle, colorFg, 2)
 	})
+	if _, alt := movieTitles(movie); alt != "" {
+		sections = append(sections, spacerFn(dp8))
+		sections = append(sections, func(gtx C) D {
+			return a.body(gtx, spMeta, alt, colorSubtle, 2)
+		})
+	}
 
 	if metaLine := buildMetaLine(movie.Year, movie.Runtime, "", float64(movie.Rating), movie.Genres); metaLine != "" {
 		sections = append(sections, spacerFn(dp8))

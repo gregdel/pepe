@@ -22,8 +22,11 @@ import (
 type MediaItem struct {
 	ID    string
 	Title string
-	Year  int
-	Type  MediaKind
+	// AltTitle is a movie's localized title when it differs from Title, the
+	// original title shown by default.
+	AltTitle string
+	Year     int
+	Type     MediaKind
 }
 
 // MediaKind identifies the catalog collection that owns a media item.
@@ -119,6 +122,37 @@ func formatTitle(title string, year int) string {
 		return fmt.Sprintf("%s (%d)", title, year)
 	}
 	return title
+}
+
+// movieTitles returns the title the TV shows and the second title shown
+// under it. The original title comes first unless Roboto cannot draw it.
+func movieTitles(movie *papi.Movie) (title, alt string) {
+	title, alt = movieTitlesRaw(movie)
+	if !fontCovers(title) && alt != "" {
+		return alt, ""
+	}
+	if !fontCovers(alt) {
+		alt = ""
+	}
+	return title, alt
+}
+
+// movieTitlesRaw returns the original title (or the localized one when it is
+// missing) and the localized title when it differs. The web UI, drawn with
+// the phone's fonts, uses these.
+func movieTitlesRaw(movie *papi.Movie) (title, alt string) {
+	if movie == nil || movie.Movie == nil {
+		return "", ""
+	}
+	title = strings.TrimSpace(movie.OriginalTitle)
+	alt = strings.TrimSpace(movie.Title)
+	if title == "" {
+		return alt, ""
+	}
+	if strings.EqualFold(title, alt) {
+		alt = ""
+	}
+	return title, alt
 }
 
 func stripThePrefix(title string) (string, bool) {

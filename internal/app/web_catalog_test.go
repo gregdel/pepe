@@ -11,6 +11,8 @@ import (
 
 func TestWebCatalogListsMoviesThenShows(t *testing.T) {
 	f := newHeadlessFixture(t)
+	f.app.client.movieItems[1] = newMovieListingItem(testOriginalMovie("movie-new", "New Movie", "新しい映画", 2026))
+	f.app.client.movieItems[1].movie.DateAdded = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	web := &webUI{commands: make(chan webCommand, webQueueSize), client: f.app.client}
 	response := webRequest(web.handler(), "GET", "/api/catalog", "")
 	if response.Code != http.StatusOK {
@@ -25,8 +27,12 @@ func TestWebCatalogListsMoviesThenShows(t *testing.T) {
 	}
 	want := []webTitle{
 		{Kind: mediaKindMovie, ID: "movie-old", Title: "Old Movie", Year: 2000, Added: time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC).Unix()},
-		{Kind: mediaKindMovie, ID: "movie-new", Title: "New Movie", Year: 2026, Added: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).Unix()},
+		{Kind: mediaKindMovie, ID: "movie-new", Title: "新しい映画", AltTitle: "New Movie", Year: 2026, Added: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).Unix()},
 		{Kind: mediaKindShow, ID: "show-one", Title: "Fixture Show", Year: 2024},
+	}
+	// The TV cannot draw the original title, but the phone's fonts can.
+	if media := f.app.client.movieItems[1].media; media.Title != "New Movie" || media.AltTitle != "" {
+		t.Fatalf("TV titles = (%q, %q), want the localized title alone", media.Title, media.AltTitle)
 	}
 	if len(catalog.Titles) != len(want) {
 		t.Fatalf("titles = %+v", catalog.Titles)
